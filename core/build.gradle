@@ -18,6 +18,13 @@ dependencies {
     mappings "net.fabricmc:yarn:${rootProject.property('yarn_mappings')}:v2"
     modImplementation "net.fabricmc:fabric-loader:${rootProject.property('loader_version')}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.property('fabric_version')}"
+
+    // 核心逻辑为纯 Java，可脱离 Minecraft 直接跑 JUnit
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
 }
 
 java {
