@@ -21,6 +21,8 @@ dependencies {
 
     // 核心逻辑为纯 Java，可脱离 Minecraft 直接跑 JUnit
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    // Gradle 9 需要显式提供 JUnit Platform Launcher
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
