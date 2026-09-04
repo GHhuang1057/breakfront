@@ -132,7 +132,7 @@ public class BreakfrontMainMenu extends Screen {
         ctx.drawText(this.textRenderer, Text.literal("立即加入战场"), actX, actTop - 26, BfTheme.TEXT_DIM, false);
 
         // PLAY 主按钮
-        playHover = smooth(playHover, hover(actX, actTop, btnW, btnH, mouseX, mouseY), delta);
+        playHover = smooth(playHover, hoverF(actX, actTop, btnW, btnH, mouseX, mouseY), delta);
         drawPlayButton(ctx);
 
         // 次级
@@ -146,9 +146,9 @@ public class BreakfrontMainMenu extends Screen {
     private float[] secondaryHover(int mx, int my) {
         int sy = actTop + btnH + btnGap;
         float[] hs = new float[3];
-        hs[0] = hover(actX, sy, smallBtnW, smallBtnH, mx, my);
-        hs[1] = hover(actX + smallBtnW + 10, sy, smallBtnW, smallBtnH, mx, my);
-        hs[2] = hover(actX + 2 * (smallBtnW + 10), sy, smallBtnW, smallBtnH, mx, my);
+        hs[0] = hoverF(actX, sy, smallBtnW, smallBtnH, mx, my);
+        hs[1] = hoverF(actX + smallBtnW + 10, sy, smallBtnW, smallBtnH, mx, my);
+        hs[2] = hoverF(actX + 2 * (smallBtnW + 10), sy, smallBtnW, smallBtnH, mx, my);
         return hs;
     }
 
@@ -329,8 +329,8 @@ public class BreakfrontMainMenu extends Screen {
         return cur + (target - cur) * k;
     }
 
-    private boolean hover(int x, int y, int w, int h, double mx, double my) {
-        return inRect(mx, my, x, y, w, h);
+    private static float hoverF(int x, int y, int w, int h, double mx, double my) {
+        return inRect(mx, my, x, y, w, h) ? 1.0f : 0.0f;
     }
 
     private static boolean inRect(double mx, double my, double x, double y, double w, double h) {
