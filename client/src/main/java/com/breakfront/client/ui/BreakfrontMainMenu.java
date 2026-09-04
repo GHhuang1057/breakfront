@@ -533,12 +533,12 @@ public class BreakfrontMainMenu extends Screen {
         flowMsg = "正在连接服务器";
         try {
             String addr = BfServerConfig.address();
-            // 用「主菜单直连」语义的无 parent 入口（6 参带 parent 版本在 1.21 会走
-            // 服务器 transfer 协议，导致离线服默认 accepts-transfers=false 被拒：
-            // “该服务器不支持转移”）。失败回标题界面由菜单 tick 重新接管。
-            ConnectScreen.connect(client, ServerAddress.parse(addr),
+            // 公开入口只有带 parent 的 connect（vanilla 多人列表同款）。
+            // “该服务器不支持转移”实为服务端默认 accepts-transfers=false 拒绝转移式登录，
+            // 服务端需开启 accepts-transfers=true（server.properties）一并根治。
+            ConnectScreen.connect(this, client, ServerAddress.parse(addr),
                     new ServerInfo("BREAKFRONT", addr, ServerInfo.ServerType.OTHER),
-                    new CookieStorage(new HashMap<>()));
+                    false, new CookieStorage(new HashMap<>()));
         } catch (Exception e) {
             flow = Flow.IDLE;
         }
