@@ -40,8 +40,20 @@ public final class BreakfrontServer {
             }
         });
 
-        // 击杀归属桥 · 第 1 层：vanilla 死亡事件
+        // 击杀归属桥 · 第 1 层：vanilla 死亡事件（覆盖全部死因，负责扣票）
         ServerLivingEntityEvents.AFTER_DEATH.register(KillListener::onEntityDeath);
+
+        // 击杀归属桥 · 第 2 层：TaCZ 枪械击杀适配（模组缺席时自动跳过，不崩服）
+        if (net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("tacz")) {
+            try {
+                TaCzKillAdapter.register();
+                LOGGER.info("[Breakfront] TaCZ kill adapter attached");
+            } catch (Throwable t) {
+                LOGGER.warn("[Breakfront] TaCZ kill adapter failed to attach, degrade to vanilla tier: {}", t.toString());
+            }
+        } else {
+            LOGGER.info("[Breakfront] TaCZ not present, kill bridge runs on vanilla tier only");
+        }
 
         CommandRegistrationCallback.EVENT.register(BreakfrontCommands::register);
 

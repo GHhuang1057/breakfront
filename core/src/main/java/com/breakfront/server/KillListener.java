@@ -50,7 +50,7 @@ public final class KillListener {
         if (attackerDied) {
             match.game().onAttackerDeath(); // 攻方每死一人扣 1 部署资源
         }
-        push(new KillEntry(killerName, victimName, attackerDied));
+        push(new KillEntry(killerName, victimName, attackerDied, false));
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("kill: {} -> {} (attackerDied={}, tickets={})",
                     killerName, victimName, attackerDied,
@@ -74,10 +74,15 @@ public final class KillListener {
         }
     }
 
+    /** 供第 2 层适配器（TaCZ 等）写入更丰富的击杀流。 */
+    public static void pushRich(KillEntry entry) {
+        push(entry);
+    }
+
     public static Deque<KillEntry> recentKills() {
         return recentKills;
     }
 
-    public record KillEntry(String killer, String victim, boolean attackerDied) {
+    public record KillEntry(String killer, String victim, boolean attackerDied, boolean headshot) {
     }
 }
