@@ -13,25 +13,11 @@ repositories {
     mavenCentral()
 }
 
-// 编译期桩源集：为「可选适配」的第三方模组类型提供最小签名。
-// 桩类只进编译类路径、绝不打包；运行时由真实模组 jar 提供同名类型。
-sourceSets {
-    stub {
-        java {
-            srcDir 'src/stub/java'
-        }
-        compileClasspath += sourceSets.main.compileClasspath
-    }
-}
-
 dependencies {
     minecraft "com.mojang:minecraft:${rootProject.property('minecraft_version')}"
     mappings "net.fabricmc:yarn:${rootProject.property('yarn_mappings')}:v2"
     modImplementation "net.fabricmc:fabric-loader:${rootProject.property('loader_version')}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.property('fabric_version')}"
-
-    // 主代码编译期挂上桩输出（不打包、不参与 remap 分发）
-    compileOnly sourceSets.stub.output
 
     // 核心逻辑为纯 Java，可脱离 Minecraft 直接跑 JUnit
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
@@ -51,6 +37,11 @@ java {
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 21
     it.options.encoding = 'UTF-8'
+}
+
+// 编译期桩（TaCZ 事件签名）随源集编译但绝不打包：成品 jar 不得包含 com/tacz 类
+tasks.withType(Jar).configureEach {
+    exclude('com/tacz/**')
 }
 
 processResources {
