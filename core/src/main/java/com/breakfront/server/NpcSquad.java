@@ -90,6 +90,15 @@ public final class NpcSquad {
             spawn(match, server, Side.DEFENDER);
         }
         redeployAll(match, server);
+        forceLoadAll(server);
+    }
+
+    /** 无玩家时区块不常驻 → NPC 落到未加载区块；对 NPC 所在区块开 forceload。 */
+    private void forceLoadAll(MinecraftServer server) {
+        for (Npc n : units.values()) {
+            exec(server, String.format("forceload add %d %d",
+                    (int) Math.floor(n.lastX) >> 4, (int) Math.floor(n.lastZ) >> 4));
+        }
     }
 
     private int online(ServerMatch match, MinecraftServer server, Side side) {
