@@ -183,15 +183,41 @@ public final class NpcSquad {
             if (dist < 1.2) {
                 continue; // 已在点内驻守
             }
-            double nx = n.lastX + dx / dist * 0.6;
-            double nz = n.lastZ + dz / dist * 0.6;
-            double ny = groundY(server, nx, nz) + 0.1;
-            n.lastX = nx;
-            n.lastY = ny;
-            n.lastZ = nz;
-            double yaw = Math.toDegrees(Math.atan2(dx, dz));
-            exec(server, tpCmd(n, nx, ny, nz, yaw));
+            double ux = dx / dist;
+            double uz = dz / dist;
+            // 地形跟随 + 轴分离避障：直行不可行则分别试 x/z 单轴，均不可行则原地驻守
+            double[] step = chooseStep(server, n.lastX, n.lastZ, ux, uz);
+            if (step == null) {
+                continue;
+            }
+            double yaw = Math.toDegrees(Math.atan2(step[0] - n.lastX, step[1] - n.lastZ));
+            n.lastX = step[0];
+            n.lastZ = step[1];
+            n.lastY = groundY(server, n.lastX, n.lastZ) + 0.1;
+            exec(server, tpCmd(n, step[0], n.lastY, step[1], yaw));
         }
+    }
+
+    /** 返回下一位置 {x,z}：直行→x 轴→z 轴；条件=目标点地表与当前高度差 ≤3.5。 */
+    private double[] chooseStep(MinecraftServer server, double x, double z, double ux, double uz) {
+        double g0 = groundY(server, x, z);
+        double nx = x + ux * 0.6;
+        double nz = z + uz * 0.6;
+        if (walkable(server, nx, nz, g0)) {
+            return new double[]{nx, nz};
+        }
+        if (walkable(server, nx, z, g0)) {
+            return new double[]{nx, z};
+        }
+        if (walkable(server, x, nz, g0)) {
+            return new double[]{x, nz};
+        }
+        return null;
+    }
+
+    private boolean walkable(MinecraftServer server, double x, double z, double fromGround) {
+        double g = groundY(server, x, z);
+        return Math.abs(g - fromGround) <= 3.5;
     }
 
     /** 攻方：当前扇区首个点；守方：按单位 id 分散到当前扇区各点。 */
