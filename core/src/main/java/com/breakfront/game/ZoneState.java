@@ -12,6 +12,8 @@ package com.breakfront.game;
  */
 public class ZoneState {
 
+    private static final double EPS = 1e-6; // 浮点累积容差（0.1×10 ≈ 0.999999999… 无法精确到 1.0）
+
     private final String id;
     private final double captureSeconds; // 人数优势 1v0 推满一杆所需秒数
     private Side owner;
@@ -47,13 +49,13 @@ public class ZoneState {
         if (diff > 0) {
             // 攻方占优：推进。已固守时 meter 本为 1，封顶即可，不再产生事件。
             meter = Math.min(meter + step, 1.0);
-            if (meter >= 1.0 && owner != Side.ATTACKER) {
+            if (meter >= 1.0 - EPS && owner != Side.ATTACKER) {
                 return flip(Side.ATTACKER);
             }
         } else {
             // 守方占优：清空攻方推进度；只有攻方已得手时清零才算夺回。
             meter = Math.max(meter - step, 0.0);
-            if (meter <= 0.0 && owner == Side.ATTACKER) {
+            if (meter <= EPS && owner == Side.ATTACKER) {
                 return flip(Side.DEFENDER);
             }
         }
