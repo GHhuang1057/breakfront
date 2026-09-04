@@ -5,6 +5,8 @@ import com.breakfront.game.Sector;
 import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
 import com.mojang.brigadier.CommandDispatcher;
+import net.minecraft.command.CommandRegistryAccess;
+import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -20,7 +22,9 @@ public final class BreakfrontCommands {
     private BreakfrontCommands() {
     }
 
-    public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
+    public static void register(CommandDispatcher<ServerCommandSource> dispatcher,
+                                CommandRegistryAccess registryAccess,
+                                CommandManager.RegistrationEnvironment environment) {
         dispatcher.register(literal("bf")
                 .then(literal("start").requires(s -> s.hasPermissionLevel(2))
                         .executes(ctx -> {
