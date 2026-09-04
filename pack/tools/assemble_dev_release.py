@@ -161,6 +161,7 @@ def main() -> None:
         # 自研模组（本地构建）
         for jar, env in ((args.core_jar, "both"), (args.client_jar, "client")):
             dest = stage / "mods" / sanitize(jar.name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(jar.read_bytes())
             files.append({
                 "slug": "breakfront" if env == "both" else "breakfront-client",
