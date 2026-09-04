@@ -1,6 +1,7 @@
 package com.breakfront.net;
 
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
@@ -23,8 +24,8 @@ public record MatchStatePayload(
     public static final Id<MatchStatePayload> ID =
             new Id<>(Identifier.of("breakfront", "match_state"));
 
-    public static final CustomPayload.Codec<MatchStatePayload> CODEC =
-            CustomPayload.codecOf(MatchStatePayload::write, MatchStatePayload::new);
+    public static final PacketCodec<PacketByteBuf, MatchStatePayload> CODEC =
+            PacketCodec.of(MatchStatePayload::write, MatchStatePayload::new);
 
     /** 服务端 → 包：写入的字段顺序与读取严格一致。 */
     private void write(PacketByteBuf buf) {
@@ -64,7 +65,7 @@ public record MatchStatePayload(
     }
 
     @Override
-    public Id<? extends CustomPayload> getType() {
+    public Id<? extends CustomPayload> getId() {
         return ID;
     }
 

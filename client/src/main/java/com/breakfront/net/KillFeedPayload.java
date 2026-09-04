@@ -41,7 +41,7 @@ public class KillFeedPayload implements CustomPayload {
     }
 
     @Override
-    public CustomPayload.Id<? extends CustomPayload> getType() {
+    public CustomPayload.Id<? extends CustomPayload> getId() {
         return ID;
     }
 }

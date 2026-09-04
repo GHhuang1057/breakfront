@@ -1,6 +1,7 @@
 package com.breakfront.net;
 
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
@@ -14,8 +15,8 @@ public record KillFeedPayload(
     public static final Id<KillFeedPayload> ID =
             new Id<>(Identifier.of("breakfront", "kill_feed"));
 
-    public static final CustomPayload.Codec<KillFeedPayload> CODEC =
-            CustomPayload.codecOf(KillFeedPayload::write, KillFeedPayload::new);
+    public static final PacketCodec<PacketByteBuf, KillFeedPayload> CODEC =
+            PacketCodec.of(KillFeedPayload::write, KillFeedPayload::new);
 
     private void write(PacketByteBuf buf) {
         buf.writeString(killer);
@@ -29,7 +30,7 @@ public record KillFeedPayload(
     }
 
     @Override
-    public Id<? extends CustomPayload> getType() {
+    public Id<? extends CustomPayload> getId() {
         return ID;
     }
 }
