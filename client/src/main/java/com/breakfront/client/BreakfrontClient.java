@@ -4,6 +4,7 @@ import com.breakfront.client.bf.BfServerConfig;
 import com.breakfront.client.hud.BreakfrontHud;
 import com.breakfront.client.hud.WorldZoneRings;
 import com.breakfront.client.state.ClientMatchState;
+import com.breakfront.client.ui.BfDeployScreen;
 import com.breakfront.client.ui.BreakfrontMainMenu;
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
@@ -29,16 +30,31 @@ public class BreakfrontClient implements ClientModInitializer {
     public static final String MOD_ID = "breakfront-client";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
+    private static int lastDeployPhaseChange = -1;
+
     @Override
     public void onInitializeClient() {
         LOGGER.info("[Breakfront] client initialized (BF2042 UI)");
 
         BfServerConfig.load();
 
-        // 原版主菜单 -> BREAKFRONT 主菜单（任何回到标题界面都接管，去服务器选择）
+        // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.currentScreen instanceof TitleScreen) {
                 client.setScreen(new BreakfrontMainMenu());
+                return;
+            }
+            if (client.player == null || client.world == null) {
+                return;
+            }
+            int ph = ClientMatchState.phaseOrdinal();
+            if (ph == 1) {
+                if (lastDeployPhaseChange != ClientMatchState.phaseChangeCount()) {
+                    lastDeployPhaseChange = ClientMatchState.phaseChangeCount();
+                    client.setScreen(new BfDeployScreen());
+                }
+            } else if (client.currentScreen instanceof BfDeployScreen) {
+                client.currentScreen.close();
             }
         });
 

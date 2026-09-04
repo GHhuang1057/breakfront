@@ -24,10 +24,16 @@ public final class ClientMatchState {
     // 击杀流（时间戳由接收方写入，HUD 负责淡出）
     private static final List<KillEvent> killFeed = new ArrayList<>();
 
+    /** 阶段切换计数（每次状态帧阶段变化 +1，供「每局弹一次部署页」判定）。 */
+    private static int phaseChangeCount;
+
     private ClientMatchState() {
     }
 
     public static void applyMatch(MatchStatePayload payload) {
+        if (payload.phaseOrdinal() != phaseOrdinal) {
+            phaseChangeCount++;
+        }
         phaseOrdinal = payload.phaseOrdinal();
         attackerTickets = payload.attackerTickets();
         matchRemainingSeconds = payload.matchRemainingSeconds();
@@ -51,6 +57,10 @@ public final class ClientMatchState {
 
     public static int phaseOrdinal() {
         return phaseOrdinal;
+    }
+
+    public static int phaseChangeCount() {
+        return phaseChangeCount;
     }
 
     public static int attackerTickets() {

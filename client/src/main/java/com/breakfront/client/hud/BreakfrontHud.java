@@ -1,5 +1,6 @@
 package com.breakfront.client.hud;
 
+import com.breakfront.client.bf.BfTheme;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.KillEvent;
 import com.breakfront.client.state.ClientMatchState.ZoneView;
@@ -13,119 +14,195 @@ import net.minecraft.text.Text;
 import java.util.List;
 
 /**
- * Breakfront 战场 HUD（P1 · 真数据版）。
+ * 战场 HUD v2 —— BF2042 排版语言：
  *
- * 数据来源：ClientMatchState（由 core → client 的 S2C 状态帧/击杀流驱动）。
- * 渲染纪律（charter §4.7）：只使用几何绘制与文本，不用像素贴图；不触碰 OpenGL。
+ * 左上 OBJECTIVE：据点字母胶囊（占领方着色/争夺呼吸）
+ * 中上：扇区 x/y + 阶段
+ * 右上：倒计时大数值 + 部署资源
+ * 底部：当前扇区据点推进条
+ * 击杀流：右上时钟下方，行淡入 + 轻微上滑 + 超时淡出
+ * （渲染纪律：纯几何 + 文本，无贴图）
  */
 public class BreakfrontHud {
 
     private static final String[] PHASE_LABELS = {
-            "大厅", "部署倒计时", "战斗中", "结算", "战场重置"
+            "大厅", "部署", "战斗中", "结算", "重置"
     };
-
-    private static final int ACCENT = 0xFFE8622C;
-    private static final int DEF_BLUE = 0xFF4DA6FF;
-    private static final int PANEL = 0x99000000;
-    private static final int PANEL_SOFT = 0x66000000;
-    private static final int TEXT = 0xFFFFFFFF;
-    private static final int MUTED = 0x99FFFFFF;
 
     public void render(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.options == null) {
-            return; // 仅游戏中渲染
+            return;
         }
         TextRenderer font = client.textRenderer;
         int sw = client.getWindow().getScaledWidth();
         int sh = client.getWindow().getScaledHeight();
+        int phase = ClientMatchState.phaseOrdinal();
 
-        renderTopStatus(context, font, sw);
-        renderZoneBars(context, font, sw, sh);
-        ZoneMarkers.render(context, font, sw, sh);
+        if (phase != 1 && phase != 2) {
+            return; // 仅部署/战斗中渲染
+        }
+        renderObjective(context, font, sw);
+        renderSectorPill(context, font, sw);
+        renderClockTickets(context, font, sw);
+        renderZoneProgress(context, font, sw, sh);
         renderKillFeed(context, font, sw);
+        ZoneMarkers.render(context, font, sw, sh);
     }
 
-    private void renderTopStatus(DrawContext ctx, TextRenderer font, int sw) {
-        int phase = ClientMatchState.phaseOrdinal();
-        String phaseText = (phase >= 0 && phase < PHASE_LABELS.length)
-                ? PHASE_LABELS[phase] : "未知";
+    // ---- 左上：目标胶囊 ----
 
+    private void renderObjective(DrawContext ctx, TextRenderer font, int sw) {
+        List<ZoneView> zones = ClientMatchState.zones();
+        int x = 10;
+        int y = 8;
+        ctx.drawText(font, Text.literal("OBJECTIVE  目标"), x, y, BfTheme.MUTED, false);
+        int cy = y + font.fontHeight + 3;
+        if (zones.isEmpty()) {
+            return;
+        }
+        for (ZoneView z : zones) {
+            int bw = 30;
+            int bh = 16;
+            ctx.fill(x, cy, x + bw, cy + bh, 0x99000000);
+            Side owner = Side.values()[z.ownerOrdinal()];
+            long t = System.currentTimeMillis();
+            boolean contested = owner == Side.DEFENDER && z.meter() > 1e-3f;
+            int edge = contested
+                    ? ((t % 700) < 350 ? 0xFFFFFFFF : 0xFFF5D44A)
+                    : (owner == Side.ATTACKER ? 0xFFF5D44A : BfTheme.BLUE);
+            ctx.fill(x, cy, x + bw, cy + 1, edge);
+            ctx.fill(x, cy, x + 1, cy + bh, edge);
+            ctx.fill(x + bw - 1, cy, x + bw, cy + bh, edge);
+            ctx.fill(x, cy + bh - 1, x + bw, cy + bh, edge);
+            // 字母菱形占位：小方块字母
+            ctx.drawText(font, Text.literal(z.letter()), x + 4, cy + 3, 0xFFFFFFFF, false);
+            ctx.drawText(font, Text.literal(owner == Side.ATTACKER ? "占" : "守"),
+                    x + bw - font.getWidth("占") - 3, cy + 3, edge, false);
+            x += bw + 6;
+            if (x > sw - 130) {
+                break;
+            }
+        }
+    }
+
+    // ---- 中上：扇区/阶段 ----
+
+    private void renderSectorPill(DrawContext ctx, TextRenderer font, int sw) {
+        int phase = ClientMatchState.phaseOrdinal();
+        String phaseText = PHASE_LABELS[Math.max(0, Math.min(phase, PHASE_LABELS.length - 1))];
+        String txt = String.format("%s  ·  扇区 %d/%d",
+                phaseText, Math.min(ClientMatchState.sectorIndex() + 1, ClientMatchState.sectorCount()),
+                ClientMatchState.sectorCount());
+        int tw = font.getWidth(txt);
+        int x = (sw - tw) / 2;
+        int y = 10;
+        ctx.fill(x - 8, y - 3, x + tw + 8, y + font.fontHeight + 3, 0x66000000);
+        ctx.drawText(font, Text.literal(txt), x, y, phase == 2 ? BfTheme.TEXT_DIM : BfTheme.YELLOW, false);
+    }
+
+    // ---- 右上：时钟 + 部署资源 ----
+
+    private void renderClockTickets(DrawContext ctx, TextRenderer font, int sw) {
+        int phase = ClientMatchState.phaseOrdinal();
         String clock;
         if (phase == 1) {
-            clock = "开局 " + String.format("%.0f", ClientMatchState.countdownRemainingSeconds());
+            clock = String.format("%.0f", Math.max(0, ClientMatchState.countdownRemainingSeconds()));
         } else {
-            clock = "剩余 " + formatClock(ClientMatchState.matchRemainingSeconds());
+            clock = formatClock(ClientMatchState.matchRemainingSeconds());
         }
-        String status = String.format("攻方部署 %d    %s",
-                ClientMatchState.attackerTickets(), clock);
-        int w = font.getWidth(status);
-        ctx.drawText(font, Text.literal(status), (sw - w) / 2, 10, TEXT, false);
-
-        String sub = String.format("%s  ·  扇区 %d / %d", phaseText,
-                Math.min(ClientMatchState.sectorIndex() + 1, ClientMatchState.sectorCount()),
-                ClientMatchState.sectorCount());
-        int pw = font.getWidth(sub);
-        ctx.drawText(font, Text.literal(sub), (sw - pw) / 2, 22, MUTED, false);
+        int clockW = font.getWidth(clock);
+        int cx = sw - 12 - clockW;
+        // 分割竖线
+        ctx.fill(cx - 10, 12, cx - 9, 12 + 20, BfTheme.PANEL_LINE);
+        ctx.drawText(font, Text.literal(clock), cx, 10, 0xFFFFFFFF, false);
+        ctx.drawText(font, Text.literal("TIME"), cx, 10 + font.fontHeight + 1, BfTheme.FAINT, false);
+        // 部署资源
+        String tick = String.valueOf(ClientMatchState.attackerTickets());
+        int tkW = font.getWidth(tick);
+        int tx = sw - 12 - tkW;
+        int ticketsColor = ClientMatchState.attackerTickets() <= 10 ? BfTheme.RED : BfTheme.YELLOW;
+        ctx.drawText(font, Text.literal(tick), tx, 10, ticketsColor, false);
+        ctx.drawText(font, Text.literal("DEPLOY  攻方"), tx, 10 + font.fontHeight + 1, BfTheme.FAINT, false);
+        // 竖直锚线
+        ctx.fill(sw - 14, 10, sw - 13, 10 + 24, ticketsColor == BfTheme.RED ? BfTheme.RED : BfTheme.YELLOW);
     }
 
-    /** 当前扇区各据点进度条（BF 风格细条，多据点则纵排）。 */
-    private void renderZoneBars(DrawContext ctx, TextRenderer font, int sw, int sh) {
+    // ---- 底部：据点推进 ----
+
+    private void renderZoneProgress(DrawContext ctx, TextRenderer font, int sw, int sh) {
         List<ZoneView> zones = ClientMatchState.zones();
         if (zones.isEmpty()) {
             return;
         }
-        int width = 220;
-        int height = 6;
-        int gap = 24;
+        int width = 200;
+        int height = 4;
+        int gap = 18;
         int total = zones.size() * gap;
-        int startY = sh - 40 - total + gap / 2;
+        int startY = sh - 26 - total + gap;
         int x = (sw - width) / 2;
 
         for (int i = 0; i < zones.size(); i++) {
             ZoneView zone = zones.get(i);
             int y = startY + i * gap;
-
-            // 底槽
-            ctx.fill(x - 2, y - 2, x + width + 2, y + height + 2, PANEL);
+            ctx.fill(x - 2, y - 2, x + width + 2, y + height + 2, 0x77000000);
             Side owner = Side.values()[zone.ownerOrdinal()];
             float meter = Math.max(0f, Math.min(1f, zone.meter()));
-            int fillColor = owner == Side.ATTACKER ? ACCENT : DEF_BLUE;
-            // 攻方已占显示满条；守方持有时 meter 为攻方推进进度（红色增长条）
-            int progress = owner == Side.ATTACKER
-                    ? width
-                    : (int) (width * meter);
-            ctx.fill(x, y, x + progress, y + height, fillColor);
-
-            String id = zone.letter().isEmpty() ? zone.zoneId() : zone.letter();
-            String stateText = owner == Side.ATTACKER
-                    ? id + " 已占领"
-                    : String.format("%s 推进 %.0f%%", id, meter * 100);
-            int tw = font.getWidth(stateText);
-            ctx.drawText(font, Text.literal(stateText), (sw - tw) / 2, y - 11, TEXT, false);
+            int fillColor = owner == Side.ATTACKER ? BfTheme.YELLOW : BfTheme.BLUE;
+            int progress = owner == Side.ATTACKER ? width : (int) (width * meter);
+            if (progress > 0) {
+                ctx.fill(x, y, x + progress, y + height, fillColor);
+            }
+            String label = String.format("%s", zone.letter());
+            ctx.drawText(font, Text.literal(label), (sw - width) / 2 - 12, y - 3, 0xFFFFFFFF, false);
+            String state = owner == Side.ATTACKER
+                    ? "已占领"
+                    : (meter > 1e-3f ? String.format("推进 %d%%", (int) (meter * 100)) : "防守中");
+            int sw2 = font.getWidth(state);
+            ctx.drawText(font, Text.literal(state), (sw + width) / 2 + 4, y - 3,
+                    owner == Side.ATTACKER ? BfTheme.YELLOW_DIM : BfTheme.TEXT_DIM, false);
         }
     }
+
+    // ---- 击杀流（右上时钟下方，动画） ----
 
     private void renderKillFeed(DrawContext ctx, TextRenderer font, int sw) {
         long now = System.currentTimeMillis();
         List<KillEvent> feed = ClientMatchState.killFeed();
-        int y = 12;
+        int x = sw - 220;
+        int y = 56;
         int shown = 0;
         for (KillEvent row : feed) {
-            if (now - row.addedAt() > 6000) {
+            long ageMs = now - row.addedAt();
+            if (ageMs > 6500 || ageMs < 0) {
                 continue;
             }
             if (shown >= 5) {
                 break;
             }
-            String line = row.killer() + (row.headshot() ? " [爆头]" : "")
-                    + " 击杀了 " + row.victim() + (row.attackerDied() ? "（攻方）" : "");
-            int w = font.getWidth(line);
-            ctx.fill(sw - w - 16, y - 1, sw - 6, y + font.fontHeight + 1, PANEL_SOFT);
-            ctx.drawText(font, Text.literal(line), sw - w - 12, y, TEXT, false);
-            y += font.fontHeight + 6;
+            // 淡入 240ms / 淡出最后 700ms
+            float inA = Math.min(1f, ageMs / 240f);
+            float outA = Math.min(1f, Math.max(0f, (6500 - ageMs) / 700f));
+            int alpha = (int) (200 * inA * outA);
+            int dy = (int) ((1 - inA) * 8);
+
+            String head = row.headshot() ? "爆头 " : "";
+            String line = row.killer() + "  击杀  " + row.victim();
+            ctx.drawText(font, Text.literal(head), x, y + dy, argb(0xFFF5D44A, alpha), false);
+            int hw = font.getWidth(head);
+            ctx.drawText(font, Text.literal(line), x + hw, y + dy, argb(0xFFF2F4F8, alpha), false);
+            if (row.attackerDied()) {
+                ctx.drawText(font, Text.literal("●攻方减员"), x + hw + font.getWidth(line) + 8, y + dy,
+                        argb(BfTheme.RED, alpha), false);
+            }
+            y += font.fontHeight + 5;
             shown++;
         }
+    }
+
+    private static int argb(int rgb, int a) {
+        int aa = Math.max(0, Math.min(255, a));
+        return (aa << 24) | (rgb & 0xFFFFFF);
     }
 
     private static String formatClock(float seconds) {
