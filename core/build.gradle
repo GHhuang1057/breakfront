@@ -11,9 +11,16 @@ base {
 
 repositories {
     mavenCentral()
-    maven {
-        name = 'Modrinth'
-        url = 'https://api.modrinth.com/maven'
+}
+
+// 编译期桩源集：为「可选适配」的第三方模组类型提供最小签名。
+// 桩类只进编译类路径、绝不打包；运行时由真实模组 jar 提供同名类型。
+sourceSets {
+    stub {
+        java {
+            srcDir 'src/stub/java'
+        }
+        compileClasspath += sourceSets.main.compileClasspath
     }
 }
 
@@ -23,8 +30,8 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${rootProject.property('loader_version')}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.property('fabric_version')}"
 
-    // 击杀归属桥 · 第 2 层适配对象：TaCZ: Refabricated（仅编译期；运行时按是否存在加载）
-    modImplementation "maven.modrinth:tacz-refabricated:${rootProject.property('tacz_version')}"
+    // 主代码编译期挂上桩输出（不打包、不参与 remap 分发）
+    compileOnly sourceSets.stub.output
 
     // 核心逻辑为纯 Java，可脱离 Minecraft 直接跑 JUnit
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
