@@ -33,6 +33,13 @@ public final class ClientMatchState {
     private static volatile int defenderTeamKills;
     private static final List<BoardRow> board = new ArrayList<>();
 
+    // 双方在线人数（MatchStatePayload 扩展，大厅/部署页用）
+    private static volatile int attackerOnline;
+    private static volatile int defenderOnline;
+
+    // 命中反馈（HitMarkerPayload）——HUD 负责动画淡出
+    private static final List<HitEvent> hitMarkers = new ArrayList<>();
+
     private ClientMatchState() {
     }
 
@@ -51,6 +58,8 @@ public final class ClientMatchState {
             zones.add(new ZoneView(z.zoneId(), z.letter(), z.ownerOrdinal(), z.meter(),
                     z.worldX(), z.worldZ(), z.groundY(), z.radius()));
         }
+        attackerOnline = payload.attackerOnline();
+        defenderOnline = payload.defenderOnline();
     }
 
     public static void applyKill(KillFeedPayload payload) {
@@ -123,6 +132,28 @@ public final class ClientMatchState {
 
     public static List<BoardRow> board() {
         return board;
+    }
+
+    public static int attackerOnline() {
+        return attackerOnline;
+    }
+
+    public static int defenderOnline() {
+        return defenderOnline;
+    }
+
+    public static void applyHit(com.breakfront.net.HitMarkerPayload payload) {
+        hitMarkers.add(0, new HitEvent(payload.kind(), System.currentTimeMillis()));
+        while (hitMarkers.size() > 12) {
+            hitMarkers.remove(hitMarkers.size() - 1);
+        }
+    }
+
+    public static List<HitEvent> hitMarkers() {
+        return hitMarkers;
+    }
+
+    public record HitEvent(int kind, long at) {
     }
 
     public record KillEvent(String killer, String victim,

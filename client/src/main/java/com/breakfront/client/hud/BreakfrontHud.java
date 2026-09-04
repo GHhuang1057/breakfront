@@ -1,5 +1,6 @@
 package com.breakfront.client.hud;
 
+import com.breakfront.client.bf.BfDraw;
 import com.breakfront.client.bf.BfTheme;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.KillEvent;
@@ -39,12 +40,22 @@ public class BreakfrontHud {
         int sh = client.getWindow().getScaledHeight();
         int phase = ClientMatchState.phaseOrdinal();
 
+        // TAB 计分板：按住显示（优先于一切战场 HUD）
+        if (isTabHeld(client) && (phase == 1 || phase == 2)) {
+            renderScoreboard(context, font, sw, sh);
+            return;
+        }
+
         if (phase == 3) {
             renderRoundOver(context, font, sw, sh);
             return;
         }
+        if (phase == 0) {
+            renderLobby(context, font, sw, sh, client);
+            return; // 大厅不渲染战场 HUD
+        }
         if (phase != 1 && phase != 2) {
-            return; // 大厅不渲染（大厅面板另行处理）
+            return;
         }
         renderObjective(context, font, sw);
         renderSectorPill(context, font, sw);
@@ -52,7 +63,194 @@ public class BreakfrontHud {
         renderScoreChip(context, font, sw);
         renderZoneProgress(context, font, sw, sh);
         renderKillFeed(context, font, sw);
+        renderHitMarkers(context, font, sw, sh);
         ZoneMarkers.render(context, font, sw, sh);
+    }
+
+    // ---- W5：HitMarker 命中反馈（准星四角斜线） ----
+
+    private void renderHitMarkers(DrawContext ctx, TextRenderer font, int sw, int sh) {
+        long now = System.currentTimeMillis();
+        List<ClientMatchState.HitEvent> marks = ClientMatchState.hitMarkers();
+        if (marks.isEmpty()) {
+            return;
+        }
+        int cx = sw / 2;
+        int cy = sh / 2 - 2;
+        // 仅在开镜/准星未隐藏场景也显示（BF 风格命中提示始终显示）
+        for (ClientMatchState.HitEvent m : marks) {
+            long ageMs = now - m.at();
+            if (ageMs < 0 || ageMs > 420) {
+                continue;
+            }
+            // 缩放出场 70ms → 停留 → 最后 120ms 淡出
+            float in = Math.min(1f, ageMs / 70f);
+            float out = Math.min(1f, Math.max(0f, (420 - ageMs) / 120f));
+            float pop = 0.6f + 0.4f * in; // 0.6 → 1.0
+            int alpha = (int) (220 * in * out);
+            int base;
+            int color;
+            if (m.kind() >= 2) {
+                base = 11; // 击杀/爆头：更大
+                color = m.kind() == 3 ? BfTheme.YELLOW : BfTheme.RED;
+            } else {
+                base = 7;
+                color = 0xFFF2F4F8;
+            }
+            int r0 = (int) (base * pop);
+            int r1 = r0 + 4;
+            int c = argb(color, alpha);
+            // 上
+            BfDraw.fill(ctx, cx - 1, cy - r1, cx + 1, cy - r0, c);
+            // 下
+            BfDraw.fill(ctx, cx - 1, cy + r0, cx + 1, cy + r1, c);
+            // 左 / 右
+            BfDraw.fill(ctx, cx - r1, cy - 1, cx - r0, cy + 1, c);
+            BfDraw.fill(ctx, cx + r0, cy - 1, cx + r1, cy + 1, c);
+        }
+    }
+
+    private static boolean isTabHeld(MinecraftClient client) {
+        try {
+            return net.minecraft.client.util.InputUtil.isKeyPressed(
+                    client.getWindow().getHandle(), org.lwjgl.glfw.GLFW.GLFW_KEY_TAB);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    // ---- W3：大厅「准备就绪」面板（phase 0） ----
+
+    private void renderLobby(DrawContext ctx, TextRenderer font, int sw, int sh, MinecraftClient client) {
+        BfDraw.fill(ctx, 0, 0, sw, sh, 0xBF06080C);
+        BfDraw.gradientV(ctx, 0, (int) (sh * 0.72), sw, (int) (sh * 0.28), 0x00141B26, 0xFF141B26);
+        BfDraw.parallelogram(ctx, -140, sh - 150, sw / 3, 5, 70, 0x16FFFFFF);
+        BfDraw.fill(ctx, sw / 2 - 90, 0, 4, sh, BfTheme.YELLOW);
+
+        // 标题
+        String head = "BREAKFRONT  ·  战备大厅";
+        int hw = font.getWidth(head);
+        int hy = (int) (sh * 0.30);
+        ctx.drawText(font, Text.literal(head), sw / 2 - hw / 2, hy, 0xFFFFFFFF, false);
+        String sub = "ALL-OUT WARFARE  ·  等待指挥官部署";
+        int subW = font.getWidth(sub);
+        ctx.drawText(font, Text.literal(sub), sw / 2 - subW / 2, hy + 16, BfTheme.YELLOW_DIM, false);
+
+        // 人数卡
+        int cw = Math.min(360, sw - 80);
+        int cx = sw / 2 - cw / 2;
+        int cy = hy + 56;
+        int chH = 86;
+        BfDraw.fill(ctx, cx, cy, cw, chH, BfTheme.PANEL);
+        BfDraw.border(ctx, cx, cy, cw, chH, BfTheme.PANEL_LINE);
+        int half = cw / 2;
+        String att = "进攻方  " + ClientMatchState.attackerOnline();
+        String def = "防守方  " + ClientMatchState.defenderOnline();
+        ctx.drawText(font, Text.literal(att), cx + 18, cy + 14, BfTheme.YELLOW, false);
+        ctx.drawText(font, Text.literal(def), cx + half + 18, cy + 14, BfTheme.BLUE, false);
+        // 我方阵营（board 行匹配自身）
+        String me = client.player != null ? client.player.getName().getString() : "";
+        int mySide = -1;
+        for (ClientMatchState.BoardRow r : ClientMatchState.board()) {
+            if (r.name().equals(me)) {
+                mySide = r.sideOrdinal();
+                break;
+            }
+        }
+        String sideText = mySide == 0 ? "进攻方" : (mySide == 1 ? "防守方" : "未分配");
+        ctx.drawText(font, Text.literal("你的阵营  " + sideText), cx + 18, cy + 36,
+                mySide == 0 ? BfTheme.YELLOW : BfTheme.MUTED, false);
+        ctx.drawText(font, Text.literal("指令  /bf team attacker|defender"), cx + half + 18, cy + 36,
+                BfTheme.MUTED, false);
+        ctx.drawText(font, Text.literal("分配后由管理员开局，或自动开局启用后满员即开"),
+                cx + 18, cy + 58, BfTheme.FAINT, false);
+    }
+
+    // ---- W2：TAB 计分板（BF2042 排版：双队纵列 + 顶比分带） ----
+
+    private void renderScoreboard(DrawContext ctx, TextRenderer font, int sw, int sh) {
+        List<ClientMatchState.BoardRow> rows = ClientMatchState.board();
+        List<ClientMatchState.BoardRow> att = new java.util.ArrayList<>();
+        List<ClientMatchState.BoardRow> def = new java.util.ArrayList<>();
+        for (ClientMatchState.BoardRow r : rows) {
+            (r.sideOrdinal() == 0 ? att : def).add(r);
+        }
+        att.sort((a, b) -> b.kills() != a.kills() ? b.kills() - a.kills() : a.deaths() - b.deaths());
+        def.sort((a, b) -> b.kills() != a.kills() ? b.kills() - a.kills() : a.deaths() - b.deaths());
+
+        // 半透明深底
+        BfDraw.fill(ctx, 0, 0, sw, sh, 0xB00A0D12);
+        BfDraw.parallelogram(ctx, -160, sh - 220, sw / 3, 4, 70, 0x10FFFFFF);
+        BfDraw.parallelogram(ctx, sw / 2, -40, sw / 3, 5, -55, 0x0FFFFFFF);
+
+        // 顶比分带
+        String score = String.format("%d    :    %d", ClientMatchState.attackerTeamKills(),
+                ClientMatchState.defenderTeamKills());
+        int scoreW = font.getWidth(score);
+        ctx.drawText(font, Text.literal(score), sw / 2 - scoreW / 2, 24, 0xFFFFFFFF, false);
+        String sub = "团队击杀  ·  回合阶段 " + PHASE_LABELS[Math.max(0, Math.min(ClientMatchState.phaseOrdinal(), 4))]
+                + "  ·  扇区 " + (Math.min(ClientMatchState.sectorIndex() + 1, ClientMatchState.sectorCount()))
+                + "/" + ClientMatchState.sectorCount();
+        int subW = font.getWidth(sub);
+        ctx.drawText(font, Text.literal(sub), sw / 2 - subW / 2, 40, BfTheme.FAINT, false);
+
+        // 双列头
+        int colW = (int) Math.min(sw * 0.42, 420);
+        int gap = 24;
+        int topY = 78;
+        int headY = topY;
+        int leftX = sw / 2 - colW - gap / 2;
+        int rightX = sw / 2 + gap / 2;
+        ctx.drawText(font, Text.literal("进攻方  ATTACKER"), leftX, headY, BfTheme.YELLOW, false);
+        ctx.drawText(font, Text.literal("防守方  DEFENDER"), rightX, headY, BfTheme.BLUE, false);
+        // 列头（名称/击杀/死亡/爆头）
+        int rowH = font.fontHeight + 7;
+        drawHeader(ctx, font, leftX, headY + font.fontHeight + 4, colW);
+        drawHeader(ctx, font, rightX, headY + font.fontHeight + 4, colW);
+
+        int bodyTop = headY + font.fontHeight * 2 + 14;
+        int maxRows = Math.max(att.size(), def.size());
+        int bodyH = Math.max(1, maxRows) * rowH;
+        int fullH = bodyTop + bodyH + 30;
+        if (fullH > sh - 24) {
+            return; // 放不下就只画头（极小窗口保护）
+        }
+        drawColumn(ctx, font, att, leftX, bodyTop, colW, rowH, BfTheme.YELLOW_DIM);
+        drawColumn(ctx, font, def, rightX, bodyTop, colW, rowH, BfTheme.BLUE);
+
+        // 底提示
+        String hint = "TAB 查看 · 进服后战绩自动记录 · K/D/爆头实时更新";
+        int hw = font.getWidth(hint);
+        ctx.drawText(font, Text.literal(hint), sw / 2 - hw / 2, sh - 22, BfTheme.FAINT, false);
+    }
+
+    private void drawHeader(DrawContext ctx, TextRenderer font, int x, int y, int colW) {
+        ctx.drawText(font, Text.literal("玩家"), x, y, BfTheme.MUTED, false);
+        int kx = x + colW - 66;
+        ctx.drawText(font, Text.literal("击杀"), kx, y, BfTheme.MUTED, false);
+        ctx.drawText(font, Text.literal("死亡"), kx + 30, y, BfTheme.MUTED, false);
+        ctx.drawText(font, Text.literal("爆头"), kx + 60, y, BfTheme.MUTED, false);
+    }
+
+    private void drawColumn(DrawContext ctx, TextRenderer font,
+                            List<ClientMatchState.BoardRow> list,
+                            int x, int topY, int colW, int rowH, int accent) {
+        int i = 0;
+        for (ClientMatchState.BoardRow r : list) {
+            int y = topY + i * rowH;
+            if (i % 2 == 1) {
+                ctx.fill(x - 4, y - 2, x + colW + 4, y + rowH - 2, 0x12FFFFFF);
+            }
+            ctx.fill(x - 4, y - 2, x + colW + 4, y - 1, accent & 0x33FFFFFF);
+            ctx.drawText(font, Text.literal(r.name()), x, y, 0xFFFFFFFF, false);
+            int kx = x + colW - 66;
+            ctx.drawText(font, Text.literal(String.valueOf(r.kills())), kx, y, 0xFFFFFFFF, false);
+            ctx.drawText(font, Text.literal(String.valueOf(r.deaths())), kx + 30, y,
+                    r.deaths() == 0 ? BfTheme.FAINT : BfTheme.TEXT_DIM, false);
+            ctx.drawText(font, Text.literal(String.valueOf(r.headshots())),
+                    kx + 60, y, r.headshots() > 0 ? BfTheme.YELLOW_DIM : BfTheme.FAINT, false);
+            i++;
+        }
     }
 
     // ---- C1：结算层（ROUND_END）----

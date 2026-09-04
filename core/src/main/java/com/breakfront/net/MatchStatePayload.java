@@ -20,7 +20,9 @@ public record MatchStatePayload(
         float countdownRemainingSeconds,
         int sectorIndex,
         int sectorCount,
-        List<ZoneStateView> currentSectorZones) implements CustomPayload {
+        List<ZoneStateView> currentSectorZones,
+        int attackerOnline,
+        int defenderOnline) implements CustomPayload {
 
     public static final Id<MatchStatePayload> ID =
             new Id<>(Identifier.of("breakfront", "match_state"));
@@ -40,6 +42,8 @@ public record MatchStatePayload(
         for (ZoneStateView zone : currentSectorZones) {
             zone.write(buf);
         }
+        buf.writeInt(attackerOnline);
+        buf.writeInt(defenderOnline);
     }
 
     /** 客户端 → 构造：从 buf 严格还原。 */
@@ -51,7 +55,9 @@ public record MatchStatePayload(
                 buf.readFloat(),
                 buf.readInt(),
                 buf.readInt(),
-                readZones(buf));
+                readZones(buf),
+                buf.readInt(),
+                buf.readInt());
     }
 
     private static List<ZoneStateView> readZones(PacketByteBuf buf) {

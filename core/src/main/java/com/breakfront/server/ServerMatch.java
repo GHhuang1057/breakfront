@@ -302,7 +302,9 @@ public final class ServerMatch {
                 (float) game.countdownRemaining(),
                 game.sectorIndex(),
                 game.sectors().size(),
-                zones);
+                zones,
+                (int) teams.count(Side.ATTACKER),
+                (int) teams.count(Side.DEFENDER));
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             ServerPlayNetworking.send(player, payload);
         }

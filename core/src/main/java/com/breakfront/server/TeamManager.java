@@ -13,6 +13,22 @@ import java.util.UUID;
 public final class TeamManager {
 
     private final Map<UUID, Side> membership = new HashMap<>();
+    private final Map<UUID, String> classes = new HashMap<>();
+
+    public static final String[] KNOWN_CLASSES = {"assault", "engineer", "support", "recon"};
+
+    public void setClass(UUID playerId, String classId) {
+        for (String k : KNOWN_CLASSES) {
+            if (k.equals(classId)) {
+                classes.put(playerId, k);
+                return;
+            }
+        }
+    }
+
+    public String classOf(UUID playerId) {
+        return classes.getOrDefault(playerId, "assault");
+    }
 
     public void join(UUID playerId, Side side) {
         membership.put(playerId, side);

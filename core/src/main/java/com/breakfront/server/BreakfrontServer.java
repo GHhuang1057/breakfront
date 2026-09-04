@@ -64,6 +64,21 @@ public final class BreakfrontServer {
             }
         });
 
+        // W4a：兵种选择（C2S）——服务端记录，供 P3 装备发放
+        ServerPlayNetworking.registerGlobalReceiver(com.breakfront.net.SetClassPayload.ID,
+                (payload, context) -> context.player().server.execute(() -> {
+                    ServerPlayerEntity p = context.player();
+                    if (match == null || p == null) {
+                        return;
+                    }
+                    String before = match.teams().classOf(p.getUuid());
+                    match.teams().setClass(p.getUuid(), payload.classId());
+                    String after = match.teams().classOf(p.getUuid());
+                    if (!before.equals(after)) {
+                        LOGGER.info("[Breakfront] {} set class -> {}", p.getName().getString(), after);
+                    }
+                }));
+
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (match != null) {
                 match.tick(server);
@@ -72,6 +87,19 @@ public final class BreakfrontServer {
 
         // 击杀归属桥 · 第 1 层：vanilla 死亡事件（覆盖全部死因，负责扣票）
         ServerLivingEntityEvents.AFTER_DEATH.register(KillListener::onEntityDeath);
+
+        // W5：命中反馈（白 X）——本玩家造成的非致死伤害
+        ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, base, taken, blocked) -> {
+            if (taken <= 0f || blocked) {
+                return;
+            }
+            if (!entity.isAlive()) {
+                return; // 致死伤：击杀反馈由死亡事件发红 X
+            }
+            if (source.getAttacker() instanceof ServerPlayerEntity shooter && shooter != entity) {
+                sendHitMarker(shooter, 0);
+            }
+        });
 
         // 击杀归属桥 · 第 2 层：TaCZ 枪械击杀适配（模组缺席时自动跳过，不崩服）
         if (net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("tacz")) {
@@ -104,6 +132,14 @@ public final class BreakfrontServer {
 
     public static ServerMatch match() {
         return match;
+    }
+
+    /** 命中反馈发送（服务端线程）。kind: 0=命中 2=击杀。 */
+    public static void sendHitMarker(ServerPlayerEntity p, int kind) {
+        if (p == null || p.networkHandler == null) {
+            return;
+        }
+        ServerPlayNetworking.send(p, new com.breakfront.net.HitMarkerPayload(kind));
     }
 
     public static MinecraftServer server() {

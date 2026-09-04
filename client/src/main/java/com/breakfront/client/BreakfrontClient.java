@@ -39,7 +39,7 @@ public class BreakfrontClient implements ClientModInitializer {
 
         BfServerConfig.load();
 
-        // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）
+        // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）+ 死亡替换为部署重生页
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.currentScreen instanceof TitleScreen) {
                 client.setScreen(new BreakfrontMainMenu());
@@ -52,7 +52,17 @@ public class BreakfrontClient implements ClientModInitializer {
             if (ph == 1) {
                 if (lastDeployPhaseChange != ClientMatchState.phaseChangeCount()) {
                     lastDeployPhaseChange = ClientMatchState.phaseChangeCount();
-                    client.setScreen(new BfDeployScreen());
+                    client.setScreen(new BfDeployScreen(false));
+                }
+            } else if (ph == 2) {
+                // 战斗中：部署/阵亡页处理
+                if (client.currentScreen instanceof BfDeployScreen s) {
+                    if (client.player.isAlive() || (!s.isRespawnMode())) {
+                        s.close();
+                    }
+                } else if (client.player.isDead()
+                        && client.currentScreen instanceof net.minecraft.client.gui.screen.DeathScreen) {
+                    client.setScreen(new BfDeployScreen(true)); // 阵亡 → BF 部署页
                 }
             } else if (client.currentScreen instanceof BfDeployScreen) {
                 client.currentScreen.close();
@@ -70,6 +80,10 @@ public class BreakfrontClient implements ClientModInitializer {
         // S2C 接收：比分/击杀榜
         ClientPlayNetworking.registerGlobalReceiver(ScoreboardPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyScoreboard(payload)));
+
+        // S2C 接收：命中反馈（HitMarker）
+        ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.HitMarkerPayload.ID,
+                (payload, context) -> context.client().execute(() -> ClientMatchState.applyHit(payload)));
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
 

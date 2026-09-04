@@ -67,6 +67,10 @@ public final class KillListener {
         if (match != null) {
             match.recordKill(player, killer instanceof LivingEntity le ? le : null);
         }
+        // W5：击杀命中反馈（红 X）——给造成击杀的玩家
+        if (killer instanceof ServerPlayerEntity kp && kp != player) {
+            BreakfrontServer.sendHitMarker(kp, 2);
+        }
         push(new KillEntry(killerName, victimName, attackerDied, false));
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("kill: {} -> {} (attackerDied={}, tickets={})",

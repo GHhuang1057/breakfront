@@ -9,9 +9,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 客户端编译期桩（与 core 真类签名完全一致；运行时由 core jar 提供）。
- * S2C：对局状态同步帧 —— 携带当前扇区据点明细（含世界坐标/半径/字母），
- * 供客户端 BF 式屏幕标记与地面描边渲染。
+ * S2C：对局状态同步帧（服务端按节流周期广播给全部玩家）。
+ * 只带「当前扇区」的据点明细；每据点附带世界坐标/半径/字母，
+ * 供客户端做 BF 式屏幕标记（菱形字母图标、投影定位、屏缘指示）与地面描边。
  */
 public record MatchStatePayload(
         int phaseOrdinal,
@@ -20,7 +20,9 @@ public record MatchStatePayload(
         float countdownRemainingSeconds,
         int sectorIndex,
         int sectorCount,
-        List<ZoneStateView> currentSectorZones) implements CustomPayload {
+        List<ZoneStateView> currentSectorZones,
+        int attackerOnline,
+        int defenderOnline) implements CustomPayload {
 
     public static final Id<MatchStatePayload> ID =
             new Id<>(Identifier.of("breakfront", "match_state"));
@@ -28,6 +30,7 @@ public record MatchStatePayload(
     public static final PacketCodec<PacketByteBuf, MatchStatePayload> CODEC =
             PacketCodec.of(MatchStatePayload::write, MatchStatePayload::new);
 
+    /** 服务端 → 包：写入的字段顺序与读取严格一致。 */
     private void write(PacketByteBuf buf) {
         buf.writeInt(phaseOrdinal);
         buf.writeInt(attackerTickets);
@@ -39,8 +42,11 @@ public record MatchStatePayload(
         for (ZoneStateView zone : currentSectorZones) {
             zone.write(buf);
         }
+        buf.writeInt(attackerOnline);
+        buf.writeInt(defenderOnline);
     }
 
+    /** 客户端 → 构造：从 buf 严格还原。 */
     public MatchStatePayload(PacketByteBuf buf) {
         this(
                 buf.readInt(),
@@ -49,7 +55,9 @@ public record MatchStatePayload(
                 buf.readFloat(),
                 buf.readInt(),
                 buf.readInt(),
-                readZones(buf));
+                readZones(buf),
+                buf.readInt(),
+                buf.readInt());
     }
 
     private static List<ZoneStateView> readZones(PacketByteBuf buf) {
@@ -66,6 +74,18 @@ public record MatchStatePayload(
         return ID;
     }
 
+    /**
+     * 单据点快照。
+     *
+     * @param zoneId      内部 ID（A1/A2/B1…，服务端逻辑用）
+     * @param letter      BF 风格全局字母（A/B/C…，屏幕菱形标记显示用）
+     * @param ownerOrdinal 归属方（Side.ordinal()）
+     * @param meter       攻方推进度 0..1
+     * @param worldX      据点圆心 X（方块中心）
+     * @param worldZ      据点圆心 Z
+     * @param groundY     据点地表高度（信标底座所在 Y，用于描边环与标记浮空基准）
+     * @param radius      占点判定半径
+     */
     public record ZoneStateView(
             String zoneId,
             String letter,

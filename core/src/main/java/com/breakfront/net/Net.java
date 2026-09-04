@@ -18,6 +18,8 @@ public final class Net {
         PayloadTypeRegistry.playS2C().register(MatchStatePayload.ID, MatchStatePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(KillFeedPayload.ID, KillFeedPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(ScoreboardPayload.ID, ScoreboardPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(HitMarkerPayload.ID, HitMarkerPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(SetClassPayload.ID, SetClassPayload.CODEC);
         LOGGER.info("[Breakfront] networking payloads registered");
     }
 }
