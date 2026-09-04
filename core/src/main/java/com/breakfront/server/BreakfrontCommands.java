@@ -68,65 +68,11 @@ public final class BreakfrontCommands {
                     return 1;
                 }));
 
-        root = root.then(literal("autostart").requires(s -> s.hasPermissionLevel(2))
-                .then(literal("on").executes(ctx -> {
-                    var match = BreakfrontServer.match();
-                    if (match == null) {
-                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
-                        return 0;
-                    }
-                    match.setAutostart(true);
-                    send(ctx.getSource(), "自动开局已开启：大厅双阵营就绪后 5 秒开局");
-                    return 1;
-                }))
-                .then(literal("off").executes(ctx -> {
-                    var match = BreakfrontServer.match();
-                    if (match != null) {
-                        match.setAutostart(false);
-                    }
-                    send(ctx.getSource(), "自动开局已关闭");
-                    return 1;
-                })));
+                root = root.then(autostartNode());
+        root = root.then(spawnsNode());
+        root = root.then(npcNode());
 
-        root = root.then(literal("spawns").requires(s -> s.hasPermissionLevel(2))
-                .executes(ctx -> {
-                    var match = BreakfrontServer.match();
-                    if (match == null) {
-                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
-                        return 0;
-                    }
-                    send(ctx.getSource(), match.spawnsText(BreakfrontServer.server()));
-                    return 1;
-                })
-                .then(literal("set")
-                        .then(literal("attacker").then(CommandManager.argument("x", DoubleArgumentType.doubleArg())
-                                .then(CommandManager.argument("z", DoubleArgumentType.doubleArg())
-                                        .executes(ctx -> {
-                                            var match = BreakfrontServer.match();
-                                            if (match == null) {
-                                                return 0;
-                                            }
-                                            match.setSpawnOverride(Side.ATTACKER,
-                                                    DoubleArgumentType.getDouble(ctx, "x"),
-                                                    DoubleArgumentType.getDouble(ctx, "z"));
-                                            send(ctx.getSource(), "攻方出生点已覆盖");
-                                            return 1;
-                                        }))))
-                        .then(literal("defender").then(CommandManager.argument("x", DoubleArgumentType.doubleArg())
-                                .then(CommandManager.argument("z", DoubleArgumentType.doubleArg())
-                                        .executes(ctx -> {
-                                            var match = BreakfrontServer.match();
-                                            if (match == null) {
-                                                return 0;
-                                            }
-                                            match.setSpawnOverride(Side.DEFENDER,
-                                                    DoubleArgumentType.getDouble(ctx, "x"),
-                                                    DoubleArgumentType.getDouble(ctx, "z"));
-                                            send(ctx.getSource(), "守方出生点已覆盖");
-                                            return 1;
-                                        })))));
-
-        root = root.then(literal("team")
+root = root.then(literal("team")
                 .executes(ctx -> {
                     send(ctx.getSource(), "用法：/bf team <attacker|defender>");
                     return 0;
@@ -168,49 +114,6 @@ public final class BreakfrontCommands {
             send(ctx.getSource(), match.scoreText());
             return 1;
         }));
-
-        root = root.then(literal("npc").requires(s -> s.hasPermissionLevel(2))
-                .then(literal("status").executes(ctx -> {
-                    var match = BreakfrontServer.match();
-                    if (match == null) {
-                        return 0;
-                    }
-                    send(ctx.getSource(), match.npc().info());
-                    return 1;
-                }))
-                .then(literal("clear").executes(ctx -> {
-                    var match = BreakfrontServer.match();
-                    if (match != null) {
-                        match.npc().clearAll(BreakfrontServer.server());
-                    }
-                    send(ctx.getSource(), "已清除全部 NPC（目标数归零）");
-                    return 1;
-                }))
-                .then(literal("add")
-                        .then(literal("attacker").then(CommandManager.argument("n", IntegerArgumentType.integer(0, 64))
-                                .executes(ctx -> {
-                                    var match = BreakfrontServer.match();
-                                    if (match == null) {
-                                        return 0;
-                                    }
-                                    int n = IntegerArgumentType.getInteger(ctx, "n");
-                                    match.npc().setTarget(Side.ATTACKER, n);
-                                    match.npc().topUp(match, BreakfrontServer.server());
-                                    send(ctx.getSource(), "攻方 NPC 目标人数=" + n);
-                                    return 1;
-                                })))
-                        .then(literal("defender").then(CommandManager.argument("n", IntegerArgumentType.integer(0, 64))
-                                .executes(ctx -> {
-                                    var match = BreakfrontServer.match();
-                                    if (match == null) {
-                                        return 0;
-                                    }
-                                    int n = IntegerArgumentType.getInteger(ctx, "n");
-                                    match.npc().setTarget(Side.DEFENDER, n);
-                                    match.npc().topUp(match, BreakfrontServer.server());
-                                    send(ctx.getSource(), "守方 NPC 目标人数=" + n);
-                                    return 1;
-                                })))));
 
         root = root.then(literal("map")
                 .then(literal("off").executes(ctx -> {
@@ -298,6 +201,101 @@ public final class BreakfrontCommands {
     private static String formatClock(double seconds) {
         int total = (int) Math.max(0, Math.ceil(seconds));
         return String.format("%02d:%02d", total / 60, total % 60);
+    }
+
+    // ---------- 子命令节点构建（避免深嵌套括号） ----------
+
+    private static LiteralArgumentBuilder<ServerCommandSource> autostartNode() {
+        return literal("autostart").requires(s -> s.hasPermissionLevel(2))
+                .then(literal("on").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                        return 0;
+                    }
+                    match.setAutostart(true);
+                    send(ctx.getSource(), "自动开局已开启：大厅双阵营就绪后 5 秒开局");
+                    return 1;
+                }))
+                .then(literal("off").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match != null) {
+                        match.setAutostart(false);
+                    }
+                    send(ctx.getSource(), "自动开局已关闭");
+                    return 1;
+                }));
+    }
+
+    private static LiteralArgumentBuilder<ServerCommandSource> spawnsNode() {
+        LiteralArgumentBuilder<ServerCommandSource> node = literal("spawns").requires(s -> s.hasPermissionLevel(2))
+                .executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                        return 0;
+                    }
+                    send(ctx.getSource(), match.spawnsText(BreakfrontServer.server()));
+                    return 1;
+                });
+        return node.then(literal("set")
+                .then(ovNode("attacker", Side.ATTACKER))
+                .then(ovNode("defender", Side.DEFENDER)));
+    }
+
+    private static LiteralArgumentBuilder<ServerCommandSource> ovNode(String label, Side side) {
+        return literal(label)
+                .then(CommandManager.argument("x", DoubleArgumentType.doubleArg())
+                        .then(CommandManager.argument("z", DoubleArgumentType.doubleArg())
+                                .executes(ctx -> {
+                                    var match = BreakfrontServer.match();
+                                    if (match == null) {
+                                        return 0;
+                                    }
+                                    match.setSpawnOverride(side,
+                                            DoubleArgumentType.getDouble(ctx, "x"),
+                                            DoubleArgumentType.getDouble(ctx, "z"));
+                                    send(ctx.getSource(), label + " 出生点已覆盖");
+                                    return 1;
+                                })));
+    }
+
+    private static LiteralArgumentBuilder<ServerCommandSource> npcNode() {
+        return literal("npc").requires(s -> s.hasPermissionLevel(2))
+                .then(literal("status").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        return 0;
+                    }
+                    send(ctx.getSource(), match.npc().info());
+                    return 1;
+                }))
+                .then(literal("clear").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match != null) {
+                        match.npc().clearAll(BreakfrontServer.server());
+                    }
+                    send(ctx.getSource(), "已清除全部 NPC（目标数归零）");
+                    return 1;
+                }))
+                .then(npcSetNode("attacker", Side.ATTACKER))
+                .then(npcSetNode("defender", Side.DEFENDER));
+    }
+
+    private static LiteralArgumentBuilder<ServerCommandSource> npcSetNode(String label, Side side) {
+        return literal("add").then(literal(label)
+                .then(CommandManager.argument("n", IntegerArgumentType.integer(0, 64))
+                        .executes(ctx -> {
+                            var match = BreakfrontServer.match();
+                            if (match == null) {
+                                return 0;
+                            }
+                            int n = IntegerArgumentType.getInteger(ctx, "n");
+                            match.npc().setTarget(side, n);
+                            match.npc().topUp(match, BreakfrontServer.server());
+                            send(ctx.getSource(), side.labelCn + " NPC 目标人数=" + n);
+                            return 1;
+                        })));
     }
 
     private static void send(ServerCommandSource source, String message) {
