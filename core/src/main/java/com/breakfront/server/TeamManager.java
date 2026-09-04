@@ -34,6 +34,13 @@ public final class TeamManager {
         return membership.values().stream().filter(s -> s == side).count();
     }
 
+    /** 自动补位：优先加入人数少的一边（平局倾向攻方），返回分配的阵营。 */
+    public Side assignLeast(UUID playerId) {
+        Side s = count(Side.ATTACKER) <= count(Side.DEFENDER) ? Side.ATTACKER : Side.DEFENDER;
+        join(playerId, s);
+        return s;
+    }
+
     public boolean isEmpty() {
         return membership.isEmpty();
     }

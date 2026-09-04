@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -51,6 +52,18 @@ public final class BreakfrontServer {
             }
         });
 
+        // S1：进服自动补位/战局部署、退服清理阵营
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            if (match != null) {
+                match.onPlayerJoin(server, handler.getPlayer());
+            }
+        });
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            if (match != null) {
+                match.onPlayerLeft(handler.getPlayer().getUuid());
+            }
+        });
+
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (match != null) {
                 match.tick(server);
@@ -91,5 +104,9 @@ public final class BreakfrontServer {
 
     public static ServerMatch match() {
         return match;
+    }
+
+    public static MinecraftServer server() {
+        return currentServer;
     }
 }

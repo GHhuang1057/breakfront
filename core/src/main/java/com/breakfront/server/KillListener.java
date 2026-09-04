@@ -50,6 +50,10 @@ public final class KillListener {
         if (attackerDied) {
             match.game().onAttackerDeath(); // 攻方每死一人扣 1 部署资源
         }
+        // S1：战中死亡把重生点钉在己方部署区
+        if (match != null && player.getServer() != null) {
+            match.onPlayerDied(player.getServer(), player);
+        }
         push(new KillEntry(killerName, victimName, attackerDied, false));
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("kill: {} -> {} (attackerDied={}, tickets={})",

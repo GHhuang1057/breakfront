@@ -68,6 +68,64 @@ public final class BreakfrontCommands {
                     return 1;
                 }));
 
+        root = root.then(literal("autostart").requires(s -> s.hasPermissionLevel(2))
+                .then(literal("on").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                        return 0;
+                    }
+                    match.setAutostart(true);
+                    send(ctx.getSource(), "自动开局已开启：大厅双阵营就绪后 5 秒开局");
+                    return 1;
+                }))
+                .then(literal("off").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match != null) {
+                        match.setAutostart(false);
+                    }
+                    send(ctx.getSource(), "自动开局已关闭");
+                    return 1;
+                })));
+
+        root = root.then(literal("spawns").requires(s -> s.hasPermissionLevel(2))
+                .executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                        return 0;
+                    }
+                    send(ctx.getSource(), match.spawnsText(BreakfrontServer.server()));
+                    return 1;
+                })
+                .then(literal("set")
+                        .then(literal("attacker").then(CommandManager.argument("x", DoubleArgumentType.doubleArg())
+                                .then(CommandManager.argument("z", DoubleArgumentType.doubleArg())
+                                        .executes(ctx -> {
+                                            var match = BreakfrontServer.match();
+                                            if (match == null) {
+                                                return 0;
+                                            }
+                                            match.setSpawnOverride(Side.ATTACKER,
+                                                    DoubleArgumentType.getDouble(ctx, "x"),
+                                                    DoubleArgumentType.getDouble(ctx, "z"));
+                                            send(ctx.getSource(), "攻方出生点已覆盖");
+                                            return 1;
+                                        }))))
+                        .then(literal("defender").then(CommandManager.argument("x", DoubleArgumentType.doubleArg())
+                                .then(CommandManager.argument("z", DoubleArgumentType.doubleArg())
+                                        .executes(ctx -> {
+                                            var match = BreakfrontServer.match();
+                                            if (match == null) {
+                                                return 0;
+                                            }
+                                            match.setSpawnOverride(Side.DEFENDER,
+                                                    DoubleArgumentType.getDouble(ctx, "x"),
+                                                    DoubleArgumentType.getDouble(ctx, "z"));
+                                            send(ctx.getSource(), "守方出生点已覆盖");
+                                            return 1;
+                                        })))));
+
         root = root.then(literal("team")
                 .executes(ctx -> {
                     send(ctx.getSource(), "用法：/bf team <attacker|defender>");
@@ -178,7 +236,8 @@ public final class BreakfrontCommands {
             }
         }
         sb.append("\n攻方人数=").append(match.teams().count(Side.ATTACKER))
-                .append(" 守方人数=").append(match.teams().count(Side.DEFENDER));
+                .append(" 守方人数=").append(match.teams().count(Side.DEFENDER))
+                .append(" 自动开局=").append(match.autostartEnabled() ? "开" : "关");
         sb.append("\n据点锚点（/bf anchor <idx> set x z 可改）：").append(match.zoneAnchorsText());
         return sb.toString();
     }

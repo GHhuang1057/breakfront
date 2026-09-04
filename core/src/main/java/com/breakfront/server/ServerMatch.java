@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 服务端对局运行时：把纯逻辑 BreakthroughGame 与真实玩家/世界接起来。
@@ -45,6 +46,13 @@ public final class ServerMatch {
     /** 回合自动循环：结算展示 8 秒后自动重开下一局。 */
     private static final double ROUND_END_PAUSE = 8.0;
     private double endPause = -1;
+
+    // ---- 出生/赛程（S1）----
+    private boolean autostart;          // 大厅人数达标自动开局
+    private double lobbyTimer = -1;
+    private MatchPhase lastPhase = MatchPhase.LOBBY;
+    private final double[] attackerSpawn = {Double.NaN, Double.NaN}; // override {x,z}
+    private final double[] defenderSpawn = {Double.NaN, Double.NaN};
 
     public ServerMatch() {
         List<Sector> sectors = defaultSectors();
@@ -125,6 +133,12 @@ public final class ServerMatch {
         } else {
             endPause = -1;
         }
+        // S1 赛程：大厅自动开局 + 进入 BATTLE 的上升沿做全员部署传送
+        tickAutoStart(server);
+        if (game.phase() == MatchPhase.BATTLE && lastPhase != MatchPhase.BATTLE) {
+            teleportAllToSpawns(server);
+        }
+        lastPhase = game.phase();
         if (game.phase() != MatchPhase.BATTLE) {
             return;
         }
@@ -277,6 +291,153 @@ public final class ServerMatch {
 
     public TeamManager teams() {
         return teams;
+    }
+
+    // ================= S1 出生 / 赛程 =================
+
+    /** 大厅自动开局判定（/bf autostart on）。 */
+    private void tickAutoStart(MinecraftServer server) {
+        if (game.phase() != MatchPhase.LOBBY || !autostart) {
+            lobbyTimer = -1;
+            return;
+        }
+        int att = onlineCount(Side.ATTACKER, server);
+        int def = onlineCount(Side.DEFENDER, server);
+        if (att >= 1 && def >= 1 && att + def >= 2) {
+            if (lobbyTimer < 0) {
+                lobbyTimer = 5;
+                BreakfrontServer.LOGGER.info("[Breakfront] autostart: {}v{} online, round in 5s", att, def);
+            }
+            lobbyTimer -= 0.05;
+            if (lobbyTimer <= 0) {
+                lobbyTimer = -1;
+                game.startRound();
+                visualsPlaced = false;
+                teleportAllToSpawns(server);
+                BreakfrontServer.LOGGER.info("[Breakfront] autostart round begun");
+            }
+        } else {
+            lobbyTimer = -1;
+        }
+    }
+
+    private int onlineCount(Side side, MinecraftServer server) {
+        int n = 0;
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (teams.sideOf(p.getUuid()) == side) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** 玩家进服：自动补位；战局中直接部署到出生区并钉重生点。 */
+    public void onPlayerJoin(MinecraftServer server, ServerPlayerEntity player) {
+        if (teams.sideOf(player.getUuid()) == null) {
+            teams.assignLeast(player.getUuid());
+        }
+        MatchPhase ph = game.phase();
+        if (ph == MatchPhase.BATTLE || ph == MatchPhase.COUNTDOWN) {
+            deployPlayer(server, player);
+        }
+    }
+
+    public void onPlayerLeft(UUID playerId) {
+        teams.leave(playerId);
+    }
+
+    /** 战中玩家死亡：把重生点钉在己方部署区（vanilla 复活即回防线）。 */
+    public void onPlayerDied(MinecraftServer server, ServerPlayerEntity player) {
+        Side side = teams.sideOf(player.getUuid());
+        if (side == null) {
+            return;
+        }
+        MatchPhase ph = game.phase();
+        if (ph != MatchPhase.BATTLE && ph != MatchPhase.COUNTDOWN) {
+            return;
+        }
+        double[] sp = spawnFor(side, server.getOverworld());
+        exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
+                player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+    }
+
+    private void deployPlayer(MinecraftServer server, ServerPlayerEntity player) {
+        Side side = teams.sideOf(player.getUuid());
+        if (side == null) {
+            return;
+        }
+        double[] sp = spawnFor(side, server.getOverworld());
+        exec(server, String.format("tp %s %.1f %.1f %.1f",
+                player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+        exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
+                player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+    }
+
+    private void teleportAllToSpawns(MinecraftServer server) {
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            Side side = teams.sideOf(p.getUuid());
+            if (side != null) {
+                deployPlayer(server, p);
+            }
+        }
+    }
+
+    /** 出生坐标（含 Y），攻/守默认锚定在首/末据点的阵营侧；可 /bf spawns set 覆盖。 */
+    private double[] spawnFor(Side side, ServerWorld world) {
+        double[] ov = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
+        if (!Double.isNaN(ov[0])) {
+            return new double[]{ov[0], groundY(world, ov[0], ov[1]) + 1, ov[1]};
+        }
+        int idx = side == Side.ATTACKER ? 0 : Math.max(0, zoneOrder.size() - 1);
+        ZoneAnchor a = anchors.get(zoneOrder.get(idx));
+        if (a == null) {
+            return new double[]{8, 70, 8};
+        }
+        double dir = side == Side.ATTACKER ? -1 : 1;
+        double sx = a.x() + dir * (a.radius() + 5);
+        return new double[]{sx, anchorGroundY(world, a) + 1, a.z()};
+    }
+
+    private double groundY(ServerWorld world, double x, double z) {
+        int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, (int) x, (int) z);
+        return topY <= world.getBottomY() ? 64.0 : topY + 1.0;
+    }
+
+    private static void exec(MinecraftServer server, String cmd) {
+        try {
+            server.getCommandManager().executeWithPrefix(server.getCommandSource(), cmd);
+        } catch (Exception e) {
+            BreakfrontServer.LOGGER.warn("[Breakfront] cmd failed: {} ({})", cmd, e.toString());
+        }
+    }
+
+    public boolean autostartEnabled() {
+        return autostart;
+    }
+
+    public void setAutostart(boolean on) {
+        autostart = on;
+        if (!on) {
+            lobbyTimer = -1;
+        }
+    }
+
+    public boolean setSpawnOverride(Side side, double x, double z) {
+        double[] t = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
+        t[0] = x;
+        t[1] = z;
+        return true;
+    }
+
+    public String spawnsText(MinecraftServer server) {
+        if (server == null) {
+            return "\n（服务器未就绪）";
+        }
+        ServerWorld world = server.getOverworld();
+        double[] a = spawnFor(Side.ATTACKER, world);
+        double[] d = spawnFor(Side.DEFENDER, world);
+        return String.format("\n攻方出生 (%.1f, %.1f, %.1f)\n守方出生 (%.1f, %.1f, %.1f)",
+                a[0], a[1], a[2], d[0], d[1], d[2]);
     }
 
     private int zoneCountLog() {
