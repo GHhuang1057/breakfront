@@ -169,6 +169,49 @@ public final class BreakfrontCommands {
             return 1;
         }));
 
+        root = root.then(literal("npc").requires(s -> s.hasPermissionLevel(2))
+                .then(literal("status").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        return 0;
+                    }
+                    send(ctx.getSource(), match.npc().info());
+                    return 1;
+                }))
+                .then(literal("clear").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match != null) {
+                        match.npc().clearAll(BreakfrontServer.server());
+                    }
+                    send(ctx.getSource(), "已清除全部 NPC（目标数归零）");
+                    return 1;
+                }))
+                .then(literal("add")
+                        .then(literal("attacker").then(CommandManager.argument("n", IntegerArgumentType.integer(0, 64))
+                                .executes(ctx -> {
+                                    var match = BreakfrontServer.match();
+                                    if (match == null) {
+                                        return 0;
+                                    }
+                                    int n = IntegerArgumentType.getInteger(ctx, "n");
+                                    match.npc().setTarget(Side.ATTACKER, n);
+                                    match.npc().topUp(match, BreakfrontServer.server());
+                                    send(ctx.getSource(), "攻方 NPC 目标人数=" + n);
+                                    return 1;
+                                })))
+                        .then(literal("defender").then(CommandManager.argument("n", IntegerArgumentType.integer(0, 64))
+                                .executes(ctx -> {
+                                    var match = BreakfrontServer.match();
+                                    if (match == null) {
+                                        return 0;
+                                    }
+                                    int n = IntegerArgumentType.getInteger(ctx, "n");
+                                    match.npc().setTarget(Side.DEFENDER, n);
+                                    match.npc().topUp(match, BreakfrontServer.server());
+                                    send(ctx.getSource(), "守方 NPC 目标人数=" + n);
+                                    return 1;
+                                })))));
+
         root = root.then(literal("map")
                 .then(literal("off").executes(ctx -> {
                     var match = BreakfrontServer.match();

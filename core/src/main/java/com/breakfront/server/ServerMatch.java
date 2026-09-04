@@ -36,6 +36,7 @@ public final class ServerMatch {
 
     private final TeamManager teams = new TeamManager();
     private final ScoreKeeper score = new ScoreKeeper();
+    private final NpcSquad npc = new NpcSquad();
     private final BreakthroughGame game;
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     private final List<String> zoneOrder = new ArrayList<>();
@@ -151,6 +152,7 @@ public final class ServerMatch {
             placeZoneVisuals(server.getOverworld());
             visualsPlaced = true;
         }
+        npc.tick(this, server); // NPC 增援向目标点推进
         var overworld = server.getOverworld();
         for (int idx = 0; idx < zoneOrder.size(); idx++) {
             ZoneAnchor anchor = anchors.get(zoneOrder.get(idx));
@@ -170,6 +172,22 @@ public final class ServerMatch {
                     } else {
                         defenders++;
                     }
+                }
+            }
+            // NPC 增援计入圈内人数（zombie + 阵营 tag）
+            double r = anchor.radius() + 1;
+            for (net.minecraft.entity.LivingEntity le : overworld.getEntitiesByClass(
+                    net.minecraft.entity.LivingEntity.class,
+                    new net.minecraft.util.math.Box(anchor.x() - r, -64, anchor.z() - r,
+                            anchor.x() + r, 320, anchor.z() + r),
+                    e -> e.hasCommandTag("breakfront.npc"))) {
+                if (!anchor.contains(le.getX(), le.getZ())) {
+                    continue;
+                }
+                if (le.hasCommandTag("bf.side.att")) {
+                    attackers++;
+                } else if (le.hasCommandTag("bf.side.def")) {
+                    defenders++;
                 }
             }
             game.applyZonePresence(idx, attackers, defenders, 0.05);
@@ -328,15 +346,48 @@ public final class ServerMatch {
         return teams;
     }
 
-    /** 开局统一入口：重开状态机、清战绩、复位据点标识。 */
+    /** 开局统一入口：重开状态机、清战绩、补 NPC、复位据点标识。 */
     public void beginRound() {
         game.startRound();
         score.reset();
         visualsPlaced = false;
+        npc.beginRound(this, BreakfrontServer.server());
     }
 
     public ScoreKeeper score() {
         return score;
+    }
+
+    public NpcSquad npc() {
+        return npc;
+    }
+
+    /** 供 NpcSquad 使用的公开坐标（出生 y 含地面）。 */
+    public double[] spawnsFor(Side side, ServerWorld world) {
+        return spawnFor(side, world);
+    }
+
+    public int zoneIndex(String zoneId) {
+        return zoneOrder.indexOf(zoneId);
+    }
+
+    /** 据点中心 {x, z, y}（y=地表+1），序号越界返回 null。 */
+    public double[] zoneCenter(int globalIndex) {
+        if (globalIndex < 0 || globalIndex >= zoneOrder.size()) {
+            return null;
+        }
+        ZoneAnchor a = anchors.get(zoneOrder.get(globalIndex));
+        if (a == null) {
+            return null;
+        }
+        return new double[]{a.x(), a.z(), 0};
+    }
+
+    /** NPC 被玩家击杀：只给击杀者记分，不建 NPC 条目。 */
+    public void recordBotKill(net.minecraft.server.network.ServerPlayerEntity killer, int botSideOrd) {
+        Side ks = teams.sideOf(killer.getUuid());
+        score.creditKill(killer.getUuid(), killer.getGameProfile().getName(),
+                ks == null ? -1 : ks.ordinal());
     }
 
     /** 记录一笔击杀（第 1 层 vanilla 事件调用；爆头标记由第 2 层富化后补录）。 */

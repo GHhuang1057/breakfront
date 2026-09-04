@@ -66,6 +66,20 @@ public final class ScoreKeeper {
         return e;
     }
 
+    /** NPC 等非玩家目标被击杀：只给击杀者记分（不产生受害方条目）。 */
+    public void creditKill(UUID killerId, String killerName, int killerSideOrd) {
+        if (killerId == null) {
+            return;
+        }
+        Entry k = player(killerId, killerName, killerSideOrd);
+        k.kills++;
+        if (killerSideOrd == 0) {
+            attackerKills++;
+        } else if (killerSideOrd == 1) {
+            defenderKills++;
+        }
+    }
+
     /** 击杀榜前 n（按 kills 降序，同杀比死亡）。 */
     public List<Entry> top(int n) {
         List<Entry> list = new ArrayList<>(players.values());

@@ -39,7 +39,17 @@ public final class KillListener {
     /** 由 Fabric 事件 AFTER_DEATH 调用（仅在服务端）。 */
     public static void onEntityDeath(LivingEntity victim, DamageSource source) {
         if (!(victim instanceof ServerPlayerEntity player)) {
-            return; // 只统计真实玩家
+            // NPC 增援被击杀：击杀者记分 + 击杀流（不扣票、不生成 NPC 战绩条目）
+            if (match != null && victim.hasCommandTag("breakfront.npc")
+                    && resolveAttacker(source, victim) instanceof ServerPlayerEntity kp) {
+                int botSide = victim.hasCommandTag("bf.side.att") ? 0 : 1;
+                match.recordBotKill(kp, botSide);
+                String vName = victim.getCustomName() != null
+                        ? victim.getCustomName().getString() : victim.getName().getString();
+                BreakfrontServer.notifyKill(new KillEntry(
+                        kp.getGameProfile().getName(), vName, false, false));
+            }
+            return; // 只统计真实玩家/受控 NPC
         }
         var killer = resolveAttacker(source, victim);
         String killerName = killer instanceof ServerPlayerEntity p ? p.getGameProfile().getName() : (killer == null ? "环境" : killer.getName().getString());
