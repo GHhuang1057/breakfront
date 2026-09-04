@@ -514,7 +514,7 @@ public class BreakfrontMainMenu extends Screen {
         int updPort = BfServerConfig.updatePort();
         ioPool.execute(() -> {
             Updater.Result r = Updater.run(host, updPort);
-            client.execute(this::onUpdateResult);
+            client.execute(() -> onUpdateResult(r));
         });
     }
 
