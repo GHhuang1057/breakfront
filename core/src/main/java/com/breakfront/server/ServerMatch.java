@@ -15,6 +15,9 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.Heightmap;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,6 +77,18 @@ public final class ServerMatch {
 
     /** 服务端主循环适配（20tps × 0.05s）。 */
     public void tick(MinecraftServer server) {
+        if (!arenaBuilt && !arenaSkipped) {
+            // 服务器目录放 breakfront.map.external 标记 => 使用外部世界地图，跳过自建城市
+            try {
+                Path flag = server.getRunDirectory().resolve("breakfront.map.external");
+                if (Files.exists(flag)) {
+                    arenaSkipped = true;
+                    arenaBuilt = true;
+                }
+            } catch (Exception ignored) {
+                // 目录不可读则忽略，走默认
+            }
+        }
         if (!arenaBuilt && !arenaSkipped) {
             arenaBuilt = ArenaViaduct.tryBuild(server.getOverworld());
             if (arenaBuilt) {
