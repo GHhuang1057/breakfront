@@ -180,13 +180,13 @@ public final class ServerMatch {
                     net.minecraft.entity.LivingEntity.class,
                     new net.minecraft.util.math.Box(anchor.x() - r, -64, anchor.z() - r,
                             anchor.x() + r, 320, anchor.z() + r),
-                    e -> e.hasCommandTag("breakfront.npc"))) {
+                    e -> e.getCommandTags().contains("breakfront.npc"))) {
                 if (!anchor.contains(le.getX(), le.getZ())) {
                     continue;
                 }
-                if (le.hasCommandTag("bf.side.att")) {
+                if (le.getCommandTags().contains("bf.side.att")) {
                     attackers++;
-                } else if (le.hasCommandTag("bf.side.def")) {
+                } else if (le.getCommandTags().contains("bf.side.def")) {
                     defenders++;
                 }
             }
