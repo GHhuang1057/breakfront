@@ -1,0 +1,34 @@
+# 个人/工作区
+.workbuddy/
+
+# Gradle / Java
+.gradle/
+build/
+out/
+bin/
+*.class
+
+# Fabric 运行目录与产物
+run/
+run-client/
+run-server/
+logs/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本地发布产物
+pack/*/mods/*.jar
+pack/dist/
