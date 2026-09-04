@@ -137,6 +137,11 @@ public final class NpcSquad {
         e.getAttributeInstance(net.minecraft.entity.attribute.EntityAttributes.GENERIC_MAX_HEALTH)
                 .setBaseValue(40);
         e.setHealth(40);
+        // zombie 白天自燃/地形挤压防护：长效防火+再生（仍可被击杀）
+        e.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
+                net.minecraft.entity.effect.StatusEffects.FIRE_RESISTANCE, 240000, 0, false, false));
+        e.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
+                net.minecraft.entity.effect.StatusEffects.REGENERATION, 240000, 1, false, false));
         e.setPosition(p.x, p.y, p.z);
         world.spawnEntity(e);
 
