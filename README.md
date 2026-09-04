@@ -2,7 +2,36 @@
 
 Minecraft（Fabric **1.21.1**）32v32 大战场整合包 —— 攻防模式（Breakthrough）玩法。
 
-> 状态：P0 脚手架搭建中。自研部分将开源发布；第三方模组资产许可由发布方（仓库负责人）自行核对。
+> 状态：P1/P2 开发中（规则内核 + BF2042 客户端界面 + 人机增援已可实机运行）。自研部分 MIT 开源；第三方模组许可见 [`docs/third-party-licenses.md`](docs/third-party-licenses.md)（含 TaCZ 的 CC BY-NC-ND 限制提示）。
+
+## 开发版发布（GitHub Releases）
+
+每次推 main 自动产出（`dev-<sha>` pre-release）：
+
+| 资产 | 用途 |
+|---|---|
+| `breakfront-dev-client-mods-<sha>.zip` | 客户端 `mods/`（自研双模组 + TaCZ + Fabric API） |
+| `breakfront-dev-server-<sha>.zip` | **服务端一键包**：解压 → 放世界目录为 `world/` → `start.bat`（或 java -jar）→ Done 即开服 |
+| `*.jar` | 自研两模组单 jar |
+| `*-manifest-*.json` | 版本/sha256 全清单（客户端启动自检用） |
+
+客户端每次启动自动向服务器更新源（`breakfront-sync/` 目录，HTTP :25610）校验更新；新版提示重启生效。`breakfront.map.external` 文件存在时跳过自建地图、使用你放入的外部世界。
+
+## 开发指令（服务端 /bf）
+
+```
+/bf team attacker|defender        加入阵营
+/bf start / stop / end            对局控制
+/bf status / board / npc status   实时状态/击杀榜/人机
+/bf autostart on                  双阵营就绪自动开局
+/bf npc add attacker|defender <n> 增援人机
+/bf anchor <i> set <x> <z>        在地图上定点配据点
+/bf spawns set attacker|defender <x> <z>   覆盖出生区
+```
+
+## 设计文档
+
+见 [`docs/bf-modpack-charter.md`](docs/bf-modpack-charter.md)。
 
 ## 仓库结构（规划）
 

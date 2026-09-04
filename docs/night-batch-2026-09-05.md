@@ -64,3 +64,17 @@
 ### 状态
 - 最新 dev：`dev-5e8a45f`（全绿，已热更本地服 + 更新源 sync）
 - 待用户醒后：装新客户端包 → 多人开服 `/bf npc add` 看 bot 交战；验收清单第一波条目并行勾选
+
+## 第三波（01:30-01:47，无多模态修正后纯工程批次）
+已完成（CI 全绿 + 服务端实测）：
+- **W2 TAB 计分板**：按住 TAB 显示双队纵列（名称/K/D/爆头，按击杀排序，队伍行底色交替），顶比分带 + 底部状态条
+- **W3 大厅面板**：phase0「BREAKFRONT 战备大厅」——双方在线人数卡 + 我的阵营判定 + 操作提示；状态帧新增 attackerOnline/defenderOnline
+- **W4 部署页升级**：4 兵种卡（突击/工程/支援/侦察，点击选中上报 C2S `set_class`，服务端 TeamManager 记录 + 日志）＋**死亡→BF 阵亡部署页**（拦截 DeathScreen，大 DEPLOY 按钮→vanilla requestRespawn，重生点已在防线；ESC 不可逃避）
+- **W5 HitMarker**：服务端 AFTER_DAMAGE(白X) + 击杀(红X，KillListener 给击杀者) → S2C `hit_marker` → 客户端准星十字缩放淡出动画
+- **W6 稳定性测试**：GameFlowLoopTest（returnToLobby/连打5局/倒计时内结算）+ TeamManagerTest（补位平衡/离场清理/兵种回退）共 6 新用例全过；**服务端连打 4 轮实测** round over→8s 自动重开稳定，无新异常
+- **W7 发布收口**：server 一键包 **standalone 冒烟通过**（全新目录解压→放 Metro world→Done 0.627s + match ready 3 zones + TaCZ adapter，更新源端口被占用属预期噪音）；`pack/tools/licenses.py` 生成 **docs/third-party-licenses.md** —— **⚠ 发现 TaCZ-Refabricated 许可 GPL3 / CC BY-NC-ND 4.0（禁止商用/演绎），公开分发前必须处理**（换枪源 or 获授权）；README 增开发版/指令/一键包用法
+
+### 状态
+- 最新 dev：`dev-d539433`（全绿，已热更本地服 + 更新源 sync，manifest sha core 68c789ce / client 95e78751）
+- 客户端升级方式：启动即自检 → 发现新包提示重启（或手动解压 dev-d539433 client zip 到 mods）
+- 协议已变（帧+2字段、新增2个 payload）→ **服务端与客户端必须同版本**（本地服已换）
