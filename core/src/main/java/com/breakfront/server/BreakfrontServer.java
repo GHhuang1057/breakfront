@@ -20,6 +20,7 @@ public final class BreakfrontServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("breakfront.server");
 
     private static ServerMatch match;
+    private static ModUpdateServer updateServer;
     private static boolean registered = false;
     private static MinecraftServer currentServer;
 
@@ -36,6 +37,7 @@ public final class BreakfrontServer {
             currentServer = server;
             match = new ServerMatch();
             KillListener.bind(match);
+            updateServer = ModUpdateServer.start(server.getRunDirectory());
             LOGGER.info("[Breakfront] server match ready ({} zones, {} sectors)",
                     match.game().zoneCount(), match.game().sectors().size());
         });
@@ -43,6 +45,10 @@ public final class BreakfrontServer {
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             currentServer = null;
             match = null;
+            if (updateServer != null) {
+                updateServer.stop();
+                updateServer = null;
+            }
         });
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {

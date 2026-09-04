@@ -1,20 +1,28 @@
 package com.breakfront.client;
 
+import com.breakfront.client.bf.BfServerConfig;
 import com.breakfront.client.hud.BreakfrontHud;
 import com.breakfront.client.hud.WorldZoneRings;
 import com.breakfront.client.state.ClientMatchState;
+import com.breakfront.client.ui.BreakfrontMainMenu;
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.minecraft.client.gui.screen.TitleScreen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Breakfront Client —— 客户端界面入口。
- * P1：注册 S2C 接收（对局状态/击杀流）+ 战场 HUD（真数据驱动）。
+ * Breakfront Client —— 客户端入口（BF2042 UI 翻新版）。
+ *
+ * 职责：
+ * - 主菜单替换：原版 TitleScreen 出现即切换为 BREAKFRONT 主菜单（一键直连，无服务器选择）
+ * - S2C 接收：对局状态/击杀流 → ClientMatchState → HUD
+ * - 世界渲染：据点区域描边环
  */
 public class BreakfrontClient implements ClientModInitializer {
 
@@ -23,7 +31,16 @@ public class BreakfrontClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        LOGGER.info("[Breakfront] client initialized (P1 networking)");
+        LOGGER.info("[Breakfront] client initialized (BF2042 UI)");
+
+        BfServerConfig.load();
+
+        // 原版主菜单 -> BREAKFRONT 主菜单（任何回到标题界面都接管，去服务器选择）
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (client.currentScreen instanceof TitleScreen) {
+                client.setScreen(new BreakfrontMainMenu());
+            }
+        });
 
         // S2C 接收：对局状态同步帧
         ClientPlayNetworking.registerGlobalReceiver(MatchStatePayload.ID,
