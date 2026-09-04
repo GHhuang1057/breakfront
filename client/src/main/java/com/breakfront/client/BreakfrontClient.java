@@ -1,12 +1,14 @@
 package com.breakfront.client;
 
 import com.breakfront.client.hud.BreakfrontHud;
+import com.breakfront.client.hud.WorldZoneRings;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,5 +34,8 @@ public class BreakfrontClient implements ClientModInitializer {
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyKill(payload)));
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
+
+        // 据点区域描边（世界空间圆环）——战地式高亮
+        WorldRenderEvents.AFTER_TRANSLUCENT.register(WorldZoneRings::render);
     }
 }

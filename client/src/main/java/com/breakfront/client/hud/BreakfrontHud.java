@@ -42,6 +42,7 @@ public class BreakfrontHud {
 
         renderTopStatus(context, font, sw);
         renderZoneBars(context, font, sw, sh);
+        ZoneMarkers.render(context, font, sw, sh);
         renderKillFeed(context, font, sw);
     }
 
@@ -96,9 +97,10 @@ public class BreakfrontHud {
                     : (int) (width * meter);
             ctx.fill(x, y, x + progress, y + height, fillColor);
 
+            String id = zone.letter().isEmpty() ? zone.zoneId() : zone.letter();
             String stateText = owner == Side.ATTACKER
-                    ? zone.zoneId() + " 已占领"
-                    : String.format("%s 推进 %.0f%%", zone.zoneId(), meter * 100);
+                    ? id + " 已占领"
+                    : String.format("%s 推进 %.0f%%", id, meter * 100);
             int tw = font.getWidth(stateText);
             ctx.drawText(font, Text.literal(stateText), (sw - tw) / 2, y - 11, TEXT, false);
         }

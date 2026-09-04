@@ -36,7 +36,8 @@ public final class ClientMatchState {
         sectorCount = payload.sectorCount();
         zones.clear();
         for (MatchStatePayload.ZoneStateView z : payload.currentSectorZones()) {
-            zones.add(new ZoneView(z.zoneId(), z.ownerOrdinal(), z.meter()));
+            zones.add(new ZoneView(z.zoneId(), z.letter(), z.ownerOrdinal(), z.meter(),
+                    z.worldX(), z.worldZ(), z.groundY(), z.radius()));
         }
     }
 
@@ -80,7 +81,8 @@ public final class ClientMatchState {
         return killFeed;
     }
 
-    public record ZoneView(String zoneId, int ownerOrdinal, float meter) {
+    public record ZoneView(String zoneId, String letter, int ownerOrdinal, float meter,
+                           double worldX, double worldZ, double groundY, float radius) {
     }
 
     public record KillEvent(String killer, String victim,

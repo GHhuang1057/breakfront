@@ -136,7 +136,11 @@ public final class ServerMatch {
         }
     }
 
-    /** 首次进入战斗时放置据点空间标识：中心信标光柱 + 橙色地面圆盘。 */
+    /**
+     * 首次进入战斗时放置据点空间标识：中心信标光柱。
+     * 地面区域不铺实心盘 —— 「描边高亮」由客户端世界渲染负责（见 client WorldZoneRings），
+     * 信标光柱保留作为非 breakfront-client 玩家的兜底提示。
+     */
     private void placeZoneVisuals(ServerWorld world) {
         for (ZoneAnchor anchor : anchors.values()) {
             int cx = (int) anchor.x();
@@ -146,32 +150,29 @@ public final class ServerMatch {
                 continue;
             }
             world.setBlockState(new BlockPos(cx, topY + 1, cz), Blocks.BEACON.getDefaultState(), 3);
-            int r = (int) Math.ceil(anchor.radius());
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    if (dx * dx + dz * dz > anchor.radius() * anchor.radius()) {
-                        continue;
-                    }
-                    int ty = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx + dx, cz + dz);
-                    if (ty <= world.getBottomY()) {
-                        continue;
-                    }
-                    world.setBlockState(new BlockPos(cx + dx, ty + 1, cz + dz),
-                            Blocks.ORANGE_CONCRETE.getDefaultState(), 3);
-                }
-            }
         }
+    }
+
+    /** 据点地表高度（信标底座所在 Y = 最高固体上方一格）。 */
+    private double anchorGroundY(ServerWorld world, ZoneAnchor anchor) {
+        int cx = (int) anchor.x();
+        int cz = (int) anchor.z();
+        int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx, cz);
+        return topY <= world.getBottomY() ? 64.0 : topY + 1.0;
     }
 
     /** 据点锚点坐标摘要（供 /bf status 展示，方便传送验证）。 */
     public String zoneAnchorsText() {
         StringBuilder sb = new StringBuilder();
+        int gi = 0;
         for (String id : zoneOrder) {
             ZoneAnchor a = anchors.get(id);
-            sb.append('\n').append(a.zoneId()).append(" @ (x=")
+            char letter = (gi >= 0 && gi < 26) ? (char) ('A' + gi) : '?';
+            sb.append('\n').append(letter).append(" (").append(a.zoneId()).append(") @ (x=")
                     .append(String.format("%.1f", a.x())).append(", z=")
                     .append(String.format("%.1f", a.z())).append(", r=")
                     .append(String.format("%.0f", a.radius())).append(')');
+            gi++;
         }
         return sb.toString();
     }
@@ -217,10 +218,24 @@ public final class ServerMatch {
 
     /** 打包并广播对局状态给所有在线玩家。 */
     private void broadcastState(MinecraftServer server) {
+        ServerWorld world = server.getOverworld();
         var zones = new ArrayList<MatchStatePayload.ZoneStateView>();
         for (ZoneState zone : game.currentSector().zones()) {
+            ZoneAnchor anchor = anchors.get(zone.id());
+            if (anchor == null) {
+                continue;
+            }
+            int gi = zoneOrder.indexOf(zone.id());
+            char letter = (gi >= 0 && gi < 26) ? (char) ('A' + gi) : '?';
             zones.add(new MatchStatePayload.ZoneStateView(
-                    zone.id(), zone.owner().ordinal(), (float) zone.meter()));
+                    zone.id(),
+                    String.valueOf(letter),
+                    zone.owner().ordinal(),
+                    (float) zone.meter(),
+                    anchor.x(),
+                    anchor.z(),
+                    anchorGroundY(world, anchor),
+                    (float) anchor.radius()));
         }
         var payload = new MatchStatePayload(
                 game.phase().ordinal(),
