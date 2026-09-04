@@ -174,7 +174,7 @@ public class BreakfrontMainMenu extends Screen {
             double h = BfEasing.easeOutCubic(navHover[i]);
             boolean selected = i == 0;
 
-            int col = selected ? BfTheme.YELLOW : argb(hov > 0.5 ? BfTheme.TEXT : BfTheme.TEXT_DIM, a);
+            int col = selected ? BfTheme.YELLOW : argb(hov ? BfTheme.TEXT : BfTheme.TEXT_DIM, a);
             int tx = navX[i] + (int) (h * 2);
             ctx.drawText(this.textRenderer, Text.literal(NAV_LABELS[i]), tx, textY, col, false);
 
