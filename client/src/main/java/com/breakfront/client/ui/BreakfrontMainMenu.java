@@ -346,26 +346,33 @@ public class BreakfrontMainMenu extends Screen {
 
     private void drawSideCards(DrawContext ctx, int mouseX, int mouseY) {
         String[][] cards = {
-                {"BATTLEFIELD PORTAL", "门户 · 自定义规则战场", "即将推出"},
-                {"HAZARD ZONE", "危险区 · 小队搜打撤", "即将推出"}
+                {"SOLO TRAINING", "单机训练 · 本地 AI 对战", "点击进入"},
+                {"BATTLEFIELD PORTAL", "门户 · 自定义规则战场", "即将推出"}
         };
+        boolean[] locked = {false, true};
         for (int i = 0; i < cards.length; i++) {
             double in = BfEasing.staged(age, 0.22 + i * 0.08, 0.45);
             int slide = (int) ((1 - in) * 14);
             int a = (int) (255 * in);
             int x = sideX;
             int y = cardY + i * (sideCardH + 12) + slide;
-            BfDraw.fill(ctx, x, y, sideW, sideCardH, argb(0xE6161C25, a));
-            BfDraw.border(ctx, x, y, sideW, sideCardH, argb(BfTheme.PANEL_LINE, a));
+            boolean hov = flow == Flow.IDLE
+                    && mouseX >= x && mouseX <= x + sideW && mouseY >= y && mouseY <= y + sideCardH;
+            BfDraw.fill(ctx, x, y, sideW, sideCardH,
+                    argb(hov && !locked[i] ? 0xE6212A36 : 0xE6161C25, a));
+            BfDraw.border(ctx, x, y, sideW, sideCardH,
+                    argb(hov && !locked[i] ? BfTheme.YELLOW_DIM : BfTheme.PANEL_LINE, a));
             ctx.drawText(this.textRenderer, Text.literal(cards[i][0]), x + 12, y + 12,
-                    argb(BfTheme.YELLOW_DIM, a), false);
+                    argb(locked[i] ? BfTheme.YELLOW_DIM : BfTheme.YELLOW, a), false);
             ctx.drawText(this.textRenderer, Text.literal(cards[i][1]), x + 12, y + 25,
                     argb(BfTheme.TEXT_DIM, a), false);
-            // 锁形角标（几何）
-            BfDraw.fill(ctx, x + sideW - 16, y + sideCardH - 18, 8, 7, argb(BfTheme.MUTED, a));
-            BfDraw.border(ctx, x + sideW - 18, y + sideCardH - 22, 12, 6, argb(BfTheme.MUTED, a));
+            if (locked[i]) {
+                // 锁形角标（几何）
+                BfDraw.fill(ctx, x + sideW - 16, y + sideCardH - 18, 8, 7, argb(BfTheme.MUTED, a));
+                BfDraw.border(ctx, x + sideW - 18, y + sideCardH - 22, 12, 6, argb(BfTheme.MUTED, a));
+            }
             ctx.drawText(this.textRenderer, Text.literal(cards[i][2]), x + 12, y + sideCardH - 15,
-                    argb(BfTheme.FAINT, a), false);
+                    argb(locked[i] ? BfTheme.FAINT : BfTheme.TEXT_DIM, a), false);
         }
     }
 
@@ -481,6 +488,11 @@ public class BreakfrontMainMenu extends Screen {
         boolean inCard = inRect(mx, my, cardX, cardY, cardW, cardH);
         if (inCard) {
             onDeploy();
+            return true;
+        }
+        // 右侧小卡：SOLO TRAINING → 选世界（进单人世界即训练对局）
+        if (mx >= sideX && mx <= sideX + sideW && my >= cardY && my <= cardY + sideCardH) {
+            client.setScreen(new SelectWorldScreen(this));
             return true;
         }
         return false;

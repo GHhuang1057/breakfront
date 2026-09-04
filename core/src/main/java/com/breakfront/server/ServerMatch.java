@@ -57,6 +57,11 @@ public final class ServerMatch {
     private final double[] attackerSpawn = {Double.NaN, Double.NaN}; // override {x,z}
     private final double[] defenderSpawn = {Double.NaN, Double.NaN};
 
+    // ---- 单机训练模式（W4B：单人世界 = 自动 AI 对战）----
+    private boolean training;          // 当前为单机训练（isSingleplayer）
+    private boolean trainingArmed;     // AI 已刷齐、等待开赛
+    private double trainingTimer = -1;
+
     public ServerMatch() {
         List<Sector> sectors = defaultSectors();
         this.game = new BreakthroughGame(sectors);
@@ -92,6 +97,11 @@ public final class ServerMatch {
 
     /** 服务端主循环适配（20tps × 0.05s）。 */
     public void tick(MinecraftServer server) {
+        // 单机（单人世界）= 训练模式：不建自建城，直接用玩家自己的世界
+        if (server.isSingleplayer() && !arenaSkipped) {
+            arenaSkipped = true;
+            arenaBuilt = true;
+        }
         if (!arenaBuilt && !arenaSkipped) {
             // 服务器目录放 breakfront.map.external 标记 => 使用外部世界地图，跳过自建城市
             try {
@@ -140,6 +150,7 @@ public final class ServerMatch {
             endPause = -1;
         }
         // S1 赛程：大厅自动开局 + 进入 BATTLE 的上升沿做全员部署传送
+        tickTraining(server);
         tickAutoStart(server);
         if (game.phase() == MatchPhase.BATTLE && lastPhase != MatchPhase.BATTLE) {
             teleportAllToSpawns(server);
@@ -410,7 +421,53 @@ public final class ServerMatch {
 
     // ================= S1 出生 / 赛程 =================
 
-    /** 大厅自动开局判定（/bf autostart on）。 */
+    /** 单机训练模式：单人世界自动刷双方 AI 并开赛。 */
+    private void tickTraining(MinecraftServer server) {
+        if (!server.isSingleplayer()) {
+            if (training) {
+                training = false;
+                trainingArmed = false;
+                trainingTimer = -1;
+            }
+            return;
+        }
+        if (game.phase() == MatchPhase.ROUND_END) {
+            return; // 结算展示中（自动重开由回合循环负责）
+        }
+        int players = server.getPlayerManager().getPlayerList().size();
+        if (game.phase() == MatchPhase.LOBBY && players == 0) {
+            training = false;
+            trainingArmed = false;
+            trainingTimer = -1;
+            return;
+        }
+        if (!training) {
+            training = true;
+            BreakfrontServer.LOGGER.info("[Breakfront] 单机训练模式激活");
+        }
+        if (game.phase() == MatchPhase.BATTLE || game.phase() == MatchPhase.COUNTDOWN) {
+            return; // 已开赛，交给回合/死亡逻辑
+        }
+        if (!trainingArmed) {
+            // 玩家默认进攻方；补足双方 AI 小队（6 攻含真人 + 8 守）
+            npc.setTarget(Side.ATTACKER, 6);
+            npc.setTarget(Side.DEFENDER, 8);
+            npc.topUp(this, server);
+            trainingArmed = true;
+            trainingTimer = 5;
+            BreakfrontServer.LOGGER.info("[Breakfront] training squads ready (6v8 AI), round in 5s");
+        } else {
+            trainingTimer -= 0.05;
+            if (trainingTimer <= 0) {
+                trainingTimer = -1;
+                beginRound();
+                visualsPlaced = false;
+                teleportAllToSpawns(server);
+                BreakfrontServer.LOGGER.info("[Breakfront] training round begun");
+            }
+        }
+    }
+
     private void tickAutoStart(MinecraftServer server) {
         if (game.phase() != MatchPhase.LOBBY || !autostart) {
             lobbyTimer = -1;
