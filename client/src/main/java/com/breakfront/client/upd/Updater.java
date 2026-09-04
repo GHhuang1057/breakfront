@@ -85,9 +85,11 @@ public final class Updater {
             if (remote.isEmpty()) {
                 return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源暂未配置模组文件");
             }
-            Path modsDir = FabricLoader.getInstance().getGameDir().resolve("mods");
-            boolean anyUpdate = false;
-            int updated = 0;
+            Path gameDir = FabricLoader.getInstance().getGameDir();
+            Path modsDir = gameDir.resolve("mods");
+            Path stageDir = gameDir.resolve("bfupdate");
+            int applied = 0;
+            int staged = 0;
             List<String> notes = new ArrayList<>();
             for (RemoteFile rf : remote) {
                 String modId = "client".equals(rf.role) ? "breakfront-client" : "breakfront";
@@ -98,30 +100,45 @@ public final class Updater {
                 if (!need) {
                     continue;
                 }
-                if (download(base, rf, modsDir)) {
-                    updated++;
-                    anyUpdate = true;
-                } else {
-                    notes.add(rf.name + " 写入失败，请手动替换到 mods/");
+                DownloadOutcome d = download(base, rf, modsDir, stageDir);
+                switch (d) {
+                    case APPLIED -> {
+                        applied++;
+                        notes.add(rf.name + " 已自动替换（重启生效）");
+                    }
+                    case STAGED -> {
+                        staged++;
+                        notes.add(rf.name + " 已下载，关闭游戏后双击 bfupdate\\apply-update.bat 应用");
+                    }
+                    case FAIL -> notes.add(rf.name + " 下载失败，请手动更新");
                 }
             }
-            if (anyUpdate) {
-                StringBuilder msg = new StringBuilder("检测到新版本模组，已自动更新 ").append(updated).append(" 个文件。");
-                if (!notes.isEmpty()) {
-                    msg.append(String.join("；", notes));
-                }
-                msg.append("请完全退出并重启游戏后重新进入。");
-                return new Result(Outcome.UPDATED_REQUIRES_RESTART, msg.toString());
+            if (applied == 0 && staged == 0 && notes.isEmpty()) {
+                return new Result(Outcome.OK, "已是最新");
             }
-            return new Result(Outcome.OK, "已是最新");
+            if (applied == 0 && staged == 0) {
+                return new Result(Outcome.ERROR, "更新失败：" + String.join("；", notes));
+            }
+            StringBuilder msg = new StringBuilder("发现新版本模组（").append(applied).append(" 已应用 / ")
+                    .append(staged).append(" 待应用）。");
+            if (!notes.isEmpty()) {
+                msg.append(String.join("；", notes)).append("。");
+            }
+            msg.append("请完全退出并重启游戏后重新进入。");
+            return new Result(Outcome.UPDATED_REQUIRES_RESTART, msg.toString());
         } catch (Exception e) {
             LOGGER.info("[Breakfront] update source unreachable: {}", e.toString());
             return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源不可达（跳过更新）");
         }
     }
 
-    private static boolean download(String base, RemoteFile rf, Path modsDir) {
-        Path target = modsDir.resolve(rf.name);
+    private enum DownloadOutcome { APPLIED, STAGED, FAIL }
+
+    /**
+     * 下载到 bfupdate/ 暂存（同时生成一键应用脚本），随后尝试直接替换 mods/ 同名文件；
+     * 运行中的 jar 在 Windows 上通常被占用 → 失败则保留暂存并交由脚本/手动应用。
+     */
+    private static DownloadOutcome download(String base, RemoteFile rf, Path modsDir, Path stageDir) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(base + "/breakfront/files/" + rf.name))
                     .timeout(Duration.ofSeconds(30))
@@ -129,27 +146,47 @@ public final class Updater {
                     .build();
             HttpResponse<byte[]> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() != 200) {
-                return false;
+                return DownloadOutcome.FAIL;
             }
             byte[] body = resp.body();
             if (!rf.sha256.equals(sha256(body))) {
                 LOGGER.warn("[Breakfront] {} checksum mismatch after download", rf.name);
-                return false;
+                return DownloadOutcome.FAIL;
             }
-            Files.createDirectories(modsDir);
-            Path tmp = modsDir.resolve(rf.name + ".partial");
-            Files.write(tmp, body);
+            Files.createDirectories(stageDir);
+            Path staged = stageDir.resolve(rf.name);
+            Files.write(staged, body);
+            writeApplyScript(stageDir);
             try {
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                Path target = modsDir.resolve(rf.name);
+                Files.createDirectories(modsDir);
+                Files.move(staged, target, StandardCopyOption.REPLACE_EXISTING);
+                LOGGER.info("[Breakfront] updated {} -> {}", rf.name, rf.sha256.substring(0, 12));
+                return DownloadOutcome.APPLIED;
             } catch (IOException e) {
-                // Windows 上加载中的 jar 可能被占用：尽力替换，失败则保留 .partial 待下次
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                LOGGER.info("[Breakfront] {} is locked, staged for apply-update script", rf.name);
+                return DownloadOutcome.STAGED;
             }
-            LOGGER.info("[Breakfront] updated {} -> {}", rf.name, rf.sha256.substring(0, 12));
-            return true;
         } catch (Exception e) {
             LOGGER.warn("[Breakfront] download {} failed: {}", rf.name, e.toString());
-            return false;
+            return DownloadOutcome.FAIL;
+        }
+    }
+
+    /** 生成「关闭游戏后一键应用更新」脚本（英文输出避免编码问题）。 */
+    private static void writeApplyScript(Path stageDir) {
+        try {
+            Path bat = stageDir.resolve("apply-update.bat");
+            String content = "@echo off\r\n"
+                    + "echo BREAKFRONT: applying mod update...\r\n"
+                    + "copy /Y \"%~dp0*.jar\" \"%~dp0..\\mods\\\"\r\n"
+                    + "echo Done. You can start the game now.\r\n"
+                    + "pause\r\n";
+            if (!Files.isRegularFile(bat)) {
+                Files.writeString(bat, content);
+            }
+        } catch (IOException e) {
+            LOGGER.warn("[Breakfront] write apply-update.bat failed: {}", e.toString());
         }
     }
 

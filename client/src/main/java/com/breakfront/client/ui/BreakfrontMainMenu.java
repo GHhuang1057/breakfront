@@ -64,7 +64,11 @@ public class BreakfrontMainMenu extends Screen {
     private final float[] navHover = new float[NAV_LABELS.length];
     private float cardHover;
     private float deployHover;
-    private volatile boolean sourceOnline;
+
+    /** 每次启动只检查一次更新（跨菜单实例共享）。 */
+    private static volatile boolean sessionCheckStarted = false;
+    private static volatile Updater.Result sessionResult;
+
     private final ExecutorService ioPool = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "breakfront-ui-io");
         t.setDaemon(true);
@@ -103,11 +107,31 @@ public class BreakfrontMainMenu extends Screen {
         sideX = cardX + cardW + 16;
         sideCardH = (cardH - 12) / 2;
 
-        flow = Flow.IDLE;
+        // 启动即检查更新（本会话一次）；结果驱动徽章与重启卡片
+        if (sessionResult != null && !sessionResult.proceedToConnect()) {
+            flow = Flow.NEED_RESTART;
+            wrap(noticeLines, sessionResult.message(), (int) Math.min(width * 0.66, 470) - 60);
+        } else {
+            flow = Flow.IDLE;
+        }
         age = 0;
-        sourceOnline = false;
-        // 后台探测更新源（右上徽章）
-        ioPool.execute(() -> sourceOnline = Updater.probe(BfServerConfig.host(), BfServerConfig.updatePort()));
+        if (!sessionCheckStarted) {
+            sessionCheckStarted = true;
+            ioPool.execute(() -> {
+                Updater.Result r = Updater.run(BfServerConfig.host(), BfServerConfig.updatePort());
+                client.execute(() -> applyStartupResult(r));
+            });
+        }
+    }
+
+    private void applyStartupResult(Updater.Result r) {
+        sessionResult = r;
+        if (flow == Flow.IDLE) {
+            if (!r.proceedToConnect()) {
+                flow = Flow.NEED_RESTART;
+                wrap(noticeLines, r.message(), (int) Math.min(width * 0.66, 470) - 60);
+            }
+        }
     }
 
     // ================= 渲染 =================
@@ -190,15 +214,49 @@ public class BreakfrontMainMenu extends Screen {
         // 右侧：状态徽章 + 版本
         String ver = FabricLoader.getInstance().getModContainer("breakfront-client")
                 .map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?");
-        String statusText = sourceOnline ? "更新源在线" : "更新源离线";
+        String statusText = statusBadgeText();
         int stW = this.textRenderer.getWidth(statusText);
         int rx = sw - stW - 54;
-        int dotCol = sourceOnline ? BfTheme.GREEN : 0xFF6B7280;
-        BfDraw.fill(ctx, rx, topBarH / 2 - 2 + slide, 5, 5, dotCol);
+        BfDraw.fill(ctx, rx, topBarH / 2 - 2 + slide, 5, 5, statusBadgeColor());
         ctx.drawText(this.textRenderer, Text.literal(statusText), rx + 10, textY, argb(BfTheme.MUTED, a), false);
         String vTag = "v" + ver;
         int vw = this.textRenderer.getWidth(vTag);
         ctx.drawText(this.textRenderer, Text.literal(vTag), sw - vw - 14, textY, argb(BfTheme.FAINT, a), false);
+    }
+
+    private String statusBadgeText() {
+        if (sessionResult != null && !sessionResult.proceedToConnect()) {
+            return "待重启应用";
+        }
+        if (!sessionCheckStarted) {
+            return "更新源在线";
+        }
+        if (sessionResult == null) {
+            return "检查更新中";
+        }
+        return switch (sessionResult.outcome()) {
+            case OK -> "已是最新";
+            case UPDATED_REQUIRES_RESTART -> "待重启应用";
+            case SKIPPED_NO_SOURCE -> "更新源离线";
+            case ERROR -> "更新失败";
+        };
+    }
+
+    private int statusBadgeColor() {
+        if (sessionResult != null && !sessionResult.proceedToConnect()) {
+            return BfTheme.YELLOW;
+        }
+        if (!sessionCheckStarted) {
+            return BfTheme.GREEN;
+        }
+        if (sessionResult == null) {
+            return BfTheme.AMBER;
+        }
+        return switch (sessionResult.outcome()) {
+            case OK -> BfTheme.GREEN;
+            case UPDATED_REQUIRES_RESTART -> BfTheme.YELLOW;
+            default -> 0xFF6B7280;
+        };
     }
 
     private void drawMainCard(DrawContext ctx, int mouseX, int mouseY, float delta, long now) {
@@ -438,17 +496,30 @@ public class BreakfrontMainMenu extends Screen {
     }
 
     private void onDeploy() {
+        // 启动检查已完成且无阻塞 → 直接连（部署不重复检查）
+        if (sessionResult != null) {
+            if (sessionResult.proceedToConnect()) {
+                startConnect();
+            } else {
+                // 有待应用的更新：重新弹出提示卡片
+                flow = Flow.NEED_RESTART;
+                wrap(noticeLines, sessionResult.message(), (int) Math.min(width * 0.66, 470) - 60);
+            }
+            return;
+        }
+        // 启动检查未完成（极少见）：现场兜底检查
         flow = Flow.CHECKING;
         flowMsg = "正在校验模组版本";
         String host = BfServerConfig.host();
         int updPort = BfServerConfig.updatePort();
         ioPool.execute(() -> {
             Updater.Result r = Updater.run(host, updPort);
-            client.execute(() -> onUpdateResult(r));
+            client.execute(this::onUpdateResult);
         });
     }
 
     private void onUpdateResult(Updater.Result r) {
+        sessionResult = r;
         if (r.proceedToConnect()) {
             startConnect();
             return;
