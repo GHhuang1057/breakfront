@@ -9,13 +9,10 @@ import com.breakfront.net.MatchStatePayload;
 import com.breakfront.server.arena.ArenaViaduct;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.mob.MonsterEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.world.GameRules;
 import net.minecraft.world.Heightmap;
 
 import java.util.ArrayList;
