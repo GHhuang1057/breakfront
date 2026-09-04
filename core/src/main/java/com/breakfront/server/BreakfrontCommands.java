@@ -119,6 +119,7 @@ public final class BreakfrontCommands {
         }
         sb.append("\n攻方人数=").append(match.teams().count(Side.ATTACKER))
                 .append(" 守方人数=").append(match.teams().count(Side.DEFENDER));
+        sb.append("\n据点锚点（可 /tp 前往）：").append(match.zoneAnchorsText());
         return sb.toString();
     }
 

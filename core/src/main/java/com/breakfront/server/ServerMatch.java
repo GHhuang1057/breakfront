@@ -7,8 +7,12 @@ import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
 import com.breakfront.net.MatchStatePayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.block.Blocks;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.Heightmap;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,6 +33,7 @@ public final class ServerMatch {
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     private final List<String> zoneOrder = new ArrayList<>();
     private int syncCounter = 0; // 状态广播节流：每 10 tick 一次
+    private boolean visualsPlaced = false; // 据点空间标识（信标+地环）只放一次
 
     public ServerMatch() {
         List<Sector> sectors = defaultSectors();
@@ -73,6 +78,10 @@ public final class ServerMatch {
         if (game.phase() != MatchPhase.BATTLE) {
             return;
         }
+        if (!visualsPlaced) {
+            placeZoneVisuals(server.getOverworld());
+            visualsPlaced = true;
+        }
         var overworld = server.getOverworld();
         for (int idx = 0; idx < zoneOrder.size(); idx++) {
             ZoneAnchor anchor = anchors.get(zoneOrder.get(idx));
@@ -96,6 +105,46 @@ public final class ServerMatch {
             }
             game.applyZonePresence(idx, attackers, defenders, 0.05);
         }
+    }
+
+    /** 首次进入战斗时放置据点空间标识：中心信标光柱 + 橙色地面圆盘。 */
+    private void placeZoneVisuals(ServerWorld world) {
+        for (ZoneAnchor anchor : anchors.values()) {
+            int cx = (int) anchor.x();
+            int cz = (int) anchor.z();
+            int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx, cz);
+            if (topY <= world.getBottomY()) {
+                continue;
+            }
+            world.setBlockState(new BlockPos(cx, topY + 1, cz), Blocks.BEACON.getDefaultState(), 3);
+            int r = (int) Math.ceil(anchor.radius());
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (dx * dx + dz * dz > anchor.radius() * anchor.radius()) {
+                        continue;
+                    }
+                    int ty = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx + dx, cz + dz);
+                    if (ty <= world.getBottomY()) {
+                        continue;
+                    }
+                    world.setBlockState(new BlockPos(cx + dx, ty + 1, cz + dz),
+                            Blocks.ORANGE_CONCRETE.getDefaultState(), 3);
+                }
+            }
+        }
+    }
+
+    /** 据点锚点坐标摘要（供 /bf status 展示，方便传送验证）。 */
+    public String zoneAnchorsText() {
+        StringBuilder sb = new StringBuilder();
+        for (String id : zoneOrder) {
+            ZoneAnchor a = anchors.get(id);
+            sb.append('\n').append(a.zoneId()).append(" @ (x=")
+                    .append(String.format("%.1f", a.x())).append(", z=")
+                    .append(String.format("%.1f", a.z())).append(", r=")
+                    .append(String.format("%.0f", a.radius())).append(')');
+        }
+        return sb.toString();
     }
 
     /** 打包并广播对局状态给所有在线玩家。 */
