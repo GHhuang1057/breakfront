@@ -6,6 +6,7 @@ import com.breakfront.game.Sector;
 import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
 import com.breakfront.net.MatchStatePayload;
+import com.breakfront.net.ScoreboardPayload;
 import com.breakfront.server.arena.ArenaViaduct;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.Blocks;
@@ -34,6 +35,7 @@ import java.util.UUID;
 public final class ServerMatch {
 
     private final TeamManager teams = new TeamManager();
+    private final ScoreKeeper score = new ScoreKeeper();
     private final BreakthroughGame game;
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     private final List<String> zoneOrder = new ArrayList<>();
@@ -115,6 +117,9 @@ public final class ServerMatch {
         boolean syncTick = syncCounter % 10 == 0; // 每 0.5s 广播一次状态
         if (syncTick && !server.getPlayerManager().getPlayerList().isEmpty()) {
             broadcastState(server);
+            if (syncCounter % 20 == 0) { // 每 1s 广播比分/击杀榜
+                broadcastScore(server);
+            }
         }
         // 回合自动循环：结算展示 8 秒后自动重开下一局（队伍/锚点不变）
         if (game.phase() == MatchPhase.ROUND_END) {
@@ -126,7 +131,7 @@ public final class ServerMatch {
             endPause -= 0.05;
             if (endPause <= 0) {
                 endPause = -1;
-                game.startRound();
+                beginRound();
                 visualsPlaced = false;
                 BreakfrontServer.LOGGER.info("[Breakfront] auto started next round");
             }
@@ -285,12 +290,69 @@ public final class ServerMatch {
         }
     }
 
+    /** 广播比分/击杀榜（每 1s）。 */
+    private void broadcastScore(MinecraftServer server) {
+        var rows = new ArrayList<ScoreboardPayload.Row>();
+        for (ScoreKeeper.Entry e : score.top(12)) {
+            rows.add(new ScoreboardPayload.Row(e.name, e.sideOrdinal, e.kills, e.deaths, e.headshots));
+        }
+        var payload = new ScoreboardPayload(score.attackerKills(), score.defenderKills(), rows);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            ServerPlayNetworking.send(player, payload);
+        }
+    }
+
+    public String scoreText() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("攻方击杀 ").append(score.attackerKills())
+                .append("  vs  守方击杀 ").append(score.defenderKills());
+        if (score.isEmpty()) {
+            return sb.toString() + "\n暂无战绩";
+        }
+        for (ScoreKeeper.Entry e : score.top(10)) {
+            sb.append('\n').append(e.name).append(" [")
+                    .append(e.sideOrdinal == 0 ? "攻" : "守").append("] ")
+                    .append(e.kills).append("杀 ").append(e.deaths).append("死");
+            if (e.headshots > 0) {
+                sb.append(" (").append(e.headshots).append("爆头)");
+            }
+        }
+        return sb.toString();
+    }
+
     public BreakthroughGame game() {
         return game;
     }
 
     public TeamManager teams() {
         return teams;
+    }
+
+    /** 开局统一入口：重开状态机、清战绩、复位据点标识。 */
+    public void beginRound() {
+        game.startRound();
+        score.reset();
+        visualsPlaced = false;
+    }
+
+    public ScoreKeeper score() {
+        return score;
+    }
+
+    /** 记录一笔击杀（第 1 层 vanilla 事件调用；爆头标记由第 2 层富化后补录）。 */
+    public void recordKill(net.minecraft.server.network.ServerPlayerEntity victim,
+                           net.minecraft.entity.LivingEntity killer) {
+        Side vs = teams.sideOf(victim.getUuid());
+        int vSide = vs == null ? 1 : vs.ordinal();
+        if (killer instanceof net.minecraft.server.network.ServerPlayerEntity kp) {
+            Side ks = teams.sideOf(kp.getUuid());
+            int kSide = ks == null ? -1 : ks.ordinal();
+            score.record(victim.getUuid(), victim.getGameProfile().getName(), vSide,
+                    kp.getUuid(), kp.getGameProfile().getName(), kSide, false);
+        } else {
+            score.record(victim.getUuid(), victim.getGameProfile().getName(), vSide,
+                    null, null, -1, false);
+        }
     }
 
     // ================= S1 出生 / 赛程 =================
@@ -311,7 +373,7 @@ public final class ServerMatch {
             lobbyTimer -= 0.05;
             if (lobbyTimer <= 0) {
                 lobbyTimer = -1;
-                game.startRound();
+                beginRound();
                 visualsPlaced = false;
                 teleportAllToSpawns(server);
                 BreakfrontServer.LOGGER.info("[Breakfront] autostart round begun");

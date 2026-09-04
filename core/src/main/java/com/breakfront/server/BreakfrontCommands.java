@@ -38,7 +38,7 @@ public final class BreakfrontCommands {
                         ctx.getSource().sendError(Text.literal("对局尚未初始化"));
                         return 0;
                     }
-                    match.game().startRound();
+                    match.beginRound();
                     send(ctx.getSource(), "对局开始：部署倒计时 "
                             + String.format("%.0f 秒", match.game().countdownRemaining()));
                     return 1;
@@ -156,6 +156,16 @@ public final class BreakfrontCommands {
                 }
                 send(ctx.getSource(), sb.toString());
             }
+            return 1;
+        }));
+
+        root = root.then(literal("board").executes(ctx -> {
+            var match = BreakfrontServer.match();
+            if (match == null) {
+                ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                return 0;
+            }
+            send(ctx.getSource(), match.scoreText());
             return 1;
         }));
 

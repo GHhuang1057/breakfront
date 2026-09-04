@@ -8,6 +8,7 @@ import com.breakfront.client.ui.BfDeployScreen;
 import com.breakfront.client.ui.BreakfrontMainMenu;
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
+import com.breakfront.net.ScoreboardPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -65,6 +66,10 @@ public class BreakfrontClient implements ClientModInitializer {
         // S2C 接收：击杀流
         ClientPlayNetworking.registerGlobalReceiver(KillFeedPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyKill(payload)));
+
+        // S2C 接收：比分/击杀榜
+        ClientPlayNetworking.registerGlobalReceiver(ScoreboardPayload.ID,
+                (payload, context) -> context.client().execute(() -> ClientMatchState.applyScoreboard(payload)));
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
 

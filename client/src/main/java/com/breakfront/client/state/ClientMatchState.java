@@ -2,6 +2,7 @@ package com.breakfront.client.state;
 
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
+import com.breakfront.net.ScoreboardPayload;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +27,11 @@ public final class ClientMatchState {
 
     /** 阶段切换计数（每次状态帧阶段变化 +1，供「每局弹一次部署页」判定）。 */
     private static int phaseChangeCount;
+
+    // 比分/击杀榜（ScoreboardPayload 1s 一次）
+    private static volatile int attackerTeamKills;
+    private static volatile int defenderTeamKills;
+    private static final List<BoardRow> board = new ArrayList<>();
 
     private ClientMatchState() {
     }
@@ -52,6 +58,15 @@ public final class ClientMatchState {
                 payload.attackerDied(), payload.headshot(), System.currentTimeMillis()));
         while (killFeed.size() > 6) {
             killFeed.remove(killFeed.size() - 1);
+        }
+    }
+
+    public static void applyScoreboard(ScoreboardPayload payload) {
+        attackerTeamKills = payload.attackerKills();
+        defenderTeamKills = payload.defenderKills();
+        board.clear();
+        for (ScoreboardPayload.Row r : payload.rows()) {
+            board.add(new BoardRow(r.name(), r.sideOrdinal(), r.kills(), r.deaths(), r.headshots()));
         }
     }
 
@@ -93,6 +108,21 @@ public final class ClientMatchState {
 
     public record ZoneView(String zoneId, String letter, int ownerOrdinal, float meter,
                            double worldX, double worldZ, double groundY, float radius) {
+    }
+
+    public record BoardRow(String name, int sideOrdinal, int kills, int deaths, int headshots) {
+    }
+
+    public static int attackerTeamKills() {
+        return attackerTeamKills;
+    }
+
+    public static int defenderTeamKills() {
+        return defenderTeamKills;
+    }
+
+    public static List<BoardRow> board() {
+        return board;
     }
 
     public record KillEvent(String killer, String victim,

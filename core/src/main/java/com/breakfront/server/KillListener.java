@@ -54,6 +54,9 @@ public final class KillListener {
         if (match != null && player.getServer() != null) {
             match.onPlayerDied(player.getServer(), player);
         }
+        if (match != null) {
+            match.recordKill(player, killer instanceof LivingEntity le ? le : null);
+        }
         push(new KillEntry(killerName, victimName, attackerDied, false));
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("kill: {} -> {} (attackerDied={}, tickets={})",
