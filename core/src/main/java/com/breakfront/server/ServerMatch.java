@@ -36,6 +36,7 @@ public final class ServerMatch {
     private int syncCounter = 0; // 状态广播节流：每 10 tick 一次
     private boolean visualsPlaced = false; // 据点空间标识（信标+地环）只放一次
     private boolean arenaBuilt = false;    // 竞技场城市只建一次
+    private boolean arenaSkipped = false;  // 使用外部世界时跳过自建城市
     private boolean envFixed = false;      // 环境锁定只做一次（白昼/禁刷怪/禁天气）
 
     public ServerMatch() {
@@ -73,7 +74,7 @@ public final class ServerMatch {
 
     /** 服务端主循环适配（20tps × 0.05s）。 */
     public void tick(MinecraftServer server) {
-        if (!arenaBuilt) {
+        if (!arenaBuilt && !arenaSkipped) {
             arenaBuilt = ArenaViaduct.tryBuild(server.getOverworld());
             if (arenaBuilt) {
                 BreakfrontServer.LOGGER.info("[Breakfront] viaduct arena built ({} zones)", zoneCountLog());
@@ -175,6 +176,27 @@ public final class ServerMatch {
         for (String cmd : cmds) {
             server.getCommandManager().executeWithPrefix(source, cmd);
         }
+        return true;
+    }
+
+    /** 跳过自建城市（配合外部世界导入的地图）。 */
+    public void setArenaSkipped(boolean skipped) {
+        this.arenaSkipped = skipped;
+        if (skipped) {
+            this.arenaBuilt = true;
+        }
+        this.visualsPlaced = false;
+    }
+
+    /** 把某个据点锚点移动到指定坐标（就地重新铺标识）。 */
+    public boolean moveAnchor(int zoneIndex, double x, double z) {
+        if (zoneIndex < 0 || zoneIndex >= zoneOrder.size()) {
+            return false;
+        }
+        String id = zoneOrder.get(zoneIndex);
+        ZoneAnchor old = anchors.get(id);
+        anchors.put(id, new ZoneAnchor(id, x, z, old.radius()));
+        visualsPlaced = false;
         return true;
     }
 

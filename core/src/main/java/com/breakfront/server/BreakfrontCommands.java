@@ -5,6 +5,8 @@ import com.breakfront.game.Sector;
 import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
@@ -83,7 +85,46 @@ public final class BreakfrontCommands {
                         send(ctx.getSource(), sb.toString());
                     }
                     return 1;
-                })));
+                }))
+                .then(literal("map").then(literal("off")
+                        .executes(ctx -> {
+                            var match = BreakfrontServer.match();
+                            if (match != null) {
+                                match.setArenaSkipped(true);
+                            }
+                            send(ctx.getSource(), "已跳过自建城市（使用外部地图世界）");
+                            return 1;
+                        }))
+                        .then(literal("on").executes(ctx -> {
+                            var match = BreakfrontServer.match();
+                            if (match != null) {
+                                match.setArenaSkipped(false);
+                            }
+                            send(ctx.getSource(), "已启用自建城市（下次重启用 viaduct 重建）");
+                            return 1;
+                        })))
+                .then(literal("anchor")
+                        .then(argument("index", IntegerArgumentType.integer(0))
+                                .then(argument("x", DoubleArgumentType.doubleArg())
+                                        .then(argument("z", DoubleArgumentType.doubleArg())
+                                                .executes(ctx -> {
+                                                    var match = BreakfrontServer.match();
+                                                    if (match == null) {
+                                                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                                                        return 0;
+                                                    }
+                                                    int idx = IntegerArgumentType.getInteger(ctx, "index");
+                                                    double x = DoubleArgumentType.getDouble(ctx, "x");
+                                                    double z = DoubleArgumentType.getDouble(ctx, "z");
+                                                    if (!match.moveAnchor(idx, x, z)) {
+                                                        ctx.getSource().sendError(Text.literal("据点序号无效：0.."
+                                                                + (match.game().zoneCount() - 1)));
+                                                        return 0;
+                                                    }
+                                                    send(ctx.getSource(), String.format(
+                                                            "据点[%d] 锚点移至 (%.1f, %.1f)，下次开战重铺标识", idx, x, z));
+                                                    return 1;
+                                                })))));
     }
 
     private static int joinTeam(ServerCommandSource source, Side side) {
