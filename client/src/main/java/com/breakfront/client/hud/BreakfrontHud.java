@@ -3,6 +3,7 @@ package com.breakfront.client.hud;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.text.Text;
 
 import java.util.ArrayDeque;
@@ -36,18 +37,18 @@ public class BreakfrontHud {
     private long lastDemoPush = 0;
     private int demoSeq = 0;
 
-    public void render(DrawContext context, float tickDelta) {
+    public void render(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.options == null) {
             return; // 仅游戏中渲染
         }
-        TextRenderer font = client.getTextRenderer();
+        TextRenderer font = client.textRenderer;
         int sw = client.getWindow().getScaledWidth();
         int sh = client.getWindow().getScaledHeight();
 
         renderTopStatus(context, font, sw);
         renderZoneBar(context, font, sw, sh);
-        renderKillFeed(context, font, sw, tickDelta);
+        renderKillFeed(context, font, sw);
     }
 
     private void renderTopStatus(DrawContext ctx, TextRenderer font, int sw) {
@@ -55,11 +56,11 @@ public class BreakfrontHud {
                 attackerTickets, formatClock(matchRemaining));
         int w = font.getWidth(status);
         int x = (sw - w) / 2;
-        ctx.drawText(font, Text.literal(status), x, 10, TEXT);
+        ctx.drawText(font, Text.literal(status), x, 10, TEXT, false);
 
         String phase = "进攻方推进  ·  扇区 1 / 4";
         int pw = font.getWidth(phase);
-        ctx.drawText(font, Text.literal(phase), (sw - pw) / 2, 22, MUTED);
+        ctx.drawText(font, Text.literal(phase), (sw - pw) / 2, 22, MUTED, false);
     }
 
     private void renderZoneBar(DrawContext ctx, TextRenderer font, int sw, int sh) {
@@ -74,10 +75,10 @@ public class BreakfrontHud {
 
         String label = String.format("目标点 A1  ·  占领 %.0f%%", zoneProgress * 100);
         int lw = font.getWidth(label);
-        ctx.drawText(font, Text.literal(label), (sw - lw) / 2, y - 12, TEXT);
+        ctx.drawText(font, Text.literal(label), (sw - lw) / 2, y - 12, TEXT, false);
     }
 
-    private void renderKillFeed(DrawContext ctx, TextRenderer font, int sw, float tickDelta) {
+    private void renderKillFeed(DrawContext ctx, TextRenderer font, int sw) {
         long now = System.currentTimeMillis();
         if (now - lastDemoPush > 6000) {
             lastDemoPush = now;
@@ -91,7 +92,7 @@ public class BreakfrontHud {
         for (KillRow row : killFeed) {
             int w = font.getWidth(row.text);
             ctx.fill(sw - w - 16, y - 1, sw - 6, y + font.fontHeight + 1, PANEL);
-            ctx.drawText(font, Text.literal(row.text), sw - w - 12, y, TEXT);
+            ctx.drawText(font, Text.literal(row.text), sw - w - 12, y, TEXT, false);
             y += font.fontHeight + 6;
         }
     }
