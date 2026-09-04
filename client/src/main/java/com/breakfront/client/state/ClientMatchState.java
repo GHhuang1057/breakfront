@@ -40,6 +40,9 @@ public final class ClientMatchState {
     // 命中反馈（HitMarkerPayload）——HUD 负责动画淡出
     private static final List<HitEvent> hitMarkers = new ArrayList<>();
 
+    // 上局结果（MatchStatePayload.lastResultOrdinal，结算页用）
+    private static volatile int lastResultOrdinal;
+
     private ClientMatchState() {
     }
 
@@ -60,6 +63,7 @@ public final class ClientMatchState {
         }
         attackerOnline = payload.attackerOnline();
         defenderOnline = payload.defenderOnline();
+        lastResultOrdinal = payload.lastResultOrdinal();
     }
 
     public static void applyKill(KillFeedPayload payload) {
@@ -140,6 +144,10 @@ public final class ClientMatchState {
 
     public static int defenderOnline() {
         return defenderOnline;
+    }
+
+    public static int lastResultOrdinal() {
+        return lastResultOrdinal;
     }
 
     public static void applyHit(com.breakfront.net.HitMarkerPayload payload) {

@@ -30,6 +30,9 @@ public class BreakfrontHud {
             "大厅", "部署", "战斗中", "结算", "重置"
     };
 
+    private int seenPhase = -1;
+    private long phaseEnterMs;
+
     public void render(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.options == null) {
@@ -39,6 +42,10 @@ public class BreakfrontHud {
         int sw = client.getWindow().getScaledWidth();
         int sh = client.getWindow().getScaledHeight();
         int phase = ClientMatchState.phaseOrdinal();
+        if (phase != seenPhase) {
+            seenPhase = phase;
+            phaseEnterMs = System.currentTimeMillis();
+        }
 
         // TAB 计分板：按住显示（优先于一切战场 HUD）
         if (isTabHeld(client) && (phase == 1 || phase == 2)) {
@@ -253,33 +260,48 @@ public class BreakfrontHud {
         }
     }
 
-    // ---- C1：结算层（ROUND_END）----
+    // ---- C1：结算层（ROUND_END，含胜方标题 + 入场动效） ----
 
     private void renderRoundOver(DrawContext ctx, TextRenderer font, int sw, int sh) {
         com.breakfront.client.bf.BfDraw.fill(ctx, 0, 0, sw, sh, 0xCC05070A);
-        int cw = Math.min(sw - 60, 400);
-        int ch = 148;
-        int x = sw / 2 - cw / 2;
-        int y = sh / 2 - ch / 2;
-        com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, ch, BfTheme.PANEL);
-        com.breakfront.client.bf.BfDraw.border(ctx, x, y, cw, ch, BfTheme.YELLOW_DIM);
-        com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, 3, BfTheme.YELLOW);
+        long ageMs = System.currentTimeMillis() - phaseEnterMs;
+        float t = Math.min(1f, Math.max(0f, ageMs / 340f));
+        float in = (float) com.breakfront.client.bf.BfEasing.easeOutCubic(t);
+        int a = (int) (255 * in);
+        int rise = (int) ((1 - in) * 16);
 
-        String head = "ROUND OVER  回合结束";
+        int cw = Math.min(sw - 60, 460);
+        int ch = 176;
+        int x = sw / 2 - cw / 2;
+        int y = sh / 2 - ch / 2 + rise;
+        com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, ch, argb(BfTheme.PANEL, a));
+        com.breakfront.client.bf.BfDraw.border(ctx, x, y, cw, ch, argb(BfTheme.YELLOW_DIM, a));
+
+        // 顶部色条 + 胜方
+        int winner = ClientMatchState.lastResultOrdinal();
+        boolean attWin = winner == 1;
+        boolean defWin = winner == 2;
+        int winCol = attWin ? BfTheme.YELLOW : (defWin ? BfTheme.BLUE : BfTheme.MUTED);
+        com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, 3, argb(winCol, a));
+
+        String head = attWin ? "进攻方获胜  ATTACKERS WIN"
+                : (defWin ? "防守方获胜  DEFENDERS WIN" : "ROUND OVER  回合结束");
         int hw = font.getWidth(head);
-        ctx.drawText(font, Text.literal(head), x + cw / 2 - hw / 2, y + 16, BfTheme.YELLOW, false);
+        ctx.drawText(font, Text.literal(head), x + cw / 2 - hw / 2, y + 18,
+                argb(winCol, a), false);
 
         String score = String.format("攻方击杀 %d    :    %d 守方击杀",
                 ClientMatchState.attackerTeamKills(), ClientMatchState.defenderTeamKills());
         int sw2 = font.getWidth(score);
-        ctx.drawText(font, Text.literal(score), x + cw / 2 - sw2 / 2, y + 42, 0xFFFFFFFF, false);
+        ctx.drawText(font, Text.literal(score), x + cw / 2 - sw2 / 2, y + 48, argb(0xFFFFFFFF, a), false);
 
         String mvp = mvpLine();
         int mw = font.getWidth(mvp);
-        ctx.drawText(font, Text.literal(mvp), x + cw / 2 - mw / 2, y + 76, BfTheme.TEXT_DIM, false);
+        ctx.drawText(font, Text.literal(mvp), x + cw / 2 - mw / 2, y + 86, argb(BfTheme.TEXT_DIM, a), false);
         String hint = "下一回合即将开始…";
         int hw2 = font.getWidth(hint);
-        ctx.drawText(font, Text.literal(hint), x + cw / 2 - hw2 / 2, y + ch - 22, BfTheme.FAINT, false);
+        ctx.drawText(font, Text.literal(hint), x + cw / 2 - hw2 / 2, y + ch - 24,
+                argb(BfTheme.FAINT, a), false);
     }
 
     private String mvpLine() {
