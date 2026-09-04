@@ -72,6 +72,7 @@ public final class KillListener {
         while (recentKills.size() > 20) {
             recentKills.removeLast();
         }
+        BreakfrontServer.notifyKill(entry); // 广播给所有客户端击杀流
     }
 
     /** 供第 2 层适配器（TaCZ 等）写入更丰富的击杀流。 */

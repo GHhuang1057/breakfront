@@ -1,8 +1,12 @@
 package com.breakfront.server;
 
 import com.breakfront.game.BreakthroughGame;
+import com.breakfront.game.MatchPhase;
 import com.breakfront.game.Sector;
+import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
+import com.breakfront.net.MatchStatePayload;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 
@@ -24,6 +28,7 @@ public final class ServerMatch {
     private final BreakthroughGame game;
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     private final List<String> zoneOrder = new ArrayList<>();
+    private int syncCounter = 0; // 状态广播节流：每 10 tick 一次
 
     public ServerMatch() {
         List<Sector> sectors = defaultSectors();
@@ -60,7 +65,12 @@ public final class ServerMatch {
     /** 服务端主循环适配（20tps × 0.05s）。 */
     public void tick(MinecraftServer server) {
         game.tick(0.05);
-        if (game.phase() != com.breakfront.game.MatchPhase.BATTLE) {
+        syncCounter++;
+        boolean syncTick = syncCounter % 10 == 0; // 每 0.5s 广播一次状态
+        if (syncTick && !server.getPlayerManager().getPlayerList().isEmpty()) {
+            broadcastState(server);
+        }
+        if (game.phase() != MatchPhase.BATTLE) {
             return;
         }
         var overworld = server.getOverworld();
@@ -72,12 +82,12 @@ public final class ServerMatch {
                 if (player.getWorld() != overworld || player.isSpectator()) {
                     continue;
                 }
-                com.breakfront.game.Side side = teams.sideOf(player.getUuid());
+                Side side = teams.sideOf(player.getUuid());
                 if (side == null) {
                     continue;
                 }
                 if (anchor.contains(player.getX(), player.getZ())) {
-                    if (side == com.breakfront.game.Side.ATTACKER) {
+                    if (side == Side.ATTACKER) {
                         attackers++;
                     } else {
                         defenders++;
@@ -85,6 +95,26 @@ public final class ServerMatch {
                 }
             }
             game.applyZonePresence(idx, attackers, defenders, 0.05);
+        }
+    }
+
+    /** 打包并广播对局状态给所有在线玩家。 */
+    private void broadcastState(MinecraftServer server) {
+        var zones = new ArrayList<MatchStatePayload.ZoneStateView>();
+        for (ZoneState zone : game.currentSector().zones()) {
+            zones.add(new MatchStatePayload.ZoneStateView(
+                    zone.id(), zone.owner().ordinal(), (float) zone.meter()));
+        }
+        var payload = new MatchStatePayload(
+                game.phase().ordinal(),
+                game.attackerTickets(),
+                (float) game.matchRemaining(),
+                (float) game.countdownRemaining(),
+                game.sectorIndex(),
+                game.sectors().size(),
+                zones);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            ServerPlayNetworking.send(player, payload);
         }
     }
 

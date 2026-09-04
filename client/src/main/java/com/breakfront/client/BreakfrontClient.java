@@ -1,15 +1,18 @@
 package com.breakfront.client;
 
 import com.breakfront.client.hud.BreakfrontHud;
+import com.breakfront.client.state.ClientMatchState;
+import com.breakfront.net.KillFeedPayload;
+import com.breakfront.net.MatchStatePayload;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Breakfront Client —— 客户端界面入口。
- * P1：注册最小矢量 HUD 管线（据点进度条 + 击杀事件流 + 票数/计时文本），
- * 全部使用几何图元绘制（无像素贴图），后续按 charter §4.7 扩展为完整 BF2042 界面。
+ * P1：注册 S2C 接收（对局状态/击杀流）+ 战场 HUD（真数据驱动）。
  */
 public class BreakfrontClient implements ClientModInitializer {
 
@@ -18,8 +21,16 @@ public class BreakfrontClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        LOGGER.info("[Breakfront] client initialized (P1)");
-        BreakfrontHud hud = new BreakfrontHud();
-        HudRenderCallback.EVENT.register(hud::render);
+        LOGGER.info("[Breakfront] client initialized (P1 networking)");
+
+        // S2C 接收：对局状态同步帧
+        ClientPlayNetworking.registerGlobalReceiver(MatchStatePayload.ID,
+                (payload, context) -> context.client().execute(() -> ClientMatchState.applyMatch(payload)));
+
+        // S2C 接收：击杀流
+        ClientPlayNetworking.registerGlobalReceiver(KillFeedPayload.ID,
+                (payload, context) -> context.client().execute(() -> ClientMatchState.applyKill(payload)));
+
+        HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
     }
 }

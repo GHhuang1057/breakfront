@@ -1,9 +1,13 @@
 package com.breakfront.server;
 
+import com.breakfront.net.KillFeedPayload;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +21,7 @@ public final class BreakfrontServer {
 
     private static ServerMatch match;
     private static boolean registered = false;
+    private static MinecraftServer currentServer;
 
     private BreakfrontServer() {
     }
@@ -28,10 +33,16 @@ public final class BreakfrontServer {
         registered = true;
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            currentServer = server;
             match = new ServerMatch();
             KillListener.bind(match);
             LOGGER.info("[Breakfront] server match ready ({} zones, {} sectors)",
                     match.game().zoneCount(), match.game().sectors().size());
+        });
+
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            currentServer = null;
+            match = null;
         });
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
@@ -58,6 +69,18 @@ public final class BreakfrontServer {
         CommandRegistrationCallback.EVENT.register(BreakfrontCommands::register);
 
         LOGGER.info("[Breakfront] server hooks registered");
+    }
+
+    /** 击杀流广播（服务端线程调用）。 */
+    public static void notifyKill(KillListener.KillEntry entry) {
+        if (currentServer == null) {
+            return;
+        }
+        KillFeedPayload payload = new KillFeedPayload(
+                entry.killer(), entry.victim(), entry.attackerDied(), entry.headshot());
+        for (ServerPlayerEntity player : currentServer.getPlayerManager().getPlayerList()) {
+            ServerPlayNetworking.send(player, payload);
+        }
     }
 
     public static ServerMatch match() {

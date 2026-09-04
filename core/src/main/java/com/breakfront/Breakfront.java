@@ -1,5 +1,6 @@
 package com.breakfront;
 
+import com.breakfront.net.Net;
 import com.breakfront.server.BreakfrontServer;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
@@ -18,6 +19,7 @@ public class Breakfront implements ModInitializer {
     @Override
     public void onInitialize() {
         LOGGER.info("[Breakfront] core initialized (P1)");
-        BreakfrontServer.register();
+        Net.register();              // Payload 类型（S2C 双端注册）
+        BreakfrontServer.register(); // 服务端生命周期/指令/击杀桥
     }
 }
