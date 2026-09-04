@@ -9,10 +9,13 @@ import com.breakfront.net.MatchStatePayload;
 import com.breakfront.server.arena.ArenaViaduct;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.mob.MonsterEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.world.GameRules;
 import net.minecraft.world.Heightmap;
 
 import java.util.ArrayList;
@@ -36,6 +39,7 @@ public final class ServerMatch {
     private int syncCounter = 0; // 状态广播节流：每 10 tick 一次
     private boolean visualsPlaced = false; // 据点空间标识（信标+地环）只放一次
     private boolean arenaBuilt = false;    // 竞技场城市只建一次
+    private boolean envFixed = false;      // 环境锁定只做一次（白昼/禁刷怪/禁天气）
 
     public ServerMatch() {
         List<Sector> sectors = defaultSectors();
@@ -77,6 +81,9 @@ public final class ServerMatch {
             if (arenaBuilt) {
                 BreakfrontServer.LOGGER.info("[Breakfront] viaduct arena built ({} zones)", zoneCountLog());
             }
+        }
+        if (!envFixed) {
+            envFixed = fixArenaEnvironment(server);
         }
         game.tick(0.05);
         syncCounter++;
@@ -154,6 +161,24 @@ public final class ServerMatch {
                     .append(String.format("%.0f", a.radius())).append(')');
         }
         return sb.toString();
+    }
+
+    /** 竞技场环境锁定：恒为白天、禁止刷怪/天气/生物破坏，并清空既有生物。 */
+    private boolean fixArenaEnvironment(MinecraftServer server) {
+        String[] cmds = {
+                "gamerule doDaylightCycle false",
+                "gamerule doWeatherCycle false",
+                "gamerule doMobSpawning false",
+                "gamerule mobGriefing false",
+                "time set 6000",
+                "weather clear",
+                "kill @e[type=!minecraft:player,distance=..200]"
+        };
+        var source = server.getCommandSource();
+        for (String cmd : cmds) {
+            server.getCommandManager().executeWithPrefix(source, cmd);
+        }
+        return true;
     }
 
     /** 打包并广播对局状态给所有在线玩家。 */

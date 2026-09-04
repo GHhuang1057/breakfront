@@ -81,16 +81,16 @@ public final class ArenaViaduct {
                     case 1 -> setSurface(world, x, z, top, Blocks.BLACK_CONCRETE);
                     case 2 -> setSurface(world, x, z, top, Blocks.SANDSTONE);
                     case 3 -> setSurface(world, x, z, top, Blocks.MOSSY_COBBLESTONE);
-                    case 5 -> { // 立柱：从地表到高架底
+                    case 5 -> { // 立柱：从地表面上一层到高架底
                         int bottom = top + 1;
-                        int slabY = top + 1 + ROAD_LAYER;
+                        int slabY = top + ROAD_LAYER;
                         for (int y = bottom; y < slabY; y++) {
                             world.setBlockState(new BlockPos(x, y, z), Blocks.LIGHT_GRAY_CONCRETE.getDefaultState(), 3);
                         }
                     }
-                    case 4 -> { // 高架路面：底下车道 + 抬高桥面
+                    case 4 -> { // 高架路面：底层车道（与地面同一水平面）+ 抬高桥面
                         setSurface(world, x, z, top, Blocks.BLACK_CONCRETE);
-                        int yv = top + 1 + ROAD_LAYER;
+                        int yv = top + ROAD_LAYER;
                         world.setBlockState(new BlockPos(x, yv, z), Blocks.WHITE_CONCRETE.getDefaultState(), 3);
                     }
                     case 6 -> buildBuilding(world, x, z, top, Math.max(1, height));
@@ -102,12 +102,13 @@ public final class ArenaViaduct {
         return true;
     }
 
+    /** 地面元素直接替换世界地表块（如超平坦的草地），保证全图同一水平面。 */
     private static void setSurface(ServerWorld world, int x, int z, int top, Block block) {
-        world.setBlockState(new BlockPos(x, top + 1, z), block.getDefaultState(), 3);
+        world.setBlockState(new BlockPos(x, top, z), block.getDefaultState(), 3);
     }
 
     private static void buildBuilding(ServerWorld world, int x, int z, int top, int height) {
-        int base = top + 1;
+        int base = top + 1; // 楼体从地面之上开始，紧贴统一地面层
         Block wall = height >= 10 ? Blocks.CYAN_TERRACOTTA
                 : height >= 6 ? Blocks.LIGHT_GRAY_CONCRETE : Blocks.GRAY_CONCRETE;
         for (int y = base; y <= base + height; y++) {
