@@ -39,15 +39,72 @@ public class BreakfrontHud {
         int sh = client.getWindow().getScaledHeight();
         int phase = ClientMatchState.phaseOrdinal();
 
+        if (phase == 3) {
+            renderRoundOver(context, font, sw, sh);
+            return;
+        }
         if (phase != 1 && phase != 2) {
-            return; // 仅部署/战斗中渲染
+            return; // 大厅不渲染（大厅面板另行处理）
         }
         renderObjective(context, font, sw);
         renderSectorPill(context, font, sw);
         renderClockTickets(context, font, sw);
+        renderScoreChip(context, font, sw);
         renderZoneProgress(context, font, sw, sh);
         renderKillFeed(context, font, sw);
         ZoneMarkers.render(context, font, sw, sh);
+    }
+
+    // ---- C1：结算层（ROUND_END）----
+
+    private void renderRoundOver(DrawContext ctx, TextRenderer font, int sw, int sh) {
+        com.breakfront.client.bf.BfDraw.fill(ctx, 0, 0, sw, sh, 0xCC05070A);
+        int cw = Math.min(sw - 60, 400);
+        int ch = 148;
+        int x = sw / 2 - cw / 2;
+        int y = sh / 2 - ch / 2;
+        com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, ch, BfTheme.PANEL);
+        com.breakfront.client.bf.BfDraw.border(ctx, x, y, cw, ch, BfTheme.YELLOW_DIM);
+        com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, 3, BfTheme.YELLOW);
+
+        String head = "ROUND OVER  回合结束";
+        int hw = font.getWidth(head);
+        ctx.drawText(font, Text.literal(head), x + cw / 2 - hw / 2, y + 16, BfTheme.YELLOW, false);
+
+        String score = String.format("攻方击杀 %d    :    %d 守方击杀",
+                ClientMatchState.attackerTeamKills(), ClientMatchState.defenderTeamKills());
+        int sw2 = font.getWidth(score);
+        ctx.drawText(font, Text.literal(score), x + cw / 2 - sw2 / 2, y + 42, 0xFFFFFFFF, false);
+
+        String mvp = mvpLine();
+        int mw = font.getWidth(mvp);
+        ctx.drawText(font, Text.literal(mvp), x + cw / 2 - mw / 2, y + 76, BfTheme.TEXT_DIM, false);
+        String hint = "下一回合即将开始…";
+        int hw2 = font.getWidth(hint);
+        ctx.drawText(font, Text.literal(hint), x + cw / 2 - hw2 / 2, y + ch - 22, BfTheme.FAINT, false);
+    }
+
+    private String mvpLine() {
+        var top = ClientMatchState.board();
+        if (top.isEmpty()) {
+            return "本局暂无击杀";
+        }
+        var m = top.get(0);
+        String side = m.sideOrdinal() == 0 ? "攻方" : "守方";
+        return "MVP  " + m.name() + "（" + side + "） " + m.kills() + " 杀 / " + m.deaths() + " 死"
+                + (m.headshots() > 0 ? " · " + m.headshots() + " 爆头" : "");
+    }
+
+    // ---- C2：战斗中顶部小比分带 ----
+
+    private void renderScoreChip(DrawContext ctx, TextRenderer font, int sw) {
+        String line = String.format("攻 %d : %d 守",
+                ClientMatchState.attackerTeamKills(), ClientMatchState.defenderTeamKills());
+        int w = font.getWidth(line);
+        int x = sw - w - 14;
+        int y = 36;
+        ctx.fill(x - 6, y - 3, x + w + 6, y + font.fontHeight + 3, 0x66000000);
+        ctx.drawText(font, Text.literal(line), x, y, BfTheme.TEXT_DIM, false);
     }
 
     // ---- 左上：目标胶囊 ----
