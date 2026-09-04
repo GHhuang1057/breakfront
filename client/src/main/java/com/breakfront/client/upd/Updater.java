@@ -56,6 +56,20 @@ public final class Updater {
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
+    /** 轻量探测更新源是否在线（主菜单状态徽章用）。 */
+    public static boolean probe(String host, int updatePort) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create("http://" + host + ":" + updatePort
+                            + "/breakfront/manifest.json"))
+                    .timeout(Duration.ofSeconds(3))
+                    .GET()
+                    .build();
+            return HTTP.send(req, HttpResponse.BodyHandlers.discarding()).statusCode() == 200;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static Result run(String host, int updatePort) {
         try {
             String base = "http://" + host + ":" + updatePort;

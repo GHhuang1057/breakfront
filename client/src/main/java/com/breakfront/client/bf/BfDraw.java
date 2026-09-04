@@ -75,4 +75,71 @@ public final class BfDraw {
     public static void diamond(DrawContext ctx, double cx, double cy, double half, int argb) {
         quad(ctx, cx, cy - half, cx + half, cy, cx, cy + half, cx - half, cy, argb);
     }
+
+    /** 1px 描边矩形（卡片边框语言）。 */
+    public static void border(DrawContext ctx, int x, int y, int w, int h, int argb) {
+        fill(ctx, x, y, w, 1, argb);
+        fill(ctx, x, y + h - 1, w, 1, argb);
+        fill(ctx, x, y + 1, 1, h - 2, argb);
+        fill(ctx, x + w - 1, y + 1, 1, h - 2, argb);
+    }
+
+    /** 细进度条。progress<0 = 不定态（亮块循环扫动）。 */
+    public static void progressBar(DrawContext ctx, int x, int y, int w, int h,
+                                   double progress, long timeMs, int argb) {
+        fill(ctx, x, y, w, h, 0x22FFFFFF);
+        if (progress >= 0) {
+            fill(ctx, x, y, (int) (w * Math.min(1, Math.max(0, progress))), h, argb);
+        } else {
+            int block = Math.max(24, w / 4);
+            int span = w + block;
+            int off = (int) ((timeMs % 1600) / 1600.0 * span);
+            fill(ctx, x + off - block, y, block, h, argb);
+        }
+    }
+
+    // ---------- 城市天际线（战场氛围背景，确定性生成 + 循环平移视差） ----------
+
+    private static final int SKY_W = 1600;
+    private static final int[][] SKY_FAR = genSkyline(777L, 46, 6, 16, 24, 78);
+    private static final int[][] SKY_NEAR = genSkyline(424242L, 34, 10, 24, 38, 120);
+
+    /** 每栋楼 {x, w, h}，x 覆盖 [0,SKY_W)。 */
+    private static int[][] genSkyline(long seed, int count, int minW, int maxW, int minH, int maxH) {
+        java.util.Random r = new java.util.Random(seed);
+        int[][] out = new int[count][3];
+        for (int i = 0; i < count; i++) {
+            out[i][0] = (int) (r.nextDouble() * SKY_W);
+            out[i][1] = minW + r.nextInt(Math.max(1, maxW - minW));
+            out[i][2] = minH + r.nextInt(Math.max(1, maxH - minH));
+        }
+        return out;
+    }
+
+    /**
+     * 画一层城市剪影（水平无缝循环 + 视差偏移）。
+     *
+     * @param offsetPx 随时间递增的偏移（层速度不同 → 视差）
+     */
+    public static void skyline(DrawContext ctx, int baseY, double offsetPx, int[][] buildings, int argb) {
+        int off = (int) (offsetPx % SKY_W);
+        if (off < 0) {
+            off += SKY_W;
+        }
+        for (int rep = -1; rep <= 1; rep++) {
+            int baseX = rep * SKY_W - off;
+            for (int[] b : buildings) {
+                int x = baseX + b[0];
+                fill(ctx, x, baseY - b[2], b[1], b[2], argb);
+            }
+        }
+    }
+
+    public static int[][] skylineFar() {
+        return SKY_FAR;
+    }
+
+    public static int[][] skylineNear() {
+        return SKY_NEAR;
+    }
 }

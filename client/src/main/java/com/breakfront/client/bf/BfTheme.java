@@ -17,7 +17,9 @@ public final class BfTheme {
     public static final int SCREEN_DIM = 0xCC05070A;   // 全屏蒙层
 
     // 语义色
-    public static final int ORANGE = 0xFFE8622C;       // 主强调（攻方/行动）
+    public static final int YELLOW = 0xFFF5D44A;       // BF2042 主强调（行动/选中）
+    public static final int YELLOW_DIM = 0x80F5D44A;
+    public static final int ORANGE = 0xFFE8622C;       // 攻方/警示
     public static final int ORANGE_SOFT = 0xCCE8622C;
     public static final int AMBER = 0xFFE8B93C;        // 次级强调
     public static final int BLUE = 0xFF4DA6FF;         // 守方/信息
