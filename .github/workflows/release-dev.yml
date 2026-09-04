@@ -48,6 +48,25 @@ jobs:
             --out pack/dist
           ls -lh pack/dist
 
+      - name: Assemble server pack (one-click)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          SHORT=$(git rev-parse --short HEAD)
+          # fabric-installer 生成服务端运行骨架（下载 MC server 本体与运行库）
+          curl -sL -o /tmp/fabric-installer.jar \
+            https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar
+          mkdir -p /tmp/bfserver
+          java -jar /tmp/fabric-installer.jar server -mcversion 1.21.1 -loader 0.19.5 \
+            -dir /tmp/bfserver >/dev/null 2>&1
+          python3 pack/tools/assemble_server_pack.py \
+            --sha "$SHORT" \
+            --client-zip "pack/dist/breakfront-dev-client-mods-${SHORT}.zip" \
+            --stage /tmp/bfserver \
+            --out pack/dist
+          ls -lh pack/dist/breakfront-dev-server-${SHORT}.zip
+
       - name: Publish dev release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,6 +74,7 @@ jobs:
           SHORT=$(git rev-parse --short HEAD)
           gh release create "dev-${SHORT}" \
             "pack/dist/breakfront-dev-client-mods-${SHORT}.zip" \
+            "pack/dist/breakfront-dev-server-${SHORT}.zip" \
             "pack/dist/breakfront-dev-manifest-${SHORT}.json" \
             "core/build/libs/breakfront-0.1.0.jar" \
             "client/build/libs/breakfront-client-0.1.0.jar" \
@@ -62,6 +82,8 @@ jobs:
             --title "BREAKFRONT dev build ${SHORT}" \
             --notes "开发版整合包（自动发布）：
             - 客户端 mods 包：解压后放入 Fabric Loader 0.19.5 的 .minecraft/mods
+            - 服务端一键包：解压后运行 start.bat（或 java -jar fabric-server-launch.jar nogui），
+              放入 world/ 即加载战场图；首启自动生成超平坦竞技场并跳过自建城市
             - 版本锁定：Minecraft 1.21.1 / Fabric API / TaCZ: Refabricated
             - 由 GitHub Actions 自动构建，内容见 manifest.json" \
             --prerelease || true

@@ -37,10 +37,14 @@ public final class ServerMatch {
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     private final List<String> zoneOrder = new ArrayList<>();
     private int syncCounter = 0; // 状态广播节流：每 10 tick 一次
-    private boolean visualsPlaced = false; // 据点空间标识（信标+地环）只放一次
+    private boolean visualsPlaced = false; // 据点空间标识（信标）只放一次
     private boolean arenaBuilt = false;    // 竞技场城市只建一次
     private boolean arenaSkipped = false;  // 使用外部世界时跳过自建城市
     private boolean envFixed = false;      // 环境锁定只做一次（白昼/禁刷怪/禁天气）
+
+    /** 回合自动循环：结算展示 8 秒后自动重开下一局。 */
+    private static final double ROUND_END_PAUSE = 8.0;
+    private double endPause = -1;
 
     public ServerMatch() {
         List<Sector> sectors = defaultSectors();
@@ -103,6 +107,23 @@ public final class ServerMatch {
         boolean syncTick = syncCounter % 10 == 0; // 每 0.5s 广播一次状态
         if (syncTick && !server.getPlayerManager().getPlayerList().isEmpty()) {
             broadcastState(server);
+        }
+        // 回合自动循环：结算展示 8 秒后自动重开下一局（队伍/锚点不变）
+        if (game.phase() == MatchPhase.ROUND_END) {
+            if (endPause < 0) {
+                endPause = ROUND_END_PAUSE;
+                BreakfrontServer.LOGGER.info("[Breakfront] round over ({}), next round in {}s",
+                        game.result(), String.format("%.0f", ROUND_END_PAUSE));
+            }
+            endPause -= 0.05;
+            if (endPause <= 0) {
+                endPause = -1;
+                game.startRound();
+                visualsPlaced = false;
+                BreakfrontServer.LOGGER.info("[Breakfront] auto started next round");
+            }
+        } else {
+            endPause = -1;
         }
         if (game.phase() != MatchPhase.BATTLE) {
             return;

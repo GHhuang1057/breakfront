@@ -52,7 +52,19 @@ public final class BreakfrontCommands {
                         return 0;
                     }
                     match.game().endRound(MatchResult.DEFENDER_WIN);
-                    send(ctx.getSource(), "对局强制结算（守方胜）");
+                    send(ctx.getSource(), "对局强制结算（守方胜），8 秒后将自动重开");
+                    return 1;
+                }));
+
+        root = root.then(literal("stop").requires(s -> s.hasPermissionLevel(2))
+                .executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                        return 0;
+                    }
+                    match.game().returnToLobby();
+                    send(ctx.getSource(), "对局已停止，回到大厅（/bf start 重新开局）");
                     return 1;
                 }));
 

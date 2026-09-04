@@ -52,6 +52,12 @@ public class BreakthroughGame {
         phaseTimer = countdownSeconds;
     }
 
+    /** 强制回到大厅（管理端 /bf stop 用）：清空本局状态并停表。 */
+    public void returnToLobby() {
+        resetState();
+        phase = MatchPhase.LOBBY;
+    }
+
     private void resetState() {
         result = MatchResult.NONE;
         attackerTickets = attackerTicketsMax;
