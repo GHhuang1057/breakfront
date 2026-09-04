@@ -1,0 +1,54 @@
+# 夜间批次验收清单 · 2026-09-05
+
+> 说明：本批次由 AI 在用户就寝期间连续执行，每块完成门槛 = CI 全绿 + 服务端冒烟。
+> 验收方法：游戏内升级客户端 → 按条目逐项实测 → 勾选「通过 / 待调」。
+
+## 本批已完成（代码/CI/服务端均已就绪，待你真机勾选）
+- CI 构建：A/B = `4d9adb3`，D/E = `e6d1465`（当前最新 release `dev-e6d1465`）
+- 本地服务端已热更至 `e6d1465`，更新源 manifest 已同步（core babcf44a / client ff6bf229）
+- RCON 冒烟已验证：`round over (DEFENDER_WIN)` → 8s → `auto started next round`（服务端日志 00:33:22→00:33:30）
+
+## 0. 升级方式
+- GitHub Releases → 最新 `dev-xxxxxx` → 下载 `breakfront-dev-client-mods-*.zip` 覆盖 mods（或启动游戏让「启动时更新检查」自动拉取+重启）
+- 服务端：使用同一 dev 版本的 jar（一键包 `breakfront-dev-server-*.zip` 或本地服热更）
+
+## 1. 启动与更新链路
+- [ ] 启动后主菜单出现，右上状态徽章最终停在「已是最新」（绿点）
+- [ ] 若曾下发新包：弹出「待重启应用」提示并可一键退出/应用（bfupdate\apply-update.bat）
+- [ ] PLAY → 进入「正在连接服务器」加载层（扫动进度条）→ 进服（不再出现「该服务器不支持转移」，服务端已 accepts-transfers=true）
+- [ ] 开屏为 BREAKFRONT 品牌图
+
+## 2. 主菜单（BF2042）
+- [ ] 顶栏导航 PLAY / 单机 / 设置 / 退出；PLAY 有黄色下划线
+- [ ] ALL-OUT WARFARE 主卡：背景城市天际线视差、黄底黑字「部署」按钮 hover 反白
+- [ ] Portal / 危险区「即将推出」小卡、底部键位提示条
+- [ ] 菜单 hover / 进出场动画顺滑
+
+## 3. 游戏内 HUD v2
+- [ ] 左上 OBJECTIVE：据点字母胶囊，占领色（黄=攻/蓝=守/争夺闪烁）
+- [ ] 右上 TIME 倒计时 + DEPLOY 攻方部署资源（低到 ≤10 变红）
+- [ ] 中上「战斗中 · 扇区 x/y」；底部各据点推进条（含 已占领/推进%/防守中 状态）
+- [ ] 击杀流：右上出现、行淡入上滑、6 秒后淡出；爆头金标、攻方减员红字
+- [ ] 世界内据点菱形字母标记 + 地面描边圆环仍在
+
+## 4. 部署界面（回合开始）
+- [ ] /bf start 后（部署倒计时）自动弹出全屏部署页（倒计时大字 + 目标点列表 + 进度）
+- [ ] 进入 BATTLE 自动关闭；ESC 可提前关闭且不会反复弹出
+- [ ] 部署页视觉：标题黄字、深色渐变、菱形字母行
+
+## 5. 回合自动循环 / 服务端
+- [ ] /bf end 结算 → 约 8 秒后自动进入下一局倒计时（队伍/锚点保持）
+- [ ] /bf stop → 回大厅；/bf status 各阶段显示正常
+- [ ] 服务端 RCON 冒烟：`scripts/smoke_round.sh` 全程 SMOKE OK
+
+## 6. 服务端一键包（运营/公测准备）
+- [ ] Release 内含 `breakfront-dev-server-*.zip`（fabric-server-launch.jar + 全量 mods + server.properties 模板 + start.bat + 外部地图标记）
+- [ ] 解压 → 放 world/（Metro）→ start.bat 启动 → Done → 客户端可连
+- [ ] 更新源 :25610 manifest 随包在服务器目录自动就绪
+
+## 7. 待办/未纳入（下批）
+- 重生-部署选择链路（死亡回部署页 + 据点重生，需服务端规则+可能 mixin）
+- 兵种/装备发放（TaCZ 枪械上阵）与部署界面选兵种
+- TAB 计分板 / 对局结算 MVP 动画
+- 协议版本号软提示（当前由更新包双 jar 同推兜底）
+- 地图内容继续推进需另行决策（当前用 Operation Metro 外部图）
