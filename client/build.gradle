@@ -1,0 +1,38 @@
+plugins {
+    id 'fabric-loom'
+}
+
+version = rootProject.findProperty('mod_version') ?: '0.1.0'
+group = rootProject.findProperty('maven_group') ?: 'com.breakfront'
+
+base {
+    archivesName = 'breakfront-client'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${rootProject.property('minecraft_version')}"
+    mappings "net.fabricmc:yarn:${rootProject.property('yarn_mappings')}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${rootProject.property('loader_version')}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.property('fabric_version')}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 21
+    it.options.encoding = 'UTF-8'
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand 'version': project.version
+    }
+}

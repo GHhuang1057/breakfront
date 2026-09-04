@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "breakfront-client",
+  "version": "${version}",
+  "name": "Breakfront Client",
+  "description": "BREAKFRONT 破阵前线 —— 客户端界面与 HUD（BF2042 风格矢量界面）。P0 脚手架占位。",
+  "authors": ["Breakfront Team"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.breakfront.client.BreakfrontClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

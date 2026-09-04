@@ -1,0 +1,17 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven {
+            name = 'Fabric'
+            url = 'https://maven.fabricmc.net/'
+        }
+    }
+    plugins {
+        id 'fabric-loom' version "${loom_version}"
+    }
+}
+
+rootProject.name = 'breakfront'
+
+include 'core'
+include 'client'

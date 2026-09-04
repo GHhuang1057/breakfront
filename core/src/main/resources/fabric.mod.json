@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "breakfront",
+  "version": "${version}",
+  "name": "Breakfront Core",
+  "description": "BREAKFRONT 破阵前线 —— 核心规则层（回合状态机/占点/票数/兵种/重生，服务端权威）。P0 脚手架占位。",
+  "authors": ["Breakfront Team"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.breakfront.Breakfront"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

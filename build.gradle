@@ -1,0 +1,2 @@
+// BREAKFRONT 根工程 —— 仅作聚合，实际构建配置在 core/ 与 client/
+// 版本锚点统一见 gradle.properties
