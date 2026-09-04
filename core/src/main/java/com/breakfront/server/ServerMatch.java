@@ -6,6 +6,7 @@ import com.breakfront.game.Sector;
 import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
 import com.breakfront.net.MatchStatePayload;
+import com.breakfront.server.arena.ArenaViaduct;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.Blocks;
 import net.minecraft.server.MinecraftServer;
@@ -34,6 +35,7 @@ public final class ServerMatch {
     private final List<String> zoneOrder = new ArrayList<>();
     private int syncCounter = 0; // 状态广播节流：每 10 tick 一次
     private boolean visualsPlaced = false; // 据点空间标识（信标+地环）只放一次
+    private boolean arenaBuilt = false;    // 竞技场城市只建一次
 
     public ServerMatch() {
         List<Sector> sectors = defaultSectors();
@@ -54,8 +56,9 @@ public final class ServerMatch {
     private void indexAnchors() {
         anchors.clear();
         zoneOrder.clear();
+        // 与 viaduct 地图对齐：A1/A2 在高架东西两段，B1 在中央广场（见 arena 装载）
         double[][] spots = {
-                {8.5, 8.5}, {24.5, 8.5}, {40.5, 8.5}
+                {20.5, 24.5}, {76.5, 24.5}, {43.5, 51.5}
         };
         int i = 0;
         for (Sector sector : game.sectors()) {
@@ -69,6 +72,12 @@ public final class ServerMatch {
 
     /** 服务端主循环适配（20tps × 0.05s）。 */
     public void tick(MinecraftServer server) {
+        if (!arenaBuilt) {
+            arenaBuilt = ArenaViaduct.tryBuild(server.getOverworld());
+            if (arenaBuilt) {
+                BreakfrontServer.LOGGER.info("[Breakfront] viaduct arena built ({} zones)", zoneCountLog());
+            }
+        }
         game.tick(0.05);
         syncCounter++;
         boolean syncTick = syncCounter % 10 == 0; // 每 0.5s 广播一次状态
@@ -173,5 +182,9 @@ public final class ServerMatch {
 
     public TeamManager teams() {
         return teams;
+    }
+
+    private int zoneCountLog() {
+        return anchors.size();
     }
 }
