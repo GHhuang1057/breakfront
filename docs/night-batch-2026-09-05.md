@@ -52,3 +52,15 @@
 - TAB 计分板 / 对局结算 MVP 动画
 - 协议版本号软提示（当前由更新包双 jar 同推兜底）
 - 地图内容继续推进需另行决策（当前用 Operation Metro 外部图）
+
+## 第二波（01:00-01:20，用户追加需求后的执行批次）
+已完成（CI 全绿 + 服务端实测）：
+- **S1 出生/自动赛程**：进服自动补少人队；开局全员部署到己方出生区（攻=首据点外沿、守=尾据点外沿，`/bf spawns set` 可覆盖）；战中死亡自动钉重生点=己方部署区；`/bf autostart on` 大厅双阵营就绪 5s 自动开局
+- **S2 战绩统计**：ScoreKeeper（纯 Java+单测）/`ScoreboardPayload`(1s)/`/bf board`/客户端接收
+- **C1 结算卡**：ROUND_END 全屏“ROUND OVER”（比分+MVP 行）· **C2**：战斗中顶部“攻 x:y 守”比分带
+- **B1 增援 NPC v0.5**：`/bf npc add attacker|defender <n>`；按缺员补位；向目标据点推进/驻守（占点）；可被杀计入击杀者战绩；**实测：无真人服务器中攻方 NPC 将 A1 占领至 100%**；连修 3 坑（zombie 自燃→防火再生；屋顶穿墙闷杀→地形跟随+轴分离避障；无人服未加载区块→forceload）
+- **G1 枪包调研**：tacz-refab 无内置枪数据；1.21.1 需外部 gunpack（用 pack upgrader 转 NeoForge 兼容，源在 TaCZ Discord 社区展示）；机制已通，包需用户侧提供（同地图授权模式）
+
+### 状态
+- 最新 dev：`dev-5e8a45f`（全绿，已热更本地服 + 更新源 sync）
+- 待用户醒后：装新客户端包 → 多人开服 `/bf npc add` 看 bot 交战；验收清单第一波条目并行勾选
