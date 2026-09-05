@@ -4,13 +4,10 @@ import com.breakfront.client.bf.BfServerConfig;
 import com.breakfront.client.hud.BreakfrontHud;
 import com.breakfront.client.hud.SectorPreviewRenderer;
 import com.breakfront.client.hud.WorldZoneRings;
-import com.breakfront.client.state.AdminState;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.SectorEditState;
 import com.breakfront.client.ui.BfDeployScreen;
 import com.breakfront.client.ui.BreakfrontMainMenu;
-import com.breakfront.client.ui.admin.BfAdminGateScreen;
-import com.breakfront.client.ui.admin.BfAdminPanel;
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
 import com.breakfront.net.ScoreboardPayload;
@@ -19,7 +16,6 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.TitleScreen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,8 +35,7 @@ public class BreakfrontClient implements ClientModInitializer {
 
     private static int lastDeployPhaseChange = -1;
 
-    /** 主页「管理」入口置位：进服成功即自动弹管理员门禁/面板（一次性消费）。 */
-    public static volatile boolean openAdminOnJoin = false;
+    /** 管理控制台已独立为 Web 程序（core /bfadmin），客户端不再内置任何管理 UI。 */
 
     @Override
     public void onInitializeClient() {
@@ -101,56 +96,6 @@ public class BreakfrontClient implements ClientModInitializer {
         // S2C 接收：扇区编辑器预览（/bfs 会话）
         ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.SectorEditPayload.ID,
                 (payload, context) -> context.client().execute(() -> SectorEditState.apply(payload)));
-
-        // S2C 接收：管理员登录结果（M8）→ 门禁屏显示结果/切面板
-        ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.AdminLoginResultPayload.ID,
-                (payload, context) -> context.client().execute(
-                        () -> AdminState.applyResult(payload.ok(), payload.message())));
-
-        // 管理员面板入口（M8→命令化 2026-09-05）：聊天输入 /bfp 开关门禁/面板
-        // 不再用快捷键——F8/F6 均与渲染/镜头功能冲突，命令入口零冲突
-        net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register(
-                (dispatcher, registryAccess) -> dispatcher.register(
-                        net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("bfp")
-                                .executes(ctx -> {
-                                    MinecraftClient c = MinecraftClient.getInstance();
-                                    if (c.currentScreen instanceof TitleScreen || c.currentScreen == null) {
-                                        if (AdminState.isAdmin()) {
-                                            c.setScreen(new BfAdminPanel());
-                                        } else {
-                                            c.setScreen(new BfAdminGateScreen());
-                                        }
-                                    } else if (c.currentScreen instanceof BfAdminPanel) {
-                                        c.setScreen(null); // 再输入 /bfp 收起面板
-                                    }
-                                    return 1;
-                                })));
-
-        // 登录成功后门禁自动切面板
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (client.currentScreen instanceof BfAdminGateScreen && AdminState.justGranted()) {
-                AdminState.clearJustGranted();
-                client.setScreen(new BfAdminPanel());
-            }
-        });
-
-        // 主页「管理」入口的进服联动：连接成功即弹门禁/面板（未登录弹门禁输密码）
-        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register(
-                (handler, sender, client) -> {
-                    if (!openAdminOnJoin) {
-                        return;
-                    }
-                    openAdminOnJoin = false;
-                    client.execute(() -> {
-                        if (client.currentScreen == null || client.currentScreen instanceof TitleScreen) {
-                            if (AdminState.isAdmin()) {
-                                client.setScreen(new BfAdminPanel());
-                            } else {
-                                client.setScreen(new BfAdminGateScreen());
-                            }
-                        }
-                    });
-                });
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
 

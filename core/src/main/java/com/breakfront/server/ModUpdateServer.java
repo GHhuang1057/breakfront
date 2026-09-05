@@ -78,6 +78,8 @@ public final class ModUpdateServer {
                 exchange.getResponseBody().write(data);
                 exchange.close();
             });
+            // 独立管理控制台（/bfadmin/*）：浏览器管理，不进入游戏
+            mu.server.createContext("/bfadmin/", WebAdminConsole::handle);
             mu.server.setExecutor(null);
             mu.server.start();
             int count = mu.sources.size();

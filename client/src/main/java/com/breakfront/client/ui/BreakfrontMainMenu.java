@@ -39,7 +39,7 @@ public class BreakfrontMainMenu extends Screen {
 
     private enum Flow { IDLE, CHECKING, CONNECTING, NEED_RESTART }
 
-    private static final String[] NAV_LABELS = {"PLAY", "设置", "退出", "管理"};
+    private static final String[] NAV_LABELS = {"PLAY", "设置", "退出"};
 
     // 布局（init 时计算）
     private int topBarH;
@@ -523,7 +523,6 @@ public class BreakfrontMainMenu extends Screen {
                         case 0 -> onDeploy();
                         case 1 -> client.setScreen(new OptionsScreen(this, client.options));
                         case 2 -> client.scheduleStop();
-                        case 3 -> onAdmin();
                         default -> {
                         }
                     }
@@ -552,12 +551,6 @@ public class BreakfrontMainMenu extends Screen {
 
     private void onDeploy() {
         startFlow("ALL-OUT WARFARE");
-    }
-
-    /** 主页「管理」入口：直连服务器并在进服后自动拉起管理员门禁/面板。 */
-    private void onAdmin() {
-        com.breakfront.client.BreakfrontClient.openAdminOnJoin = true;
-        startFlow("ADMIN CONTROL");
     }
 
     private void startFlow(String title) {

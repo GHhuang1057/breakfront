@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BREAKFRONT · 破阵前线 — 管理控制台</title>
+<style>
+  :root{ --bg:#0a0d12; --panel:#141b24; --line:#232e3b; --txt:#dfe6ee; --dim:#7c8a99;
+         --yellow:#f5cd54; --blue:#4da6ff; --red:#ff5a52; --green:#6fe873; --mono:Consolas,Menlo,monospace }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif;min-height:100vh}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px}
+  header{display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:16px}
+  .logo{width:14px;height:14px;background:var(--yellow);transform:rotate(45deg)}
+  h1{font-size:18px;letter-spacing:1px}
+  h1 small{color:var(--dim);font-weight:400;margin-left:8px}
+  .right{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--dim)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .cell{background:var(--panel);border:1px solid var(--line);padding:10px 12px;border-radius:4px}
+  .cell .k{color:var(--dim);font-size:11px;letter-spacing:1px}
+  .cell .v{font-size:20px;font-weight:600;margin-top:2px}
+  h2{font-size:13px;color:var(--yellow);letter-spacing:2px;margin:18px 0 8px;border-left:3px solid var(--yellow);padding-left:8px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);font:12px/1.5 var(--mono)}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #1a232e}
+  th{color:var(--dim);font-weight:400}
+  .meter{height:6px;background:#0a0f15;position:relative;border-radius:3px;overflow:hidden}
+  .meter i{position:absolute;left:0;top:0;bottom:0;display:block}
+  .own-def{background:var(--blue)} .own-att{background:var(--yellow)} .own-cont{background:var(--red)}
+  .btn{border:1px solid var(--line);background:var(--panel);color:var(--txt);padding:7px 14px;border-radius:3px;cursor:pointer;font-size:13px;margin:0 6px 6px 0}
+  .btn:hover{border-color:var(--yellow);color:var(--yellow)}
+  .btn.primary{background:var(--yellow);color:#0a0d12;font-weight:600;border-color:var(--yellow)}
+  .btn.danger:hover{border-color:var(--red);color:var(--red)}
+  .log{background:#06080c;border:1px solid var(--line);padding:8px 10px;font:11px var(--mono);color:#8fa3b5;min-height:26px;border-radius:4px}
+  .banner{padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:6px;text-align:center}
+  .banner input{background:#0a0f15;border:1px solid var(--line);color:var(--txt);padding:9px 12px;width:260px;border-radius:3px;margin-right:8px}
+  .hint{color:var(--dim);font-size:12px;margin-top:10px}
+  .pill{display:inline-block;padding:0 8px;border-radius:10px;font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <div class="logo"></div>
+    <h1>BREAKFRONT <small>破阵前线 · 独立管理控制台</small></h1>
+    <div class="right"><span class="dot" id="dot"></span><span id="conn">未连接</span></div>
+  </header>
+
+  <!-- 登录 -->
+  <div id="login" class="banner">
+    <div style="font-size:20px;color:var(--yellow);letter-spacing:4px;margin-bottom:4px">ADMIN ACCESS</div>
+    <div class="hint" style="margin-bottom:14px">输入服务器管理员密码（admin.password）</div>
+    <input type="password" id="pw" placeholder="管理员密码" autocomplete="off">
+    <button class="btn primary" onclick="login()">登 录</button>
+    <div class="hint" id="lgmsg"></div>
+  </div>
+
+  <!-- 控制台 -->
+  <div id="console" style="display:none">
+    <div class="grid">
+      <div class="cell"><div class="k">对局阶段</div><div class="v" id="st-phase">-</div></div>
+      <div class="cell"><div class="k">攻方部署资源</div><div class="v" id="st-ticks">-</div></div>
+      <div class="cell"><div class="k">回合剩余</div><div class="v" id="st-clock">-</div></div>
+      <div class="cell"><div class="k">扇区</div><div class="v" id="st-sector">-</div></div>
+      <div class="cell"><div class="k">AI 存活</div><div class="v" id="st-ai">-</div></div>
+      <div class="cell"><div class="k">在线真人</div><div class="v" id="st-ply">-</div></div>
+    </div>
+
+    <h2>对局控制</h2>
+    <button class="btn primary" onclick="cmd('start')">开始回合</button>
+    <button class="btn" onclick="cmd('end')">结束回合</button>
+    <button class="btn danger" onclick="cmd('stop')">停止(回大厅)</button>
+    <button class="btn" onclick="cmd('fillOn')">AI填充 ON</button>
+    <button class="btn" onclick="cmd('fillOff')">AI填充 OFF</button>
+    <button class="btn" onclick="cmd('autostartOn')">自动开局 ON</button>
+    <button class="btn" onclick="cmd('autostartOff')">自动开局 OFF</button>
+    <button class="btn" onclick="cmd('mapOn')">自建城 ON</button>
+    <button class="btn" onclick="cmd('mapOff')">自建城 OFF</button>
+
+    <h2>据点推进</h2>
+    <table><thead><tr><th>ID</th><th>归属</th><th>攻方推进</th><th>进度</th></tr></thead>
+      <tbody id="tb-zones"></tbody></table>
+
+    <h2>在线玩家</h2>
+    <table><thead><tr><th>玩家</th><th>阵营</th><th>兵种</th><th>坐标</th><th>HP</th></tr></thead>
+      <tbody id="tb-players"></tbody></table>
+
+    <h2>执行反馈</h2>
+    <div class="log" id="cmdlog">就绪</div>
+  </div>
+</div>
+
+<script>
+let TOKEN = localStorage.getItem('bfadmin_token') || '';
+const $ = id => document.getElementById(id);
+function el(tag, cls, text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e; }
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  let j = null;
+  try{ j = await r.json(); }catch(e){ j = {ok:false, msg:'响应解析失败 ' + r.status}; }
+  return {code:r.status, ...j};
+}
+
+async function login(){
+  const r = await api('/bfadmin/api/login', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({pw: $('pw').value})});
+  if (r.ok){ TOKEN = r.token; localStorage.setItem('bfadmin_token', TOKEN);
+    $('lgmsg').textContent='登录成功'; showConsole(); poll();
+  } else { $('lgmsg').textContent = r.msg || '失败'; }
+}
+
+async function cmd(name){
+  const r = await api('/bfadmin/api/cmd', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name: name})});
+  log((r.ok ? '✓ ' : '✗ ') + name + (r.msg ? ' — ' + r.msg : ''));
+}
+
+async function poll(){
+  if (!TOKEN) return;
+  const r = await api('/bfadmin/api/status?token=' + encodeURIComponent(TOKEN));
+  if (r.code === 401){ TOKEN=''; localStorage.removeItem('bfadmin_token'); showLogin(); setDot(false); return; }
+  setDot(true); $('conn').textContent = '已连接';
+  if (!r.ok || !r.phase){ return; }
+  $('st-phase').textContent = r.phaseCn;
+  $('st-ticks').textContent = r.tickets + ' / ' + r.ticketsMax;
+  const secs = r.phase==='BATTLE' ? r.matchRemaining : r.countdown;
+  const mm = String(Math.floor(secs/60)).padStart(2,'0'), ss = String(secs%60).padStart(2,'0');
+  $('st-clock').textContent = mm + ':' + ss;
+  $('st-sector').textContent = r.sectorIndex+1 + ' / ' + r.sectorCount;
+  $('st-ai').textContent = r.aiAlive + (r.aiInfo ? '　' + r.aiInfo.replace('NPC 目标','').trim() : '');
+  $('st-ply').textContent = (r.players||[]).length;
+  // zones
+  const tz=$('tb-zones'); tz.innerHTML='';
+  (r.zones||[]).forEach(z=>{
+    const tr=el('tr');
+    tr.appendChild(el('td','',z.id));
+    const own = z.owner==='ATTACKER' ? ['守方','own-def'] : ['攻方','own-att'];
+    tr.appendChild(el('td','', own[0]));
+    const td=el('td'); const m=el('div','meter');
+    const i=el('i','own-'+z.owner.toLowerCase());
+    i.style.width = z.pct + '%'; m.appendChild(i); td.appendChild(m);
+    tr.appendChild(td);
+    tr.appendChild(el('td','', z.pct + '%'));
+    tz.appendChild(tr);
+  });
+  if(!r.zones || !r.zones.length) tz.appendChild(el('tr').appendChild(el('td','','（大厅/无当前扇区）')));
+  // players
+  const tp=$('tb-players'); tp.innerHTML='';
+  (r.players||[]).forEach(p=>{
+    const tr=el('tr');
+    tr.appendChild(el('td','',p.name));
+    tr.appendChild(el('td','',p.side));
+    tr.appendChild(el('td','',p.cls));
+    tr.appendChild(el('td','', p.x + ', ' + p.y + ', ' + p.z));
+    tr.appendChild(el('td','', p.hp));
+    tp.appendChild(tr);
+  });
+}
+
+function showConsole(){ $('login').style.display='none'; $('console').style.display=''; }
+function showLogin(){ $('login').style.display=''; $('console').style.display='none'; }
+function setDot(on){ $('dot').style.background = on ? 'var(--green)' : '#ff5a52'; $('conn').textContent = on ? '已连接' : '未连接'; }
+function log(s){ $('cmdlog').textContent = new Date().toLocaleTimeString() + '  ' + s; }
+
+$('pw').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
+(async function init(){
+  if (TOKEN){
+    const r = await api('/bfadmin/api/status?token=' + encodeURIComponent(TOKEN));
+    if (r.code !== 401 && r.ok){ showConsole(); }
+    else { TOKEN=''; localStorage.removeItem('bfadmin_token'); }
+  }
+  if ($('console').style.display !== 'none') { poll(); setInterval(poll, 2000); }
+  else { setDot(false); }
+})();
+</script>
+</body>
+</html>
