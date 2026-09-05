@@ -40,7 +40,7 @@ public final class MusicUpdater {
     }
 
     /** 进度回调（与 {@link Updater.Progress} 同形，复用其定义）。 */
-    public static void sync(String host, int updatePort, Updater.Progress progress) {
+    public static SyncResult sync(String host, int updatePort, Updater.Progress progress) {
         String base = "http://" + host + ":" + updatePort + "/breakfront/music";
         List<MusicFile> remote = new ArrayList<>();
         try {
