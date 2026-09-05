@@ -15,7 +15,7 @@
 | 维度 | 决策 | 备注 |
 |---|---|---|
 | MC 版本 | **1.21.1（Fabric）** | 生态完整性的现实选择，见 §2 兼容矩阵 |
-| 渲染/性能 | **VulkanMod** 为客户端首选渲染器 | 1.21–1.21.1 有对应构建；有 OpenGL 兼容红线 |
+| 渲染/性能 | **Sodium + Iris**（客户端首选渲染器，配 ComplementaryReimagined 光影） | 2026-09-05 实测弃用 VulkanMod：与 TaCZ 模板缓冲 FBO 不兼容，启动即崩（见 §2.3） |
 | 战场规模 | **32v32（64 人）** | 决定地图尺寸、服务器规格、性能方案 |
 | 首发模式 | **攻防 Breakthrough** | 攻方推线拔点 vs 守方拖时耗票 |
 | 首发图主题 | **城市街区攻防** | 视觉与动线参考三角洲行动「攀升」，沿街区纵深推进 |
@@ -70,7 +70,7 @@
 | Superb Warfare ReFabricated（枪械+载具） | ✗ | ✅ 0.8.8-alfa，2026-08 仍高频更新 |
 | TaCZ 永恒枪械 ReFabricated | ✗ | ✅ 1.21.1 / 1.20.1 |
 | Vic's Point Blank（Fabric） | ✗ 未跟进 | ✅ 1.21.1 系 |
-| VulkanMod | ✅ 0.6.1 | ✅ 1.21–1.21.1 构建 |
+| VulkanMod | ✅ 0.6.1 | ✅ 构建可用，**但 2026-09-05 起弃用**（与 TaCZ stencil FBO 冲突，见 §2.3） |
 | Lithium / Krypton / FerriteCore / Spark | ✅ | ✅ |
 | Very Many Players (VMP) | ✅ | 待实机验证 |
 
@@ -83,13 +83,13 @@
 | Java | 21 | 21 |
 | Fabric Loader | ≥ 0.16.x | 与客户端同系 |
 | Fabric API | 对应 1.21.1 版本 | 同 |
-| GPU/驱动 | Vulkan 1.2+（VulkanMod 路径） | — |
+| GPU/驱动 | OpenGL 3.2+（Iris/Sodium 路径，常规独显/核显即可） | — |
 
-### 2.3 渲染方案（两套备选）
+### 2.3 渲染方案（已定案：Sodium + Iris）
 
-- **方案 A（主推）：VulkanMod**。按用户性能诉求。红线：**直调 OpenGL 的模组会崩溃**，须对照其不兼容清单逐项排查；光影走 Beryl 社区生态，不在 P0 承诺。
-- **方案 B（回退/兼容备胎）：Sodium + Iris**。若 VulkanMod 与 SBW/GeckoLib/自研 HUD 实测冲突且无法解决，切回此方案。
-- P0 冒烟测试必须覆盖：VulkanMod × SBW × GeckoLib × 自研 HUD 同场共存与 64 人压测帧数。
+- **主方案：Sodium + Iris + ComplementaryReimagined 光影**（2026-09-05 起）。Iris 自 1.7+ 含 Sodium 兼容渲染管线，二者同装；光影包随包分发。
+- **VulkanMod 已弃用**：2026-09-05 实测与 TaCZ:Refabricated 不兼容——TaCZ 客户端初始化对内部 FBO 开模板缓冲（stencil），VulkanMod `GlUtil.vulkanFormat` 不识别该格式（`Unexpected format: 36013`）**启动即崩**，游戏无法进入。TaCZ 为枪械核心不可弃，故放弃 VulkanMod 路径；OpenGL 直调红线随之解除，但自研矢量绘制纪律（Fabric 标准渲染路径）仍保留。
+- P0 冒烟测试覆盖：Iris × TaCZ × SBW × GeckoLib × 自研 HUD 同场共存与 64 人压测帧数。
 
 ---
 
@@ -116,13 +116,13 @@
 | Lithium / Krypton / FerriteCore / Spark | 基础优化 + 性能采样 |
 | Very Many Players (VMP) | 64 人同屏/网络优化（实机压测后决定是否启用） |
 | C2ME | 区块加载优化（竞技场固定图作用有限，按需） |
-| BadOptimizations / Packet Fixer 等 | 次要增益（装前查 VulkanMod 兼容清单） |
+| BadOptimizations / Packet Fixer 等 | 次要增益（与 Sodium/Iris 兼容性装前确认） |
 
 ### 3.3 客户端体验（C）
 
 | 模组 | 职责 |
 |---|---|
-| VulkanMod（或 Sodium+Iris 备胎） | 渲染加速 |
+| Sodium + Iris + ComplementaryReimagined | 渲染加速 + 光影（VulkanMod 已弃，见 §2.3） |
 | Xaero 小地图（可选） | 战场态势辅助（战地味地图后续以自研 HUD 叠加） |
 | Mod Menu | 配置入口 |
 
@@ -250,7 +250,7 @@ P1 必须先把这条链路在最小地图上打洞验证（打靶房），它�
 - 常驻 HUD：击杀播报流、扇区进度条、票数/倒计时、占点圈内人数。
 - 命中反馈与标记指示（队友/敌人方向标记，可选）。
 - **击杀播报交互模型参考 GD656Killicon 的事件与动效设计、MotionHUD 的动态 HUD 思路**（详见 §3.5），自研实现而非直接搬运。
-- **渲染纪律：只用 Fabric 标准 GuiGraphics/现代渲染路径，禁止直调 OpenGL**（VulkanMod 红线，见 §2.3）。
+- **渲染纪律：只用 Fabric 标准 GuiGraphics/现代渲染路径，禁止直调 OpenGL**（保 Sodium/Iris 渲染兼容，见 §2.3）。
 - 与 Xaero 小地图等纯 HUD 类模组无冲突风险；与 GeckoLib 实体渲染同屏是否稳定列入冒烟测试。
 
 ### 4.7 BF2042 风格全界面与交互规格（矢量绘制，非像素化）
@@ -276,7 +276,7 @@ P1 必须先把这条链路在最小地图上打洞验证（打靶房），它�
 2. 文本用平滑 TrueType 渲染（含中文，如思源黑体等可再分发字体，随包保留许可声明）。
 3. 抗锯齿策略：以高分辨率虚拟画布绘制 + 下采样，或等价 AA；目标是 1080p/2K 下无锯齿、缩放平滑。
 4. 动效语言统一（淡入/滑入/进度缓动/击杀播报出入场），参考 656 Killicon 的动效质感（§3.5）。
-5. **渲染依赖策略（关键）**：首选 breakfront 自研矢量绘制管线（Tessellator 基础图元 + 缓存），保证与 VulkanMod 同屏零冲突；Modern UI（NanoVG）等第三方 UI 库列入待评估，与 VulkanMod 实测冲突则弃用 —— P0 冒烟一票否决。
+5. **渲染依赖策略（关键）**：首选 breakfront 自研矢量绘制管线（Tessellator 基础图元 + 缓存），保证与 Sodium/Iris 渲染同屏零冲突；Modern UI（NanoVG）等第三方 UI 库列入待评估，与 Iris/Sodium 实测冲突则弃用 —— P0 冒烟一票否决。
 6. 禁止"贴图化 UI 兜底"，除非性能压力经过实测与评审。
 
 **设计系统（草拟）**：深色半透明底 + 细描边高亮（战术橙/冰蓝双主色）、字号层级 4 档、统一的圆角与间距栅格 —— 先落成一份 UI 设计令牌（token）文档供全界面复用，不与原版背包等 UI 混排。
@@ -345,7 +345,7 @@ WorldEdit 在单机/创作服搭图 → 导出基准（两种格式都备）
 
 | 阶段 | 内容 | 验收标准 |
 |---|---|---|
-| **P0 地基** | 1.21.1 Fabric 工程；整合包模组清单组装；兼容冒烟：VulkanMod×SBW×GeckoLib×自研HUD 空壳 | 64 bot 压测不崩，帧数/TP 有基线记录 |
+| **P0 地基** | 1.21.1 Fabric 工程；整合包模组清单组装；兼容冒烟：Iris/Sodium×TaCZ×SBW×自研HUD 空壳 | 64 bot 压测不崩，帧数/TP 有基线记录 |
 | **P1 攻防 MVP** | breakfront 回合状态机 + 攻防规则 + 击杀归属桥打通 + 首发图 v1 + 波次部署/结算 | 完整打满一场 32v32，计分/胜负/重生全链路无人工干预 |
 | **P2 载具与兵种** | SBW 载具发放与反载具闭环、4 兵种配装、破坏白名单+差异回滚、语音分队 | 载具步兵协同对局流畅；局末 2 分钟内战场复原 |
 | **P3 氛围与上线** | HUD 打磨、音效/播报、平衡调参（时间/票数/占点速度）、防滥用、运营文档 | 公测开服，连续 48h 无重启事故 |
@@ -357,7 +357,7 @@ WorldEdit 在单机/创作服搭图 → 导出基准（两种格式都备）
 | # | 风险 | 等级 | 缓解 |
 |---|---|---|---|
 | 1 | SBW ReFabricated 为 alpha（现收敛为载具源），可能崩溃/缺功能 | 高 | 锁定可复现版本号；冲突不可调和则评估迁 NeoForge 生态；每日跟踪其更新 |
-| 2 | VulkanMod × GeckoLib/SBW 渲染冲突 | 高 | P0 冒烟先行；Sodium+Iris 回退方案就位 |
+| 2 | Iris/Sodium × GeckoLib/SBW 渲染冲突 | 中 | P0 冒烟先行（VulkanMod 冲突已实测出局，见 §2.3） |
 | 3 | TaCZ/SBW 击杀归属需桥接（TaCZ 有爆头/伤害事件接口，SBW 待探） | 中 | 三级策略（§4.5）；P1 打靶房早验证 |
 | 4 | 破坏回滚内存/耗时超限 | 中 | 可破坏集上限 + WorldEdit 兜底 |
 | 5 | Fabric 单服 64 人稳定性 | 中 | VMP/性能套件 + bot 压测 + Spark 定位 |
@@ -384,5 +384,5 @@ WorldEdit 在单机/创作服搭图 → 导出基准（两种格式都备）
 
 1. 本地环境：安装 **JDK 21**（Temurin 21；现机为 Java 26、无系统 Gradle，将使用 Gradle wrapper 自动拉取）。
 2. 脚手架：初始化 `breakfront` 工程（服务端逻辑 + 客户端 HUD/UI 双入口），版本锚点集中管理。
-3. 冒烟测试：VulkanMod × TaCZ × SBW（载具）× 自研空壳 HUD × 本地服 64 bot 压测，输出基线。
+3. 冒烟测试：Iris/Sodium × TaCZ × SBW（载具）× 自研空壳 HUD × 本地服 64 bot 压测，输出基线。
 4. 地图 v0：WorldEdit 起首发图「高架走廊」（viaduct）底图，验证攻防扇区划分。
