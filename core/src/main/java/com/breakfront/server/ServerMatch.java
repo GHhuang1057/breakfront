@@ -657,22 +657,9 @@ public final class ServerMatch {
         if (teams.sideOf(player.getUuid()) == null) {
             teams.assignLeast(player.getUuid());
         }
-        MatchPhase ph = game.phase();
-        if (ph == MatchPhase.BATTLE || ph == MatchPhase.COUNTDOWN) {
-            deployPlayer(server, player);
-            kitPlayer(server, player);
-        } else {
-            // LOBBY / ROUND_END / 其它：也先部署到阵营出生区，杜绝站在地图原版虚空出生点
-            deployPlayer(server, player);
-            kitPlayer(server, player);
-        }
-        // 若出生点本身异常（落虚空），向上兜底到世界安全高度
-        if (player.getY() < -10) {
-            double[] sp = spawnFor(teams.sideOf(player.getUuid()), server.getOverworld());
-            double safeY = sp[1] < 0 ? 70.0 : sp[1]; // 仅异常负值才抬升，正常地表高度原样使用
-            exec(server, String.format("tp %s %.1f %.1f %.1f",
-                    player.getGameProfile().getName(), sp[0], safeY, sp[2]));
-        }
+        // 任意阶段进服都部署到己方出生区（spawnFor 保证落真实实体表面；不再有假高度二次传送）
+        deployPlayer(server, player);
+        kitPlayer(server, player);
     }
 
     /** 战斗数值模型：真人满血 = 100（原版 20 心的 ×5 细化粒度）；基础值只设一次。 */
@@ -691,14 +678,11 @@ public final class ServerMatch {
         editorViewers.remove(playerId);
     }
 
-    /** 战中玩家死亡：把重生点钉在己方部署区（vanilla 复活即回防线）。 */
+    /** 玩家死亡：任意阶段都把重生点钉在己方部署区（vanilla 复活即回防线/出生区，
+     *  绝不落到世界原版出生点——低海拔地图的世界出生点可能悬空/虚空）。 */
     public void onPlayerDied(MinecraftServer server, ServerPlayerEntity player) {
         Side side = teams.sideOf(player.getUuid());
         if (side == null) {
-            return;
-        }
-        MatchPhase ph = game.phase();
-        if (ph != MatchPhase.BATTLE && ph != MatchPhase.COUNTDOWN) {
             return;
         }
         double[] sp = spawnFor(side, server.getOverworld());
@@ -721,14 +705,16 @@ public final class ServerMatch {
     /** 玩家最后被救援时间戳（防抖，避免下坠途中反复瞬移）。 */
     private final java.util.Map<java.util.UUID, Long> lastRescueAt = new java.util.HashMap<>();
 
-    /** 虚空救援（收紧版 2026-09-05 v2）：仅 y<-10 深虚空判定拉回——此前的「脚下无方块」
-     *  判定会误伤正常行走玩家（站姿脚格/半砖判定歧义→每 3s 瞬移回出生，用户报「路都走不了」）。
-     *  高空/悬空不救（玩家自行走回地面即可），杜绝任何正常行走被拉回的可能。 */
+    /** 掉出世界救援（2026-09-05 v3 根治版）：只认「低于世界建造底部 +2」的真·掉出世界。
+     *  判据 = getBottomY()+2（1.21.1 = -62）——平坦/低海拔地图的地面（如 y≈-60 超级平坦层）
+     *  完全不受影响，任何真实实体表面行走都不会被拉回（此前写死 y<-10 把低海拔地图当虚空，
+     *  导致用户在正常地面上每 2-3s 被瞬移回出生点，即「走路被拉回原位」）。 */
     private void rescueVoidedPlayers(MinecraftServer server) {
         ServerWorld overworld = server.getOverworld();
+        double voidFloor = overworld.getBottomY() + 2.0; // -62：低于此必然已掉出可建造世界
         long now = System.currentTimeMillis();
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            if (p.isSpectator() || p.getY() > -10) {
+            if (p.isSpectator() || p.getY() > voidFloor) {
                 continue;
             }
             Long last = lastRescueAt.get(p.getUuid());
@@ -744,7 +730,7 @@ public final class ServerMatch {
             double[] sp = spawnFor(side, overworld);
             exec(server, String.format("tp %s %.1f %.1f %.1f",
                     p.getGameProfile().getName(), sp[0], sp[1], sp[2]));
-            BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from void -> ({},{},{})",
+            BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from out-of-world void -> ({},{},{})",
                     p.getName().getString(), String.format("%.1f", sp[0]),
                     String.format("%.1f", sp[1]), String.format("%.1f", sp[2]));
         }
