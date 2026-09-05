@@ -85,7 +85,7 @@ public final class ZoneMarkers {
         for (ZoneView zone : zones) {
             double wx = zone.worldX();
             double wz = zone.worldZ();
-            double wy = zone.groundY() + 2.0;
+            double wy = WorldZoneRings.anchorY(zone) + 2.0;
             Vec3d to = new Vec3d(wx - cam.x, wy - cam.y, wz - cam.z);
             double dist = to.length();
             if (dist < 4.0) {

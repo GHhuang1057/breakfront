@@ -338,9 +338,9 @@ public class BreakfrontHud {
         int y = ZoneMarkers.PILL_TOP;
 
         // 细长底条（高透明，不遮视野中心）
-        ctx.fill(x, y, x + bw, y + pillH, 0x990B0F15);
-        ctx.fill(x, y, x + bw, y + 1, 0x30FFFFFF);
-        ctx.fill(x, y + pillH - 1, x + bw, y + pillH, 0x1AFFFFFF);
+        ctx.fill(x, y, x + bw, y + pillH, 0x710B0F15);
+        ctx.fill(x, y, x + bw, y + 1, 0x26FFFFFF);
+        ctx.fill(x, y + pillH - 1, x + bw, y + pillH, 0x14FFFFFF);
 
         // 左侧：进攻方剩余部署票（顶栏唯一「进度数字」）
         int leftColW = 118;
@@ -371,8 +371,9 @@ public class BreakfrontHud {
             ZoneMarkers.renderRailInto(ctx, font, bandX, y + 1, bandW, pillH - 2, zones);
         }
 
-        // 底部 3px：进攻方剩余票数进度条（唯一进度条，tickets/max）
-        if (ClientMatchState.attackerTicketsMax() > 0 && ClientMatchState.phaseOrdinal() == 2) {
+        // 底部 3px：进攻方剩余票数进度条（唯一进度条，tickets/max；部署倒计时阶段即显示）
+        if (ClientMatchState.attackerTicketsMax() > 0 && (ClientMatchState.phaseOrdinal() == 1
+                || ClientMatchState.phaseOrdinal() == 2)) {
             int gx = x + 12;
             int gw = bw - 24;
             int gy = y + pillH - 4;
