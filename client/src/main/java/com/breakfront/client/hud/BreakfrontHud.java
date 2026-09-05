@@ -70,6 +70,7 @@ public class BreakfrontHud {
         renderHitMarkers(context, font, sw, sh);
         BfMinimap.render(context, font, sw, sh);
         ZoneMarkers.render(context, font, sw, sh);
+        ActiveZonePin.render(context, font, sw); // #40：进入领地→顶栏钉卡（平滑转移）
     }
 
     // ---- W5：HitMarker 命中反馈（准星四角斜线） ----
