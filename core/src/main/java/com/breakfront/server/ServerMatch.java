@@ -718,23 +718,40 @@ public final class ServerMatch {
                 player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
     }
 
-    /** 虚空/异常位置救援：真人 y<-10 且非旁观即拉回己方出生区安全高度。 */
+    /** 玩家最后被救援时间戳（防抖，避免下坠途中反复瞬移）。 */
+    private final java.util.Map<java.util.UUID, Long> lastRescueAt = new java.util.HashMap<>();
+
+    /** 虚空/异常位置救援：真人脚下无实心方块（出生虚空/空中/坠落滞留）即拉回己方出生区。
+     *  每玩家 3s 防抖一次，目标=出生区落点（landingAt 保证脚踩方块）。 */
     private void rescueVoidedPlayers(MinecraftServer server) {
+        ServerWorld overworld = server.getOverworld();
+        long now = System.currentTimeMillis();
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            if (p.getY() > -10 || p.isSpectator()) {
+            if (p.isSpectator()) {
                 continue;
             }
+            var feet = p.getBlockPos().down(); // 脚下一格
+            boolean airborne = overworld.getBlockState(feet).isAir()
+                    && overworld.getBlockState(p.getBlockPos()).isAir();
+            if (!airborne && p.getY() > -10) {
+                continue;
+            }
+            Long last = lastRescueAt.get(p.getUuid());
+            if (last != null && now - last < 3000) {
+                continue;
+            }
+            lastRescueAt.put(p.getUuid(), now);
             Side side = teams.sideOf(p.getUuid());
             if (side == null) {
                 teams.assignLeast(p.getUuid());
                 side = teams.sideOf(p.getUuid());
             }
-            double[] sp = spawnFor(side, server.getOverworld());
-            double y = sp[1] < 0 ? 70.0 : sp[1]; // 仅异常负值抬升；正常地表高度原样落地（避免高空摔伤）
+            double[] sp = spawnFor(side, overworld);
             exec(server, String.format("tp %s %.1f %.1f %.1f",
-                    p.getGameProfile().getName(), sp[0], y, sp[2]));
-            BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from void to spawn ({},{})",
-                    p.getName().getString(), String.format("%.1f", sp[0]), String.format("%.1f", sp[2]));
+                    p.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+            BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from airborne/void -> ({},{},{})",
+                    p.getName().getString(), String.format("%.1f", sp[0]),
+                    String.format("%.1f", sp[1]), String.format("%.1f", sp[2]));
         }
     }
 
@@ -748,29 +765,32 @@ public final class ServerMatch {
     }
 
     /** 出生坐标（含 Y），攻/守默认锚定在首/末据点的阵营侧；可 /bf spawns set 覆盖。
-     *  落点一律经 {@link #landingAt}：在目标点邻域内找「真实存在方块的站面」，
-     *  杜绝虚空/假高度出生（此前空柱回退 64/70 会把人放高空或虚空）。 */
+     *  落点经 {@link #landingAt}：优先「与据点街区同层(≤街区顶+2)」的站面——
+     *  锚点地面是已证实实的方块层（AI 一直在其上走动），绝不在虚空或高架顶出生。 */
     private double[] spawnFor(Side side, ServerWorld world) {
         double[] ov = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
-        if (!Double.isNaN(ov[0])) {
-            return landingAt(world, ov[0], ov[1], null);
-        }
         int idx = side == Side.ATTACKER ? 0 : Math.max(0, zoneOrder.size() - 1);
         ZoneAnchor a = anchors.get(zoneOrder.get(idx));
+        double anchorTop = a == null ? Double.NaN : anchorGroundY(world, a);
+        if (!Double.isNaN(ov[0])) {
+            return landingAt(world, ov[0], ov[1], anchorTop, a);
+        }
         if (a == null) {
             return new double[]{8, 65, 8};
         }
         double dir = side == Side.ATTACKER ? -1 : 1;
         double sx = a.x() + dir * (a.radius() + 5);
-        return landingAt(world, sx, a.z(), a);
+        return landingAt(world, sx, a.z(), anchorTop, a);
     }
 
-    /** 在 (tx,tz) 的 ±6 邻域内找最高「实心方块顶」落点；全空则回退 side 锚点/全局 8,8。
-     *  返回 {x, 站立Y(方块顶+1), z}——保证脚底下有方块、不会从半空摔落。 */
-    private double[] landingAt(ServerWorld world, double tx, double tz, ZoneAnchor fallbackAnchor) {
-        double bestY = Double.NEGATIVE_INFINITY;
-        double bx = tx;
-        double bz = tz;
+    /** 在 (tx,tz) 的 ±6 邻域找落点，优先「站面≤anchorTop+2 中最高」= 据点街区层；
+     *  无低层站面（全在楼顶）才取最高站面；全空回退锚点柱；再退 (8,65,8) 安全桩。
+     *  返回 {x, 站立Y(方块顶+1), z}——脚底下必有方块。 */
+    private double[] landingAt(ServerWorld world, double tx, double tz,
+                               double anchorTop, ZoneAnchor fallbackAnchor) {
+        double lowBest = Double.NEGATIVE_INFINITY;
+        double anyBest = Double.NEGATIVE_INFINITY;
+        double lx = tx, lz = tz, ax = tx, az = tz;
         for (int dx = -6; dx <= 6; dx++) {
             for (int dz = -6; dz <= 6; dz++) {
                 double cx = tx + dx;
@@ -779,15 +799,31 @@ public final class ServerMatch {
                 if (Double.isNaN(t)) {
                     continue;
                 }
-                if (t > bestY) {
-                    bestY = t;
-                    bx = cx;
-                    bz = cz;
+                if (t > anyBest) {
+                    anyBest = t;
+                    ax = cx;
+                    az = cz;
+                }
+                if (!Double.isNaN(anchorTop) && t <= anchorTop + 2.0 && t > lowBest) {
+                    lowBest = t;
+                    lx = cx;
+                    lz = cz;
                 }
             }
         }
-        if (Double.isNaN(bestY)) {
-            // 邻域全空（极端）：回退锚点柱；再退 8,8 安全桩
+        double pick;
+        double px;
+        double pz;
+        if (!Double.isNaN(lowBest)) {
+            pick = lowBest;
+            px = lx;
+            pz = lz;
+        } else if (!Double.isNaN(anyBest)) {
+            pick = anyBest;
+            px = ax;
+            pz = az;
+        } else {
+            // 邻域全空（极端）：回退锚点柱；再退 (8,65,8) 安全桩
             if (fallbackAnchor != null) {
                 double t = columnTopY(world, fallbackAnchor.x(), fallbackAnchor.z());
                 if (!Double.isNaN(t)) {
@@ -796,7 +832,7 @@ public final class ServerMatch {
             }
             return new double[]{8, 65, 8};
         }
-        return new double[]{bx, bestY + 1, bz};
+        return new double[]{px, pick + 1, pz};
     }
 
     /** 柱顶方块 Y（方块顶面坐标）；该柱无方块（虚空）返回 NaN。 */
