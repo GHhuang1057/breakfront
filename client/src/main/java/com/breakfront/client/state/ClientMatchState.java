@@ -2,6 +2,7 @@ package com.breakfront.client.state;
 
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
+import com.breakfront.net.PlayerPosPayload;
 import com.breakfront.net.ScoreboardPayload;
 
 import java.util.ArrayList;
@@ -43,6 +44,9 @@ public final class ClientMatchState {
     // 上局结果（MatchStatePayload.lastResultOrdinal，结算页用）
     private static volatile int lastResultOrdinal;
 
+    // 位置帧（雷达友军点，PlayerPosPayload 0.25s 一帧）
+    private static final List<FriendDot> friends = new ArrayList<>();
+
     private ClientMatchState() {
     }
 
@@ -80,6 +84,13 @@ public final class ClientMatchState {
         board.clear();
         for (ScoreboardPayload.Row r : payload.rows()) {
             board.add(new BoardRow(r.name(), r.sideOrdinal(), r.kills(), r.deaths(), r.headshots()));
+        }
+    }
+
+    public static void applyFriends(PlayerPosPayload payload) {
+        friends.clear();
+        for (PlayerPosPayload.Row r : payload.rows()) {
+            friends.add(new FriendDot(r.name(), r.sideOrdinal(), r.x(), r.z(), r.yaw(), r.alive()));
         }
     }
 
@@ -124,6 +135,14 @@ public final class ClientMatchState {
     }
 
     public record BoardRow(String name, int sideOrdinal, int kills, int deaths, int headshots) {
+    }
+
+    public record FriendDot(String name, int sideOrdinal, double x, double z,
+                            float yaw, boolean alive) {
+    }
+
+    public static List<FriendDot> friends() {
+        return friends;
     }
 
     public static int attackerTeamKills() {

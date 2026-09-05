@@ -1,5 +1,6 @@
 package com.breakfront.server;
 
+import com.breakfront.game.BreakthroughTuning;
 import com.breakfront.game.MatchPhase;
 import com.breakfront.game.Side;
 import net.minecraft.entity.EntityType;
@@ -93,11 +94,67 @@ public final class NpcSquad {
         forceLoadAll(server);
     }
 
+    /**
+     * 按两侧目标总人数（真人 + bot）填充并裁剪 —— 供「按机器负载动态补员」调用。
+     * 目标调低时先裁剪再补员，目标调高时只补不裁。
+     */
+    public void applyFill(ServerMatch match, MinecraftServer server, int attTotal, int defTotal) {
+        setTarget(Side.ATTACKER, attTotal);
+        setTarget(Side.DEFENDER, defTotal);
+        ensure(match, server);
+        trimToTarget(match, server);
+    }
+
+    private void trimToTarget(ServerMatch match, MinecraftServer server) {
+        int wantAtt = Math.max(0, targetAttacker - online(match, server, Side.ATTACKER));
+        int wantDef = Math.max(0, targetDefender - online(match, server, Side.DEFENDER));
+        killExcess(server, Side.ATTACKER, wantAtt);
+        killExcess(server, Side.DEFENDER, wantDef);
+    }
+
+    private void killExcess(MinecraftServer server, Side side, int want) {
+        List<UUID> candidates = new ArrayList<>();
+        for (Npc n : units.values()) {
+            if (n.side == side) {
+                candidates.add(n.id);
+            }
+        }
+        int excess = candidates.size() - want;
+        if (excess <= 0) {
+            return;
+        }
+        for (UUID id : candidates) {
+            if (excess <= 0) {
+                break;
+            }
+            Npc n = units.remove(id);
+            if (n != null) {
+                exec(server, "kill @e[tag=" + TAG_PREFIX + n.shortId + "]");
+                excess--;
+            }
+        }
+    }
+
     /** 无玩家时区块不常驻 → NPC 落到未加载区块；对 NPC 所在区块开 forceload。 */
     private void forceLoadAll(MinecraftServer server) {
         for (Npc n : units.values()) {
             exec(server, String.format("forceload add %d %d",
                     (int) Math.floor(n.lastX) >> 4, (int) Math.floor(n.lastZ) >> 4));
+        }
+    }
+
+    /** 清扫已死亡/消失的单位（防止对空实体持续发 tp 导致控制台刷屏）。 */
+    public void sweep(MinecraftServer server) {
+        if (units.isEmpty()) {
+            return;
+        }
+        var world = server.getOverworld();
+        var it = units.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            if (world.getEntity(entry.getKey()) == null) {
+                it.remove();
+            }
         }
     }
 
@@ -144,8 +201,8 @@ public final class NpcSquad {
         e.addCommandTag("bf.side." + (side == Side.ATTACKER ? "att" : "def"));
         e.addCommandTag(TAG_PREFIX + sid);
         e.getAttributeInstance(net.minecraft.entity.attribute.EntityAttributes.GENERIC_MAX_HEALTH)
-                .setBaseValue(40);
-        e.setHealth(40);
+                .setBaseValue(BreakthroughTuning.PLAYER_MAX_HEALTH);
+        e.setHealth((float) BreakthroughTuning.PLAYER_MAX_HEALTH);
         // zombie 白天自燃/地形挤压防护：长效防火+再生（仍可被击杀）
         e.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
                 net.minecraft.entity.effect.StatusEffects.FIRE_RESISTANCE, 240000, 0, false, false));
@@ -174,10 +231,16 @@ public final class NpcSquad {
     // ---------- 每 tick 推进 ----------
 
     public void tick(ServerMatch match, MinecraftServer server) {
-        if (units.isEmpty() || match.game().phase() != MatchPhase.BATTLE) {
+        if (match.game().phase() != MatchPhase.BATTLE) {
             return;
         }
         stepCounter++;
+        if (stepCounter % 20 == 0) {
+            sweep(server); // 每秒清扫阵亡单位（顺带消灭「No entity was found」刷屏）
+        }
+        if (units.isEmpty()) {
+            return;
+        }
         if (stepCounter % 3 != 0) { // 每 3 tick（0.15s）动一步，兼顾平顺与开销
             return;
         }

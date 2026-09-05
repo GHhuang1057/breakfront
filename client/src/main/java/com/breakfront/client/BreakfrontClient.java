@@ -79,6 +79,10 @@ public class BreakfrontClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(KillFeedPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyKill(payload)));
 
+        // S2C 接收：位置帧（雷达友军点）
+        ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.PlayerPosPayload.ID,
+                (payload, context) -> context.client().execute(() -> ClientMatchState.applyFriends(payload)));
+
         // S2C 接收：比分/击杀榜
         ClientPlayNetworking.registerGlobalReceiver(ScoreboardPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyScoreboard(payload)));

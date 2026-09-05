@@ -1,6 +1,7 @@
 package com.breakfront.server;
 
 import com.breakfront.game.BreakthroughGame;
+import com.breakfront.game.BreakthroughTuning;
 import com.breakfront.game.MatchPhase;
 import com.breakfront.game.MatchResult;
 import com.breakfront.game.Sector;
@@ -8,6 +9,7 @@ import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
 import com.breakfront.map.SectorLayout;
 import com.breakfront.net.MatchStatePayload;
+import com.breakfront.net.PlayerPosPayload;
 import com.breakfront.net.ScoreboardPayload;
 import com.breakfront.net.SectorEditPayload;
 import com.breakfront.server.arena.ArenaViaduct;
@@ -43,8 +45,13 @@ import java.util.UUID;
  */
 public final class ServerMatch {
 
-    /** 自动填充时每边目标总人数（真人 + AI）。 */
-    private static final int FILL_TARGET = 16;
+    /**
+     * 自动填充每边目标上限（真人 + AI）。实际值由机器负载动态决定：
+     * 负载好 → 趋向上限；负载差 → 下调（见 pickFillTarget）。
+     */
+    private static final int FILL_CAP = 16;
+    /** 负载最差时的保底人数（每边，含真人）。 */
+    private static final int FILL_FLOOR = 4;
 
     private final TeamManager teams = new TeamManager();
     private final ScoreKeeper score = new ScoreKeeper();
@@ -73,9 +80,11 @@ public final class ServerMatch {
     private final double[] defenderSpawn = {Double.NaN, Double.NaN};
 
     // ---- AI 自动填充（人机对战 / 单机=一真人其余AI）----
-    private boolean autoFill = true;    // 默认开：有真人即 16v16 填充并自动开局
+    private boolean autoFill = true;    // 默认开：有真人即按负载填充并自动开局
     private boolean autoArmed;          // bot 已补齐、等待开局
     private double autoTimer = -1;
+    private int desiredPerSide = FILL_CAP; // 当前每边目标（真人+AI），按 TPS 动态
+    private int adaptTick;                 // 填充目标节流计数
 
     // ---- 扇区编辑器（/bfs）----
     private int editorSectorIdx;        // 当前编辑扇区指针
@@ -180,6 +189,9 @@ public final class ServerMatch {
                 broadcastScore(server);
             }
         }
+        if (syncCounter % 5 == 0 && !server.getPlayerManager().getPlayerList().isEmpty()) {
+            broadcastPos(server); // 每 0.25s 广播位置帧（雷达友军点）
+        }
         // 回合自动循环：结算展示 8 秒后自动重开下一局（队伍/锚点不变）
         if (game.phase() == MatchPhase.ROUND_END) {
             if (endPause < 0) {
@@ -264,14 +276,27 @@ public final class ServerMatch {
         int humans = server.getPlayerManager().getPlayerList().size();
         if (autoFill && humans > 0) {
             if (!autoArmed) {
-                npc.setTarget(Side.ATTACKER, FILL_TARGET);
-                npc.setTarget(Side.DEFENDER, FILL_TARGET);
-                npc.topUp(this, server);
+                desiredPerSide = pickFillTarget(server);
+                npc.applyFill(this, server, desiredPerSide, desiredPerSide);
                 autoArmed = true;
                 autoTimer = 5.0;
+                float tps = server.getAverageTickTime() <= 0 ? 20f : 1000f / server.getAverageTickTime();
                 BreakfrontServer.LOGGER.info(
-                        "[Breakfront] AI fill {}v{} ({} human), round in 5s", FILL_TARGET, FILL_TARGET, humans);
+                        "[Breakfront] AI fill {}v{} ({} human, tps={}), round in 5s",
+                        desiredPerSide, desiredPerSide, humans, String.format("%.0f", tps));
             } else {
+                adaptTick++;
+                if (adaptTick % 100 == 0) { // 大厅等待窗口内每 5s 按负载微调一次
+                    int next = pickFillTarget(server);
+                    if (next != desiredPerSide) {
+                        desiredPerSide = next;
+                        npc.applyFill(this, server, desiredPerSide, desiredPerSide);
+                        BreakfrontServer.LOGGER.info("[Breakfront] AI fill adjusted to {}v{} (tps={})",
+                                desiredPerSide, desiredPerSide,
+                                String.format("%.0f", server.getAverageTickTime() <= 0 ? 20f
+                                        : 1000f / server.getAverageTickTime()));
+                    }
+                }
                 autoTimer -= 0.05;
                 if (autoTimer <= 0) {
                     autoTimer = -1;
@@ -289,6 +314,19 @@ public final class ServerMatch {
         if (!autoFill) {
             tickAutoStartLegacy(server);
         }
+    }
+
+    /** 按当前 TPS 决定每边目标总人数：负载好趋上限，负载差保底。 */
+    private int pickFillTarget(MinecraftServer server) {
+        float ms = server.getAverageTickTime();
+        float tps = ms <= 0 ? 20f : 1000f / ms;
+        if (tps >= 19.4f) {
+            return FILL_CAP;
+        }
+        if (tps >= 18.6f) {
+            return (FILL_CAP + FILL_FLOOR) / 2;
+        }
+        return FILL_FLOOR;
     }
 
     /** 旧版自动开局（AI 填充关闭时）：双阵营真实玩家 ≥1 且总数 ≥2 → 5 秒开局。 */
@@ -368,15 +406,16 @@ public final class ServerMatch {
         return sb.toString();
     }
 
-    /** 竞技场环境锁定：恒为白天、禁止刷怪/天气/生物破坏，并清空既有生物。 */
+    /** 竞技场环境锁定：恒定白昼雷暴（沉浸氛围）、禁刷怪/天气变化/生物破坏，并清空既有生物。 */
     private boolean fixArenaEnvironment(MinecraftServer server) {
         String[] cmds = {
                 "gamerule doDaylightCycle false",
                 "gamerule doWeatherCycle false",
                 "gamerule doMobSpawning false",
                 "gamerule mobGriefing false",
+                "gamerule naturalRegeneration false",
                 "time set 6000",
-                "weather clear",
+                "weather thunder 1000000",
                 "kill @e[type=!minecraft:player,distance=..200]"
         };
         var source = server.getCommandSource();
@@ -451,6 +490,21 @@ public final class ServerMatch {
             rows.add(new ScoreboardPayload.Row(e.name, e.sideOrdinal, e.kills, e.deaths, e.headshots));
         }
         var payload = new ScoreboardPayload(score.attackerKills(), score.defenderKills(), rows);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            ServerPlayNetworking.send(player, payload);
+        }
+    }
+
+    /** 广播玩家位置帧（每 0.25s）：客户端雷达只显示同阵营队友。 */
+    private void broadcastPos(MinecraftServer server) {
+        var rows = new ArrayList<PlayerPosPayload.Row>();
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            Side side = teams.sideOf(p.getUuid());
+            int s = side == null ? -1 : side.ordinal();
+            rows.add(new PlayerPosPayload.Row(p.getGameProfile().getName(), s,
+                    p.getX(), p.getZ(), p.getYaw(), p.isAlive() && p.getHealth() > 0));
+        }
+        var payload = new PlayerPosPayload(rows);
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             ServerPlayNetworking.send(player, payload);
         }
@@ -548,8 +602,9 @@ public final class ServerMatch {
 
     // ================= 玩家进出 =================
 
-    /** 玩家进服：自动补位；战局中直接部署到出生区并钉重生点。 */
+    /** 玩家进服：套用 100HP 战斗模型、自动补位；战局中直接部署到出生区并钉重生点。 */
     public void onPlayerJoin(MinecraftServer server, ServerPlayerEntity player) {
+        applyCombatModel(player);
         if (teams.sideOf(player.getUuid()) == null) {
             teams.assignLeast(player.getUuid());
         }
@@ -557,6 +612,17 @@ public final class ServerMatch {
         if (ph == MatchPhase.BATTLE || ph == MatchPhase.COUNTDOWN) {
             deployPlayer(server, player);
         }
+    }
+
+    /** 战斗数值模型：真人满血 = 100（原版 20 心的 ×5 细化粒度）；基础值只设一次。 */
+    private void applyCombatModel(ServerPlayerEntity player) {
+        var maxHealth = player.getAttributeInstance(
+                net.minecraft.entity.attribute.EntityAttributes.GENERIC_MAX_HEALTH);
+        if (maxHealth != null
+                && Math.abs(maxHealth.getBaseValue() - BreakthroughTuning.PLAYER_MAX_HEALTH) > 1e-3) {
+            maxHealth.setBaseValue(BreakthroughTuning.PLAYER_MAX_HEALTH);
+        }
+        player.setHealth((float) BreakthroughTuning.PLAYER_MAX_HEALTH);
     }
 
     public void onPlayerLeft(UUID playerId) {

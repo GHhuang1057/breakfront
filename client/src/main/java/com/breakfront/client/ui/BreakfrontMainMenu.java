@@ -39,7 +39,7 @@ public class BreakfrontMainMenu extends Screen {
 
     private enum Flow { IDLE, CHECKING, CONNECTING, NEED_RESTART }
 
-    private static final String[] NAV_LABELS = {"PLAY", "单机", "设置", "退出"};
+    private static final String[] NAV_LABELS = {"PLAY", "设置", "退出"};
 
     // 布局（init 时计算）
     private int topBarH;
@@ -297,7 +297,7 @@ public class BreakfrontMainMenu extends Screen {
         ctx.drawText(this.textRenderer, Text.literal("全面战争"),
                 padX, py + 13, argb(BfTheme.TEXT, a), false);
         ctx.drawText(this.textRenderer,
-                Text.literal("32v32 大战场 · 攻防模式 Breakthrough · 城市街区"),
+                Text.literal("32v32 大战场 · 攻防 Breakthrough · 缺员自动由 AI 补位"),
                 padX, py + 30, argb(BfTheme.MUTED, a), false);
 
         // 服务器信息行（小标签 + 数值排版）
@@ -335,7 +335,7 @@ public class BreakfrontMainMenu extends Screen {
         String[] values = {
                 BfServerConfig.address(),
                 "攻防 · 2 扇区",
-                "32 v 32"
+                "32 v 32 · AI 补位"
         };
         for (int i = 0; i < labels.length; i++) {
             ctx.drawText(this.textRenderer, Text.literal(labels[i]), x, y + i * 13,
@@ -346,10 +346,10 @@ public class BreakfrontMainMenu extends Screen {
 
     private void drawSideCards(DrawContext ctx, int mouseX, int mouseY) {
         String[][] cards = {
-                {"SOLO TRAINING", "单机 · 1真人 + AI 全场对战", "连入即战"},
+                {"CONQUEST 征服", "模式池 · 后续开放", "即将推出"},
                 {"BATTLEFIELD PORTAL", "门户 · 自定义规则战场", "即将推出"}
         };
-        boolean[] locked = {false, true};
+        boolean[] locked = {true, true};
         for (int i = 0; i < cards.length; i++) {
             double in = BfEasing.staged(age, 0.22 + i * 0.08, 0.45);
             int slide = (int) ((1 - in) * 14);
@@ -405,10 +405,7 @@ public class BreakfrontMainMenu extends Screen {
         ctx.drawText(this.textRenderer, Text.literal(target), sw / 2 - tw / 2, sh / 2 + 22,
                 BfTheme.MUTED, false);
         // 底部细字
-        String tip = "连接由服务端发起 · 请保持网络畅通";
-        if (Flow.CONNECTING == flow && flowTitle.equals("SOLO TRAINING")) {
-            tip = "SOLO 单机 = 你一个真人 + 全场 AI 对战";
-        }
+        String tip = "连接由服务端发起 · 未满员位置由 AI 自动补位 · 请保持网络畅通";
         int gw = this.textRenderer.getWidth(tip);
         ctx.drawText(this.textRenderer, Text.literal(tip), sw / 2 - gw / 2, sh - 34, BfTheme.FAINT, false);
     }
@@ -476,9 +473,8 @@ public class BreakfrontMainMenu extends Screen {
                 if (mx >= navX[i] && mx <= navX[i] + navW[i]) {
                     switch (i) {
                         case 0 -> onDeploy();
-                        case 1 -> onSolo();
-                        case 2 -> client.setScreen(new OptionsScreen(this, client.options));
-                        case 3 -> client.scheduleStop();
+                        case 1 -> client.setScreen(new OptionsScreen(this, client.options));
+                        case 2 -> client.scheduleStop();
                         default -> {
                         }
                     }
@@ -491,11 +487,6 @@ public class BreakfrontMainMenu extends Screen {
         boolean inCard = inRect(mx, my, cardX, cardY, cardW, cardH);
         if (inCard) {
             onDeploy();
-            return true;
-        }
-        // 右侧小卡：SOLO TRAINING → 连入同一战场、由服务端补齐 AI（不新建本地世界）
-        if (mx >= sideX && mx <= sideX + sideW && my >= cardY && my <= cardY + sideCardH) {
-            onSolo();
             return true;
         }
         return false;
@@ -512,11 +503,6 @@ public class BreakfrontMainMenu extends Screen {
 
     private void onDeploy() {
         startFlow("ALL-OUT WARFARE");
-    }
-
-    /** SOLO TRAINING：连入服务端人机对战（不建本地世界；AI 填充由服务端负责）。 */
-    private void onSolo() {
-        startFlow("SOLO TRAINING");
     }
 
     private void startFlow(String title) {
