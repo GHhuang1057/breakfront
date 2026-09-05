@@ -2,8 +2,10 @@ package com.breakfront.client;
 
 import com.breakfront.client.bf.BfServerConfig;
 import com.breakfront.client.hud.BreakfrontHud;
+import com.breakfront.client.hud.SectorPreviewRenderer;
 import com.breakfront.client.hud.WorldZoneRings;
 import com.breakfront.client.state.ClientMatchState;
+import com.breakfront.client.state.SectorEditState;
 import com.breakfront.client.ui.BfDeployScreen;
 import com.breakfront.client.ui.BreakfrontMainMenu;
 import com.breakfront.net.KillFeedPayload;
@@ -85,9 +87,16 @@ public class BreakfrontClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.HitMarkerPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyHit(payload)));
 
+        // S2C 接收：扇区编辑器预览（/bfs 会话）
+        ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.SectorEditPayload.ID,
+                (payload, context) -> context.client().execute(() -> SectorEditState.apply(payload)));
+
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
 
         // 据点区域描边（世界空间圆环）——战地式高亮
         WorldRenderEvents.AFTER_TRANSLUCENT.register(WorldZoneRings::render);
+
+        // 扇区编辑器地面预览（世界空间圆环，按扇区分色）
+        WorldRenderEvents.AFTER_TRANSLUCENT.register(SectorPreviewRenderer::render);
     }
 }

@@ -2,11 +2,14 @@ package com.breakfront.server;
 
 import com.breakfront.game.BreakthroughGame;
 import com.breakfront.game.MatchPhase;
+import com.breakfront.game.MatchResult;
 import com.breakfront.game.Sector;
 import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
+import com.breakfront.map.SectorLayout;
 import com.breakfront.net.MatchStatePayload;
 import com.breakfront.net.ScoreboardPayload;
+import com.breakfront.net.SectorEditPayload;
 import com.breakfront.server.arena.ArenaViaduct;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.Blocks;
@@ -17,12 +20,15 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.Heightmap;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -30,17 +36,26 @@ import java.util.UUID;
  *
  * - 每 tick 调用 game.tick(0.05)
  * - 按 ZoneAnchor 统计圈内双方人数并喂给占点逻辑
- * - 默认竞技场（打靶房占位）：2 扇区 3 据点，坐标贴近原点便于摆桩验证
+ * - 扇区配置（含坐标）来自 SectorLayout：启动装载 runDir/breakfront/sectors.json，
+ *   缺失时回退内置 viaduct 布局；/bfs apply 可将编辑成果热应用到对局
+ * - AI 自动填充（autoFill）：大厅有真人时按 16v16 补 bot 并在 5s 后自动开局，
+ *   实现「单机/人少 = 1 个真人 + 其余 AI」；/bf fill off 关闭后回到双真人就绪规则
  */
 public final class ServerMatch {
+
+    /** 自动填充时每边目标总人数（真人 + AI）。 */
+    private static final int FILL_TARGET = 16;
 
     private final TeamManager teams = new TeamManager();
     private final ScoreKeeper score = new ScoreKeeper();
     private final NpcSquad npc = new NpcSquad();
-    private final BreakthroughGame game;
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     private final List<String> zoneOrder = new ArrayList<>();
-    private int syncCounter = 0; // 状态广播节流：每 10 tick 一次
+    private final Path runDir;
+
+    private SectorLayout layout;           // 扇区配置（编辑器草稿即此物，坐标唯一来源）
+    private BreakthroughGame game;         // 由 layout 重建（/bfs apply 时替换）
+    private int syncCounter = 0;           // 状态广播节流：每 10 tick 一次
     private boolean visualsPlaced = false; // 据点空间标识（信标）只放一次
     private boolean arenaBuilt = false;    // 竞技场城市只建一次
     private boolean arenaSkipped = false;  // 使用外部世界时跳过自建城市
@@ -51,61 +66,94 @@ public final class ServerMatch {
     private double endPause = -1;
 
     // ---- 出生/赛程（S1）----
-    private boolean autostart;          // 大厅人数达标自动开局
+    private boolean autostart;          // 关闭 AI 填充时：大厅双真实阵营人数达标自动开局
     private double lobbyTimer = -1;
     private MatchPhase lastPhase = MatchPhase.LOBBY;
     private final double[] attackerSpawn = {Double.NaN, Double.NaN}; // override {x,z}
     private final double[] defenderSpawn = {Double.NaN, Double.NaN};
 
-    // ---- 单机训练模式（W4B：单人世界 = 自动 AI 对战）----
-    private boolean training;          // 当前为单机训练（isSingleplayer）
-    private boolean trainingArmed;     // AI 已刷齐、等待开赛
-    private double trainingTimer = -1;
+    // ---- AI 自动填充（人机对战 / 单机=一真人其余AI）----
+    private boolean autoFill = true;    // 默认开：有真人即 16v16 填充并自动开局
+    private boolean autoArmed;          // bot 已补齐、等待开局
+    private double autoTimer = -1;
 
-    public ServerMatch() {
-        List<Sector> sectors = defaultSectors();
-        this.game = new BreakthroughGame(sectors);
-        indexAnchors();
+    // ---- 扇区编辑器（/bfs）----
+    private int editorSectorIdx;        // 当前编辑扇区指针
+    private final Set<UUID> editorViewers = new HashSet<>();
+
+    public ServerMatch(MinecraftServer server) {
+        this.runDir = server.getRunDirectory();
+        loadServerProps();
+        this.layout = loadLayoutOrFallback();
+        rebuildFromLayout();
     }
 
-    private List<Sector> defaultSectors() {
-        double captureSeconds = com.breakfront.game.BreakthroughTuning.DEFAULT_ZONE_CAPTURE_SECONDS;
-        return List.of(
-                new Sector("s1", "扇区一", List.of(
-                        new ZoneState("A1", captureSeconds),
-                        new ZoneState("A2", captureSeconds))),
-                new Sector("s2", "扇区二", List.of(
-                        new ZoneState("B1", captureSeconds))));
-    }
+    // ================= 装载与重建 =================
 
-    private void indexAnchors() {
-        anchors.clear();
-        zoneOrder.clear();
-        // 与 viaduct 地图对齐：A1/A2 在高架东西两段，B1 在中央广场（见 arena 装载）
-        double[][] spots = {
-                {20.5, 24.5}, {76.5, 24.5}, {43.5, 51.5}
-        };
-        int i = 0;
-        for (Sector sector : game.sectors()) {
-            for (ZoneState zone : sector.zones()) {
-                anchors.put(zone.id(), new ZoneAnchor(zone.id(), spots[i][0], spots[i][1], 6.0));
-                zoneOrder.add(zone.id());
-                i++;
+    /** 启动装载：外部扇区配置优先，缺失/损坏回退内置 viaduct 布局。 */
+    private SectorLayout loadLayoutOrFallback() {
+        Path file = runDir.resolve("breakfront/sectors.json");
+        if (Files.isRegularFile(file)) {
+            try {
+                SectorLayout loaded = SectorLayout.parse(
+                        Files.readString(file, StandardCharsets.UTF_8));
+                if (loaded.zoneCount() > 0) {
+                    BreakfrontServer.LOGGER.info("[Breakfront] sectors loaded from {} ({} zones)",
+                            file.getFileName(), loaded.zoneCount());
+                    return loaded;
+                }
+            } catch (Exception e) {
+                BreakfrontServer.LOGGER.warn("[Breakfront] sectors.json invalid ({}), fallback default",
+                        e.toString());
             }
         }
+        return SectorLayout.defaultViaduct();
     }
 
-    /** 服务端主循环适配（20tps × 0.05s）。 */
+    /** 以当前 layout 重建纯逻辑对局 + 锚点索引（启动与 /bfs apply 共用）。 */
+    private void rebuildFromLayout() {
+        this.game = new BreakthroughGame(layout.toGameSectors());
+        anchors.clear();
+        zoneOrder.clear();
+        for (SectorLayout.SectorDef def : layout.sectors()) {
+            for (SectorLayout.Zone z : def.zones()) {
+                anchors.put(z.id(), new ZoneAnchor(z.id(), z.x(), z.z(), z.radius()));
+                zoneOrder.add(z.id());
+            }
+        }
+        visualsPlaced = false;
+        score.reset();
+        BreakfrontServer.LOGGER.info("[Breakfront] layout applied ({} sectors, {} zones)",
+                layout.sectorCount(), layout.zoneCount());
+    }
+
+    /** 应用扇区配置：先落盘，再重建对局并回到大厅（/bfs apply）。 */
+    public String applyLayout(MinecraftServer server) {
+        if (layout.zoneCount() == 0) {
+            return "当前布局没有任何据点，拒绝应用（请先 /bfs here 添加）";
+        }
+        String save = saveLayout();
+        rebuildFromLayout();
+        game.returnToLobby();
+        autoArmed = false;
+        autoTimer = -1;
+        npc.clearAll(server);
+        BreakfrontServer.LOGGER.info("[Breakfront] layout applied to live match (lobby)");
+        pushEditorPreview(server);
+        return "已应用并保存扇区布局，对局回到大厅（自动填充将在有真人后重开）：\n" + layout.toText();
+    }
+
+    // ================= 服务端主循环 =================
+
     public void tick(MinecraftServer server) {
-        // 单机（单人世界）= 训练模式：不建自建城，直接用玩家自己的世界
+        // 单机（单人世界）与外部地图标记都跳过自建城
         if (server.isSingleplayer() && !arenaSkipped) {
             arenaSkipped = true;
             arenaBuilt = true;
         }
         if (!arenaBuilt && !arenaSkipped) {
-            // 服务器目录放 breakfront.map.external 标记 => 使用外部世界地图，跳过自建城市
             try {
-                Path flag = server.getRunDirectory().resolve("breakfront.map.external");
+                Path flag = runDir.resolve("breakfront.map.external");
                 if (Files.exists(flag)) {
                     arenaSkipped = true;
                     arenaBuilt = true;
@@ -117,7 +165,7 @@ public final class ServerMatch {
         if (!arenaBuilt && !arenaSkipped) {
             arenaBuilt = ArenaViaduct.tryBuild(server.getOverworld());
             if (arenaBuilt) {
-                BreakfrontServer.LOGGER.info("[Breakfront] viaduct arena built ({} zones)", zoneCountLog());
+                BreakfrontServer.LOGGER.info("[Breakfront] viaduct arena built ({} zones)", anchors.size());
             }
         }
         if (!envFixed) {
@@ -149,9 +197,8 @@ public final class ServerMatch {
         } else {
             endPause = -1;
         }
-        // S1 赛程：大厅自动开局 + 进入 BATTLE 的上升沿做全员部署传送
-        tickTraining(server);
-        tickAutoStart(server);
+        // S1 赛程：AI 填充/自动开局 + 进入 BATTLE 的上升沿做全员部署传送
+        tickAutoPlay(server);
         if (game.phase() == MatchPhase.BATTLE && lastPhase != MatchPhase.BATTLE) {
             teleportAllToSpawns(server);
         }
@@ -203,6 +250,81 @@ public final class ServerMatch {
             }
             game.applyZonePresence(idx, attackers, defenders, 0.05);
         }
+    }
+
+    /**
+     * 开局赛程：
+     * - autoFill 开 & 大厅有真人 → 双阵营补齐至 16 并 5 秒后自动开局（单人=1 真人其余 AI）
+     * - autoFill 关 → 沿用旧规则：双真实阵营就绪自动开（/bf autostart on）或 /bf start 手动开
+     */
+    private void tickAutoPlay(MinecraftServer server) {
+        if (game.phase() != MatchPhase.LOBBY) {
+            return; // 局中/倒计时/结算均不干预
+        }
+        int humans = server.getPlayerManager().getPlayerList().size();
+        if (autoFill && humans > 0) {
+            if (!autoArmed) {
+                npc.setTarget(Side.ATTACKER, FILL_TARGET);
+                npc.setTarget(Side.DEFENDER, FILL_TARGET);
+                npc.topUp(this, server);
+                autoArmed = true;
+                autoTimer = 5.0;
+                BreakfrontServer.LOGGER.info(
+                        "[Breakfront] AI fill {}v{} ({} human), round in 5s", FILL_TARGET, FILL_TARGET, humans);
+            } else {
+                autoTimer -= 0.05;
+                if (autoTimer <= 0) {
+                    autoTimer = -1;
+                    beginRound();
+                    visualsPlaced = false;
+                    BreakfrontServer.LOGGER.info("[Breakfront] auto round begun (fill on)");
+                }
+            }
+            return;
+        }
+        if (autoArmed) {
+            autoArmed = false;
+            autoTimer = -1;
+        }
+        if (!autoFill) {
+            tickAutoStartLegacy(server);
+        }
+    }
+
+    /** 旧版自动开局（AI 填充关闭时）：双阵营真实玩家 ≥1 且总数 ≥2 → 5 秒开局。 */
+    private void tickAutoStartLegacy(MinecraftServer server) {
+        if (game.phase() != MatchPhase.LOBBY || !autostart) {
+            lobbyTimer = -1;
+            return;
+        }
+        int att = onlineCount(Side.ATTACKER, server);
+        int def = onlineCount(Side.DEFENDER, server);
+        if (att >= 1 && def >= 1 && att + def >= 2) {
+            if (lobbyTimer < 0) {
+                lobbyTimer = 5;
+                BreakfrontServer.LOGGER.info("[Breakfront] autostart: {}v{} online, round in 5s", att, def);
+            }
+            lobbyTimer -= 0.05;
+            if (lobbyTimer <= 0) {
+                lobbyTimer = -1;
+                beginRound();
+                visualsPlaced = false;
+                teleportAllToSpawns(server);
+                BreakfrontServer.LOGGER.info("[Breakfront] autostart round begun");
+            }
+        } else {
+            lobbyTimer = -1;
+        }
+    }
+
+    private int onlineCount(Side side, MinecraftServer server) {
+        int n = 0;
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (teams.sideOf(p.getUuid()) == side) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /**
@@ -360,6 +482,10 @@ public final class ServerMatch {
         return teams;
     }
 
+    public SectorLayout layout() {
+        return layout;
+    }
+
     /** 开局统一入口：重开状态机、清战绩、补 NPC、复位据点标识。 */
     public void beginRound() {
         game.startRound();
@@ -398,18 +524,18 @@ public final class ServerMatch {
     }
 
     /** NPC 被玩家击杀：只给击杀者记分，不建 NPC 条目。 */
-    public void recordBotKill(net.minecraft.server.network.ServerPlayerEntity killer, int botSideOrd) {
+    public void recordBotKill(ServerPlayerEntity killer, int botSideOrd) {
         Side ks = teams.sideOf(killer.getUuid());
         score.creditKill(killer.getUuid(), killer.getGameProfile().getName(),
                 ks == null ? -1 : ks.ordinal());
     }
 
     /** 记录一笔击杀（第 1 层 vanilla 事件调用；爆头标记由第 2 层富化后补录）。 */
-    public void recordKill(net.minecraft.server.network.ServerPlayerEntity victim,
+    public void recordKill(ServerPlayerEntity victim,
                            net.minecraft.entity.LivingEntity killer) {
         Side vs = teams.sideOf(victim.getUuid());
         int vSide = vs == null ? 1 : vs.ordinal();
-        if (killer instanceof net.minecraft.server.network.ServerPlayerEntity kp) {
+        if (killer instanceof ServerPlayerEntity kp) {
             Side ks = teams.sideOf(kp.getUuid());
             int kSide = ks == null ? -1 : ks.ordinal();
             score.record(victim.getUuid(), victim.getGameProfile().getName(), vSide,
@@ -420,89 +546,7 @@ public final class ServerMatch {
         }
     }
 
-    // ================= S1 出生 / 赛程 =================
-
-    /** 单机训练模式：单人世界自动刷双方 AI 并开赛。 */
-    private void tickTraining(MinecraftServer server) {
-        if (!server.isSingleplayer()) {
-            if (training) {
-                training = false;
-                trainingArmed = false;
-                trainingTimer = -1;
-            }
-            return;
-        }
-        if (game.phase() == MatchPhase.ROUND_END) {
-            return; // 结算展示中（自动重开由回合循环负责）
-        }
-        int players = server.getPlayerManager().getPlayerList().size();
-        if (game.phase() == MatchPhase.LOBBY && players == 0) {
-            training = false;
-            trainingArmed = false;
-            trainingTimer = -1;
-            return;
-        }
-        if (!training) {
-            training = true;
-            BreakfrontServer.LOGGER.info("[Breakfront] 单机训练模式激活");
-        }
-        if (game.phase() == MatchPhase.BATTLE || game.phase() == MatchPhase.COUNTDOWN) {
-            return; // 已开赛，交给回合/死亡逻辑
-        }
-        if (!trainingArmed) {
-            // 玩家默认进攻方；补足双方 AI 小队（6 攻含真人 + 8 守）
-            npc.setTarget(Side.ATTACKER, 6);
-            npc.setTarget(Side.DEFENDER, 8);
-            npc.topUp(this, server);
-            trainingArmed = true;
-            trainingTimer = 5;
-            BreakfrontServer.LOGGER.info("[Breakfront] training squads ready (6v8 AI), round in 5s");
-        } else {
-            trainingTimer -= 0.05;
-            if (trainingTimer <= 0) {
-                trainingTimer = -1;
-                beginRound();
-                visualsPlaced = false;
-                teleportAllToSpawns(server);
-                BreakfrontServer.LOGGER.info("[Breakfront] training round begun");
-            }
-        }
-    }
-
-    private void tickAutoStart(MinecraftServer server) {
-        if (game.phase() != MatchPhase.LOBBY || !autostart) {
-            lobbyTimer = -1;
-            return;
-        }
-        int att = onlineCount(Side.ATTACKER, server);
-        int def = onlineCount(Side.DEFENDER, server);
-        if (att >= 1 && def >= 1 && att + def >= 2) {
-            if (lobbyTimer < 0) {
-                lobbyTimer = 5;
-                BreakfrontServer.LOGGER.info("[Breakfront] autostart: {}v{} online, round in 5s", att, def);
-            }
-            lobbyTimer -= 0.05;
-            if (lobbyTimer <= 0) {
-                lobbyTimer = -1;
-                beginRound();
-                visualsPlaced = false;
-                teleportAllToSpawns(server);
-                BreakfrontServer.LOGGER.info("[Breakfront] autostart round begun");
-            }
-        } else {
-            lobbyTimer = -1;
-        }
-    }
-
-    private int onlineCount(Side side, MinecraftServer server) {
-        int n = 0;
-        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            if (teams.sideOf(p.getUuid()) == side) {
-                n++;
-            }
-        }
-        return n;
-    }
+    // ================= 玩家进出 =================
 
     /** 玩家进服：自动补位；战局中直接部署到出生区并钉重生点。 */
     public void onPlayerJoin(MinecraftServer server, ServerPlayerEntity player) {
@@ -517,6 +561,7 @@ public final class ServerMatch {
 
     public void onPlayerLeft(UUID playerId) {
         teams.leave(playerId);
+        editorViewers.remove(playerId);
     }
 
     /** 战中玩家死亡：把重生点钉在己方部署区（vanilla 复活即回防线）。 */
@@ -584,6 +629,8 @@ public final class ServerMatch {
         }
     }
 
+    // ================= /bf autostart / fill =================
+
     public boolean autostartEnabled() {
         return autostart;
     }
@@ -593,6 +640,22 @@ public final class ServerMatch {
         if (!on) {
             lobbyTimer = -1;
         }
+        saveServerProps();
+    }
+
+    public boolean autoFillEnabled() {
+        return autoFill;
+    }
+
+    /** 开/关 AI 自动填充 + 自动开局（持久化到 runDir/breakfront-server.properties）。 */
+    public void setAutoFill(boolean on) {
+        autoFill = on;
+        autoArmed = false;
+        autoTimer = -1;
+        if (!on) {
+            npc.clearAll(BreakfrontServer.server());
+        }
+        saveServerProps();
     }
 
     public boolean setSpawnOverride(Side side, double x, double z) {
@@ -613,7 +676,308 @@ public final class ServerMatch {
                 a[0], a[1], a[2], d[0], d[1], d[2]);
     }
 
-    private int zoneCountLog() {
-        return anchors.size();
+    private void loadServerProps() {
+        try {
+            Path file = runDir.resolve("breakfront-server.properties");
+            if (Files.isRegularFile(file)) {
+                for (String raw : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                    String line = raw.trim();
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+                    int eq = line.indexOf('=');
+                    if (eq <= 0) {
+                        continue;
+                    }
+                    String k = line.substring(0, eq).trim().toLowerCase();
+                    String v = line.substring(eq + 1).trim();
+                    if (k.equals("fill")) {
+                        autoFill = v.equalsIgnoreCase("on") || v.equals("1") || v.equals("true");
+                    } else if (k.equals("autostart")) {
+                        autostart = v.equalsIgnoreCase("on") || v.equals("1") || v.equals("true");
+                    }
+                }
+            }
+        } catch (IOException e) {
+            // 保持默认
+        }
+    }
+
+    private void saveServerProps() {
+        try {
+            Path file = runDir.resolve("breakfront-server.properties");
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, String.join("\n",
+                    "# BREAKFRONT 服务端运行开关",
+                    "fill=" + (autoFill ? "on" : "off"),
+                    "autostart=" + (autostart ? "on" : "off")) + "\n",
+                    StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            BreakfrontServer.LOGGER.warn("[Breakfront] cannot save server props: {}", e.toString());
+        }
+    }
+
+    // ================= 扇区编辑器（/bfs 操作） =================
+
+    public boolean editorActive(UUID playerId) {
+        return editorViewers.contains(playerId);
+    }
+
+    public int editorViewersCount() {
+        return editorViewers.size();
+    }
+
+    public String editorOn(MinecraftServer server, UUID playerId) {
+        editorViewers.add(playerId);
+        ensureEditorSector();
+        pushEditorPreview(server);
+        return "扇区编辑器已开启：准星对准方块用 /bfs here [半径] 添加据点；/bfs help 看全部命令。当前扇区: "
+                + currentEditorSectorName();
+    }
+
+    public String editorOff(MinecraftServer server, UUID playerId) {
+        editorViewers.remove(playerId);
+        ServerPlayerEntity p = server.getPlayerManager().getPlayer(playerId);
+        if (p != null) {
+            ServerPlayNetworking.send(p, new SectorEditPayload(false, 0, List.of()));
+        }
+        return "扇区编辑器已关闭（预览已清除）";
+    }
+
+    public int editorSectorIdx() {
+        return editorSectorIdx;
+    }
+
+    public String currentEditorSectorName() {
+        ensureEditorSector();
+        return (editorSectorIdx + 1) + "/" + layout.sectorCount() + " 「"
+                + layout.sectors().get(editorSectorIdx).name() + "」"
+                + layout.sectors().get(editorSectorIdx).zones().size() + " 个据点";
+    }
+
+    /** 确保至少有一个扇区且指针有效（空布局 → 自动建「扇区一」）。 */
+    private void ensureEditorSector() {
+        if (layout.sectors().isEmpty()) {
+            layout.sectors().add(new SectorLayout.SectorDef("扇区一"));
+        }
+        if (editorSectorIdx < 0 || editorSectorIdx >= layout.sectors().size()) {
+            editorSectorIdx = 0;
+        }
+    }
+
+    /** 在指定扇区计算唯一据点 id（如 A1/A2/B1），按「扇区字母 + 序号」。 */
+    private String nextZoneId(SectorLayout.SectorDef def) {
+        int si = layout.sectors().indexOf(def);
+        if (si < 0) {
+            si = editorSectorIdx;
+        }
+        char letter = si < 26 ? (char) ('A' + si) : 'Z';
+        int n = def.zones().size() + 1;
+        String id;
+        do {
+            id = "" + letter + n;
+            n++;
+        } while (findZoneIndex(id) >= 0);
+        return id;
+    }
+
+    /** 全布局范围内查找据点，返回 {sectorIdx, zoneIdx}；找不到返回 -1。 */
+    private int[] findZoneIndex(String id) {
+        for (int si = 0; si < layout.sectors().size(); si++) {
+            List<SectorLayout.Zone> zones = layout.sectors().get(si).zones();
+            for (int zi = 0; zi < zones.size(); zi++) {
+                if (zones.get(zi).id().equals(id)) {
+                    return new int[]{si, zi};
+                }
+            }
+        }
+        return null;
+    }
+
+    /** /bfs here：在准星所指方块位置向当前扇区添加据点。 */
+    public String editorAdd(MinecraftServer server, double x, double z, double radius) {
+        ensureEditorSector();
+        SectorLayout.SectorDef def = layout.sectors().get(editorSectorIdx);
+        double r = Math.max(1.0, Math.min(64.0, radius));
+        String id = nextZoneId(def);
+        def.addZone(new SectorLayout.Zone(id, x, z, r));
+        pushEditorPreview(server);
+        return String.format("已添加据点 %s → 扇区 %d 「%s」 @ (%.1f, %.1f, r=%.0f)",
+                id, editorSectorIdx + 1, def.name(), x, z, r);
+    }
+
+    /** /bfs move：移动已有据点圆心。 */
+    public String editorMove(MinecraftServer server, String id, double x, double z) {
+        int[] idx = findZoneIndex(id);
+        if (idx == null) {
+            return "找不到据点 " + id + "（/bfs list 查看）";
+        }
+        SectorLayout.Zone old = layout.sectors().get(idx[0]).zones().get(idx[1]);
+        SectorLayout.Zone next = new SectorLayout.Zone(id, x, z, old.radius());
+        layout.sectors().get(idx[0]).zones().set(idx[1], next);
+        pushEditorPreview(server);
+        return String.format("据点 %s 移至 (%.1f, %.1f)", id, x, z);
+    }
+
+    /** /bfs resize：改据点半径。 */
+    public String editorResize(MinecraftServer server, String id, double radius) {
+        int[] idx = findZoneIndex(id);
+        if (idx == null) {
+            return "找不到据点 " + id + "（/bfs list 查看）";
+        }
+        SectorLayout.Zone old = layout.sectors().get(idx[0]).zones().get(idx[1]);
+        double r = Math.max(1.0, Math.min(64.0, radius));
+        layout.sectors().get(idx[0]).zones().set(idx[1],
+                new SectorLayout.Zone(id, old.x(), old.z(), r));
+        pushEditorPreview(server);
+        return String.format("据点 %s 半径改为 %.0f", id, r);
+    }
+
+    /** /bfs remove：删除指定据点。 */
+    public String editorRemove(MinecraftServer server, String id) {
+        for (SectorLayout.SectorDef def : layout.sectors()) {
+            if (def.removeZone(id)) {
+                pushEditorPreview(server);
+                return "已删除据点 " + id;
+            }
+        }
+        return "找不到据点 " + id + "（/bfs list 查看）";
+    }
+
+    /** /bfs undo：删除最近添加的一个据点（从最后一个扇区倒序找）。 */
+    public String editorUndo(MinecraftServer server) {
+        for (int si = layout.sectors().size() - 1; si >= 0; si--) {
+            List<SectorLayout.Zone> zones = layout.sectors().get(si).zones();
+            if (!zones.isEmpty()) {
+                SectorLayout.Zone last = zones.remove(zones.size() - 1);
+                if (editorSectorIdx >= layout.sectors().size()) {
+                    editorSectorIdx = layout.sectors().size() - 1;
+                }
+                pushEditorPreview(server);
+                return "已撤销：删除据点 " + last.id();
+            }
+        }
+        return "没有可撤销的据点";
+    }
+
+    /** /bfs sector next：前进一个扇区（到底则新建）。 */
+    public String editorSectorNext(MinecraftServer server) {
+        ensureEditorSector();
+        if (editorSectorIdx >= layout.sectors().size() - 1) {
+            layout.sectors().add(new SectorLayout.SectorDef("扇区" + (layout.sectors().size() + 1)));
+        }
+        editorSectorIdx++;
+        pushEditorPreview(server);
+        return "编辑指针 → " + currentEditorSectorName();
+    }
+
+    /** /bfs sector prev：回退一个扇区（已在第一个则不动）。 */
+    public String editorSectorPrev(MinecraftServer server) {
+        ensureEditorSector();
+        if (editorSectorIdx > 0) {
+            editorSectorIdx--;
+        }
+        pushEditorPreview(server);
+        return "编辑指针 → " + currentEditorSectorName();
+    }
+
+    /** /bfs sector name：重命名当前扇区。 */
+    public String editorSectorRename(MinecraftServer server, String name) {
+        ensureEditorSector();
+        layout.sectors().get(editorSectorIdx).setName(name);
+        pushEditorPreview(server);
+        return "当前扇区已重命名：" + currentEditorSectorName();
+    }
+
+    /** /bfs clear：清空全部扇区（保留一个空扇区便于重新开始）。 */
+    public String editorClear(MinecraftServer server) {
+        layout.sectors().clear();
+        layout.sectors().add(new SectorLayout.SectorDef("扇区一"));
+        editorSectorIdx = 0;
+        pushEditorPreview(server);
+        return "布局已清空（保留空「扇区一」，用 /bfs here 开始划分）";
+    }
+
+    /** /bfs save：落盘到 runDir/breakfront/sectors.json。 */
+    public String saveLayout() {
+        if (layout.zoneCount() == 0) {
+            return "布局为空，不保存";
+        }
+        try {
+            Path file = runDir.resolve("breakfront/sectors.json");
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, layout.toJson(), StandardCharsets.UTF_8);
+            return "扇区布局已保存 → breakfront/sectors.json（" + layout.zoneCount() + " 据点）";
+        } catch (IOException e) {
+            return "保存失败：" + e;
+        }
+    }
+
+    /** /bfs load：从磁盘重载布局（放弃未保存改动）。 */
+    public String loadLayout(MinecraftServer server) {
+        Path file = runDir.resolve("breakfront/sectors.json");
+        if (!Files.isRegularFile(file)) {
+            return "还没有已保存的布局文件（先 /bfs save）";
+        }
+        try {
+            SectorLayout loaded = SectorLayout.parse(Files.readString(file, StandardCharsets.UTF_8));
+            if (loaded.zoneCount() == 0) {
+                return "文件为空布局，拒绝装载";
+            }
+            layout = loaded;
+            editorSectorIdx = 0;
+            pushEditorPreview(server);
+            return "已从磁盘装载：" + layout.toText();
+        } catch (Exception e) {
+            return "装载失败（文件损坏？）：" + e.getMessage();
+        }
+    }
+
+    /** /bfs list：文本概览。 */
+    public String editorLayoutText() {
+        ensureEditorSector();
+        StringBuilder sb = new StringBuilder("当前布局（共 " + layout.sectorCount() + " 扇区 / "
+                + layout.zoneCount() + " 据点）：");
+        for (int si = 0; si < layout.sectors().size(); si++) {
+            SectorLayout.SectorDef def = layout.sectors().get(si);
+            sb.append('\n').append(si == editorSectorIdx ? "→ " : "  ")
+                    .append(si + 1).append(". ").append(def.name());
+            for (SectorLayout.Zone z : def.zones()) {
+                sb.append("\n     ").append(z.id())
+                        .append(" @ (x=").append(String.format("%.1f", z.x()))
+                        .append(", z=").append(String.format("%.1f", z.z()))
+                        .append(", r=").append(String.format("%.0f", z.radius()))
+                        .append(')');
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 给所有编辑器观看者推送最新预览（enabled=true）。 */
+    public void pushEditorPreview(MinecraftServer server) {
+        if (editorViewers.isEmpty() || server == null) {
+            return;
+        }
+        ServerWorld world = server.getOverworld();
+        var zones = new ArrayList<SectorEditPayload.ZoneView>();
+        for (int si = 0; si < layout.sectors().size(); si++) {
+            for (SectorLayout.Zone z : layout.sectors().get(si).zones()) {
+                int cx = (int) z.x();
+                int cz = (int) z.z();
+                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx, cz);
+                double groundY = topY <= world.getBottomY() ? 64.0 : topY + 1.0;
+                zones.add(new SectorEditPayload.ZoneView(z.id(), si, z.x(), groundY, z.z(), z.radius()));
+            }
+        }
+        SectorEditPayload payload = new SectorEditPayload(true,
+                Math.max(0, editorSectorIdx), zones);
+        for (UUID viewerId : new ArrayList<>(editorViewers)) {
+            ServerPlayerEntity p = server.getPlayerManager().getPlayer(viewerId);
+            if (p != null) {
+                ServerPlayNetworking.send(p, payload);
+            } else {
+                editorViewers.remove(viewerId);
+            }
+        }
     }
 }

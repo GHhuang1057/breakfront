@@ -36,7 +36,7 @@ public final class BreakfrontServer {
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             currentServer = server;
-            match = new ServerMatch();
+            match = new ServerMatch(server);
             KillListener.bind(match);
             updateServer = ModUpdateServer.start(server.getRunDirectory());
             LOGGER.info("[Breakfront] server match ready ({} zones, {} sectors)",
@@ -114,6 +114,7 @@ public final class BreakfrontServer {
         }
 
         CommandRegistrationCallback.EVENT.register(BreakfrontCommands::register);
+        CommandRegistrationCallback.EVENT.register(SectorEditCommands::register);
 
         LOGGER.info("[Breakfront] server hooks registered");
     }

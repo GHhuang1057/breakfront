@@ -10,7 +10,6 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.multiplayer.ConnectScreen;
 import net.minecraft.client.gui.screen.option.OptionsScreen;
-import net.minecraft.client.gui.screen.world.SelectWorldScreen;
 import net.minecraft.client.network.CookieStorage;
 import net.minecraft.client.network.ServerAddress;
 import net.minecraft.client.network.ServerInfo;
@@ -60,6 +59,7 @@ public class BreakfrontMainMenu extends Screen {
     private double age;
     private Flow flow = Flow.IDLE;
     private String flowMsg = "";
+    private String flowTitle = "ALL-OUT WARFARE"; // 当前部署加载层的模式名
     private final List<String> noticeLines = new ArrayList<>();
     private final float[] navHover = new float[NAV_LABELS.length];
     private float cardHover;
@@ -346,7 +346,7 @@ public class BreakfrontMainMenu extends Screen {
 
     private void drawSideCards(DrawContext ctx, int mouseX, int mouseY) {
         String[][] cards = {
-                {"SOLO TRAINING", "单机训练 · 本地 AI 对战", "点击进入"},
+                {"SOLO TRAINING", "单机 · 1真人 + AI 全场对战", "连入即战"},
                 {"BATTLEFIELD PORTAL", "门户 · 自定义规则战场", "即将推出"}
         };
         boolean[] locked = {false, true};
@@ -391,8 +391,8 @@ public class BreakfrontMainMenu extends Screen {
     private void drawDeployLoading(DrawContext ctx, int sw, int sh, long now) {
         BfDraw.fill(ctx, 0, 0, sw, sh, 0xF206080C);
         // 顶部：模式名（大写小字）+ 状态大字
-        ctx.drawText(this.textRenderer, Text.literal("ALL-OUT WARFARE"), sw / 2
-                - this.textRenderer.getWidth("ALL-OUT WARFARE") / 2, sh / 2 - 52, BfTheme.YELLOW, false);
+        ctx.drawText(this.textRenderer, Text.literal(flowTitle), sw / 2
+                - this.textRenderer.getWidth(flowTitle) / 2, sh / 2 - 52, BfTheme.YELLOW, false);
         int lw = this.textRenderer.getWidth(flowMsg);
         ctx.drawText(this.textRenderer, Text.literal(flowMsg), sw / 2 - lw / 2, sh / 2 - 30,
                 BfTheme.TEXT, false);
@@ -406,6 +406,9 @@ public class BreakfrontMainMenu extends Screen {
                 BfTheme.MUTED, false);
         // 底部细字
         String tip = "连接由服务端发起 · 请保持网络畅通";
+        if (Flow.CONNECTING == flow && flowTitle.equals("SOLO TRAINING")) {
+            tip = "SOLO 单机 = 你一个真人 + 全场 AI 对战";
+        }
         int gw = this.textRenderer.getWidth(tip);
         ctx.drawText(this.textRenderer, Text.literal(tip), sw / 2 - gw / 2, sh - 34, BfTheme.FAINT, false);
     }
@@ -473,7 +476,7 @@ public class BreakfrontMainMenu extends Screen {
                 if (mx >= navX[i] && mx <= navX[i] + navW[i]) {
                     switch (i) {
                         case 0 -> onDeploy();
-                        case 1 -> client.setScreen(new SelectWorldScreen(this));
+                        case 1 -> onSolo();
                         case 2 -> client.setScreen(new OptionsScreen(this, client.options));
                         case 3 -> client.scheduleStop();
                         default -> {
@@ -490,9 +493,9 @@ public class BreakfrontMainMenu extends Screen {
             onDeploy();
             return true;
         }
-        // 右侧小卡：SOLO TRAINING → 选世界（进单人世界即训练对局）
+        // 右侧小卡：SOLO TRAINING → 连入同一战场、由服务端补齐 AI（不新建本地世界）
         if (mx >= sideX && mx <= sideX + sideW && my >= cardY && my <= cardY + sideCardH) {
-            client.setScreen(new SelectWorldScreen(this));
+            onSolo();
             return true;
         }
         return false;
@@ -508,6 +511,16 @@ public class BreakfrontMainMenu extends Screen {
     }
 
     private void onDeploy() {
+        startFlow("ALL-OUT WARFARE");
+    }
+
+    /** SOLO TRAINING：连入服务端人机对战（不建本地世界；AI 填充由服务端负责）。 */
+    private void onSolo() {
+        startFlow("SOLO TRAINING");
+    }
+
+    private void startFlow(String title) {
+        flowTitle = title;
         // 启动检查已完成且无阻塞 → 直接连（部署不重复检查）
         if (sessionResult != null) {
             if (sessionResult.proceedToConnect()) {

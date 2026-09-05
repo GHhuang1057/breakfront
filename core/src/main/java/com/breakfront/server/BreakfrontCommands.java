@@ -69,6 +69,7 @@ public final class BreakfrontCommands {
                 }));
 
                 root = root.then(autostartNode());
+        root = root.then(fillNode());
         root = root.then(spawnsNode());
         root = root.then(npcNode());
 
@@ -193,7 +194,8 @@ root = root.then(literal("team")
         }
         sb.append("\n攻方人数=").append(match.teams().count(Side.ATTACKER))
                 .append(" 守方人数=").append(match.teams().count(Side.DEFENDER))
-                .append(" 自动开局=").append(match.autostartEnabled() ? "开" : "关");
+                .append(" 自动开局=").append(match.autostartEnabled() ? "开" : "关")
+                .append(" AI填充=").append(match.autoFillEnabled() ? "开" : "关");
         sb.append("\n据点锚点（/bf anchor <idx> set x z 可改）：").append(match.zoneAnchorsText());
         return sb.toString();
     }
@@ -223,6 +225,29 @@ root = root.then(literal("team")
                         match.setAutostart(false);
                     }
                     send(ctx.getSource(), "自动开局已关闭");
+                    return 1;
+                }));
+    }
+
+    /** AI 自动填充（人机/单机=一真人其余 AI）：开=有真人即 16v16 填充 5s 自动开局。 */
+    private static LiteralArgumentBuilder<ServerCommandSource> fillNode() {
+        return literal("fill").requires(s -> s.hasPermissionLevel(2))
+                .then(literal("on").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                        return 0;
+                    }
+                    match.setAutoFill(true);
+                    send(ctx.getSource(), "AI 填充已开启：大厅有真人时补齐 16v16 并在 5 秒后自动开局");
+                    return 1;
+                }))
+                .then(literal("off").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match != null) {
+                        match.setAutoFill(false);
+                    }
+                    send(ctx.getSource(), "AI 填充已关闭：仅真实玩家对局（可用 /bf autostart 或 /bf start）");
                     return 1;
                 }));
     }
