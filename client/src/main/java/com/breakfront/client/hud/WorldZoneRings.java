@@ -19,47 +19,47 @@ import org.joml.Matrix4f;
 import java.util.List;
 
 /**
- * 据点「地面高亮描边」重做版（2026-09-05 v2，BF2042/GD656 式区域标记）。
+ * 据点「方块领地」地面标线重做版（2026-09-05 v3，方形语义）。
  *
- * 上一版（逐块 1×1 方块轮廓 + 服务端单一 groundY）在城市街区几乎不可见：
- * 锯齿离散线太细、固定高度遇高差/建筑即埋地或悬空。本版彻底改画法：
+ * 依据服务端 ZoneAnchor v2 的方形判定（|dx|≤r 且 |dz|≤r），视觉侧同样以外接正方形
+ * 呈现，取代 v2 的圆环/圆坪（用户反馈：悬空、非方形、看不清边界）。
  *
- * 1) 外圈「实色高亮环带」——半径 r-0.45..r+0.4 的连续圆环（QUADS 三角带），
- *    高饱和实色 alpha≈180，约 0.9m 宽，是"描边"的主体，任何距离都清晰。
- * 2) 主环带内外两条「发光外晕」（r-0.9..r-0.5 / r+0.45..r+0.9，alpha≈55）——
- *    GD656 Killicon 多层发光同思路，复杂地形/远距离下先看到晕再看到环。
- * 3) 环带内缘一条 2px 亮线精描边（状态色最高亮度）。
- * 4) 内部极淡地坪（alpha≈30）标出占区范围，不干扰视觉。
- * 5) 中心「目标光柱」——半透明竖柱 + 顶部亮色柱头，楼群/高差中远处可定位。
- *    柱高按中心地表 +5.4m；柱头实色（守蓝/攻黄/争夺白橙呼吸）。
+ * 画法（GD656 多层发光思路，正方形四边）：
+ * 1) 内部淡色方坪（alpha≈26，整片低干扰地标出占领范围，单平面贴中心高）
+ * 2) 边界四边「高亮发光带」——宽约 0.75m 且绝大部分压在边界外侧（boundary..boundary+0.75），
+ *    沿边逐段贴地（每 ~1.5m 一采样），是"方块边缘亮光"的主体；
+ * 3) 边带外侧再压一条低透明「外晕」（+0.75..+1.25，alpha≈50，呼吸）拉出发光层次；
+ * 4) 边带内缘 2px 亮线精描（在 boundary-0.08 处，最高亮度）；
+ * 5) 四角「角柱」——垂直细柱 + 顶块，方框四角在空中也清晰可辨（楼群/坡地中定位）；
+ * 6) 中心「目标光柱」抬高至 7.5m（半透柱身 + 高亮柱头）——地标位于领地光亮中心。
  *
- * 地面锚定：不再信任服务端 groundY（外部图/自建城高差会错位）。
- * 每个环带采样点 + 圆心的高度都由客户端本地高度图实时求值
- * （Heightmap.MOTION_BLOCKING，贴方块顶面 +0.16 防 z-fighting），
- * 区块未加载时回退服务端 groundY。高度缓存约 1s 刷新一次跟踪地形破坏。
+ * 地面锚定：全部走客户端本地高度图（Heightmap.MOTION_BLOCKING 顶 +1，贴块顶 +0.16
+ * 防 z-fighting），每 ~1s 刷新一次跟踪地形变化；区块未加载回退服务端 groundY。
  *
- * 渲染路径：vanilla immediate（getPositionColorProgram / getRenderTypeLinesProgram），
- * AFTER_TRANSLUCENT 阶段，兼容 Sodium/Iris。
+ * 渲染路径：vanilla immediate（getPositionColorProgram / LINES），AFTER_TRANSLUCENT
+ * 阶段，兼容 Sodium/Iris。
  */
 public final class WorldZoneRings {
 
-    /** 环带/光柱的圆周分段数（够圆、开销小）。 */
-    private static final int SEG = 72;
-    /** 内部淡地坪分段数。 */
-    private static final int DISC_SEG = 40;
     /** 地表以上抬升量（防与方块面 z-fighting）。 */
     private static final float LIFT = 0.16f;
-    /** 光柱相对中心地表的高度。 */
-    private static final float BEACON_H = 5.4f;
+    /** 中心目标光柱相对中心地表的高度。 */
+    private static final float BEACON_H = 7.5f;
     /** 光柱半宽。 */
-    private static final float BEACON_HALF = 0.30f;
+    private static final float BEACON_HALF = 0.28f;
+    /** 角柱高度。 */
+    private static final float CORNER_H = 2.6f;
+    /** 沿边每段的期望地面采样步长（米）。 */
+    private static final double STEP = 1.5;
+    /** 单边采样点数上限（4 边合计上限 160，内存/开销可控）。 */
+    private static final int MAX_PER_EDGE = 40;
 
     // ---------- 地面高度缓存 ----------
-    // zones 指纹（x/z/r 拼接）→ 变了全量重算；否则每 REFIT_MS 刷新一次。
+    // 每 zone 一条：index0=中心地表 Y；随后按 上→右→下→左 四边各 perEdge 点（顺时针）。
     private static String lastSig = "";
     private static long lastFitMs;
-    /** 每 zone：index 0 = 圆心地表 Y，1..SEG = 环带采样点地表 Y（不可用为 NaN）。 */
     private static double[][] ground = new double[0][];
+    private static int[] perEdge = new int[0];
     private static final long REFIT_MS = 1000;
 
     private WorldZoneRings() {
@@ -104,7 +104,7 @@ public final class WorldZoneRings {
         Matrix4f m = context.positionMatrix();
         long t = System.currentTimeMillis();
 
-        // ---- 1) 内部淡地坪 + 高亮环带（一次过 QUADS） ----
+        // ---- 1) 内部淡色方坪 + 高亮边带 + 外晕（一次 QUADS） ----
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.setShader(GameRenderer::getPositionColorProgram);
@@ -114,18 +114,17 @@ public final class WorldZoneRings {
             ZoneView zone = zones.get(i);
             int[] col = areaColor(zone, t, false);
             double yc = centerY(i, zone);
-            // 发光外晕（主环带内外各一条低透明宽带，先画作底层）
-            fillGlowBandInto(quads, m, zone, i, col[0], col[1], col[2], glowAlpha(t));
-            // 内部淡地坪（平面，低 alpha）
-            fillDiscInto(quads, m, zone.worldX(), yc + 0.02, zone.worldZ(),
-                    zone.radius() - 0.45, col[0], col[1], col[2], 30);
-            // 外圈高亮环带（逐采样点贴地）
-            fillRingBandInto(quads, m, zone, i, col[0], col[1], col[2], 180);
+            double[] b = bounds(zone);
+            // 内部淡色方坪（单平面贴中心高，低干扰）
+            fillPlateInto(quads, m, b, yc + 0.02, col, 26);
+            // 外晕（边外 +0.75..+1.25）
+            fillEdgeBandInto(quads, m, b, i, 0.75, 1.25, col[0], col[1], col[2], glowAlpha(t));
+            // 高亮边带（boundary..+0.75 大部分在边外，贴地）
+            fillEdgeBandInto(quads, m, b, i, 0.0, 0.75, col[0], col[1], col[2], 185);
         }
         BufferRenderer.drawWithGlobalProgram(quads.end());
 
-        // ---- 2) 环带内缘亮线 + 中心光柱 ----
-        // 内缘亮线
+        // ---- 2) 边带内缘亮线（boundary-0.08 处） ----
         RenderSystem.setShader(GameRenderer::getRenderTypeLinesProgram);
         RenderSystem.lineWidth(2.0f);
         BufferBuilder lines = Tessellator.getInstance()
@@ -133,20 +132,220 @@ public final class WorldZoneRings {
         for (int i = 0; i < zones.size(); i++) {
             ZoneView zone = zones.get(i);
             int[] col = areaColor(zone, t, true);
-            rimBrightLineInto(lines, m, zone, i, col[0], col[1], col[2], 255);
+            rimLineInto(lines, m, bounds(zone), i, col[0], col[1], col[2], 255);
         }
         BufferRenderer.drawWithGlobalProgram(lines.end());
         RenderSystem.lineWidth(1.0f);
 
-        // 中心光柱（QUADS，与环带同样式但单独 alpha）
+        // ---- 3) 四角柱 + 中心光柱（QUADS） ----
         BufferBuilder pillars = Tessellator.getInstance()
                 .begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
         for (int i = 0; i < zones.size(); i++) {
             ZoneView zone = zones.get(i);
+            int[] col = areaColor(zone, t, true);
+            double[] b = bounds(zone);
+            double y0 = centerY(i, zone);
+            cornersInto(pillars, m, b, y0, col);
             beaconInto(pillars, m, zone, i, t);
         }
         BufferRenderer.drawWithGlobalProgram(pillars.end());
         RenderSystem.disableBlend();
+    }
+
+    // ================= 几何工具 =================
+
+    /** 外接方界 {x0,z0,x1,z1}（radius 即半边长）。 */
+    private static double[] bounds(ZoneView zone) {
+        double r = zone.radius();
+        return new double[]{zone.worldX() - r, zone.worldZ() - r,
+                zone.worldX() + r, zone.worldZ() + r};
+    }
+
+    /** 单边采样点数。 */
+    private static int perEdgeOf(ZoneView zone) {
+        int n = (int) Math.ceil(2.0 * Math.max(1, zone.radius()) / STEP);
+        return Math.max(4, Math.min(MAX_PER_EDGE, n));
+    }
+
+    /** 内部淡色方坪（半透明平面，压地形起伏近似单面）。 */
+    private static void fillPlateInto(BufferBuilder buf, Matrix4f m, double[] b,
+                                      double y, int[] col, int a) {
+        float rf = col[0] / 255f;
+        float gf = col[1] / 255f;
+        float bf = col[2] / 255f;
+        float af = Math.min(1f, a / 255f);
+        float fy = (float) y;
+        buf.vertex(m, (float) b[0], fy, (float) b[1]).color(rf, gf, bf, af);
+        buf.vertex(m, (float) b[0], fy, (float) b[3]).color(rf, gf, bf, af);
+        buf.vertex(m, (float) b[2], fy, (float) b[3]).color(rf, gf, bf, af);
+        buf.vertex(m, (float) b[2], fy, (float) b[1]).color(rf, gf, bf, af);
+    }
+
+    /**
+     * 沿正方形四边画一段「贴地发光带」：外扩量 offIn..offOut（0=正好压边界线）。
+     * 采样点：四边顺时针各 perEdge 段；缓存索引 i=1+edge*perEdge+k。
+     */
+    private static void fillEdgeBandInto(BufferBuilder buf, Matrix4f m, double[] b,
+                                         int idx, double offIn, double offOut,
+                                         int r, int g, int bl, int a) {
+        double[] gs = (idx >= 0 && idx < ground.length) ? ground[idx] : null;
+        int pe = (idx >= 0 && idx < perEdge.length) ? perEdge[idx] : 16;
+        float rf = r / 255f;
+        float gf = g / 255f;
+        float bf = bl / 255f;
+        float af = Math.min(1f, a / 255f);
+        // 每边起点终点（顺时针：上边 z=z0 从左到右；右边 x=x1 从上到下；下边 z=z1 从右到左；左边 x=x0 从下到上）
+        double[][][] edges = {
+                {{b[0], b[1]}, {b[2], b[1]}},
+                {{b[2], b[1]}, {b[2], b[3]}},
+                {{b[2], b[3]}, {b[0], b[3]}},
+                {{b[0], b[3]}, {b[0], b[1]}},
+        };
+        for (int e = 0; e < 4; e++) {
+            double xa = edges[e][0][0], za = edges[e][0][1];
+            double xb = edges[e][1][0], zb = edges[e][1][1];
+            double len = Math.hypot(xb - xa, zb - za);
+            // 外向法线（右手边朝外：顺时针前进时右侧即外部）
+            double nx = (zb - za) / len;
+            double nz = -(xb - xa) / len;
+            int segs = pe;
+            for (int k = 0; k < segs; k++) {
+                double t0 = (double) k / segs;
+                double t1 = (double) (k + 1) / segs;
+                double p0x = xa + (xb - xa) * t0;
+                double p0z = za + (zb - za) * t0;
+                double p1x = xa + (xb - xa) * t1;
+                double p1z = za + (zb - za) * t1;
+                double y0 = edgeY(gs, pe, e, k);
+                double y1 = edgeY(gs, pe, e, Math.min(k + 1, segs - 1));
+                if (Double.isNaN(y0)) y0 = centerY(idx, gs);
+                if (Double.isNaN(y1)) y1 = centerY(idx, gs);
+                float fy0 = (float) (y0 + LIFT);
+                float fy1 = (float) (y1 + LIFT);
+                buf.vertex(m, (float) (p0x + nx * offIn), fy0, (float) (p0z + nz * offIn)).color(rf, gf, bf, af);
+                buf.vertex(m, (float) (p0x + nx * offOut), fy0, (float) (p0z + nz * offOut)).color(rf, gf, bf, af);
+                buf.vertex(m, (float) (p1x + nx * offOut), fy1, (float) (p1z + nz * offOut)).color(rf, gf, bf, af);
+                buf.vertex(m, (float) (p1x + nx * offIn), fy1, (float) (p1z + nz * offIn)).color(rf, gf, bf, af);
+            }
+        }
+    }
+
+    /** 缓存内某边某采样点的地表 Y；无缓存/越界返回 NaN。 */
+    private static double edgeY(double[] gs, int pe, int edge, int k) {
+        if (gs == null || pe <= 0 || edge < 0 || edge >= 4 || k < 0 || k >= pe) {
+            return Double.NaN;
+        }
+        return gs[1 + edge * pe + k];
+    }
+
+    /** 边带内缘亮线（boundary-0.08，顺时针四边）。 */
+    private static void rimLineInto(BufferBuilder buf, Matrix4f m, double[] b,
+                                    int idx, int r, int g, int bl, int a) {
+        double[] gs = (idx >= 0 && idx < ground.length) ? ground[idx] : null;
+        int pe = (idx >= 0 && idx < perEdge.length) ? perEdge[idx] : 16;
+        float rf = r / 255f;
+        float gf = g / 255f;
+        float bf = bl / 255f;
+        float af = Math.min(1f, a / 255f);
+        double off = -0.08;
+        double[][][] edges = {
+                {{b[0], b[1]}, {b[2], b[1]}},
+                {{b[2], b[1]}, {b[2], b[3]}},
+                {{b[2], b[3]}, {b[0], b[3]}},
+                {{b[0], b[3]}, {b[0], b[1]}},
+        };
+        for (int e = 0; e < 4; e++) {
+            double xa = edges[e][0][0], za = edges[e][0][1];
+            double xb = edges[e][1][0], zb = edges[e][1][1];
+            double len = Math.hypot(xb - xa, zb - za);
+            double nx = (zb - za) / len;
+            double nz = -(xb - xa) / len;
+            int segs = pe;
+            for (int k = 0; k < segs; k++) {
+                double t0 = (double) k / segs;
+                double t1 = (double) (k + 1) / segs;
+                double p0x = xa + (xb - xa) * t0;
+                double p0z = za + (zb - za) * t0;
+                double p1x = xa + (xb - xa) * t1;
+                double p1z = za + (zb - za) * t1;
+                double y0 = edgeY(gs, pe, e, k);
+                double y1 = edgeY(gs, pe, e, Math.min(k + 1, segs - 1));
+                if (Double.isNaN(y0)) y0 = centerY(idx, gs);
+                if (Double.isNaN(y1)) y1 = centerY(idx, gs);
+                buf.vertex(m, (float) (p0x + nx * off), (float) (y0 + LIFT), (float) (p0z + nz * off))
+                        .color(rf, gf, bf, af).normal(0f, 1f, 0f);
+                buf.vertex(m, (float) (p1x + nx * off), (float) (y1 + LIFT), (float) (p1z + nz * off))
+                        .color(rf, gf, bf, af).normal(0f, 1f, 0f);
+            }
+        }
+    }
+
+    /** 四角竖直角柱（y0..y0+CORNER_H，顶加粗亮块）。 */
+    private static void cornersInto(BufferBuilder buf, Matrix4f m, double[] b,
+                                    double y0, int[] col) {
+        float rf = col[0] / 255f;
+        float gf = col[1] / 255f;
+        float bf = col[2] / 255f;
+        double h = 0.16;
+        double top = y0 + CORNER_H;
+        double pad = 0.10;
+        double[][] corners = {
+                {b[0], b[1]}, {b[2], b[1]}, {b[2], b[3]}, {b[0], b[3]}
+        };
+        for (double[] c : corners) {
+            double cx = c[0], cz = c[1];
+            quad(buf, m, cx - h, cx + h, cz - h, cz + h, y0, top, rf, gf, bf, 0.42f);
+            quad(buf, m, cx - h - pad, cx + h + pad, cz - h - pad, cz + h + pad,
+                    top, top + 0.7, rf, gf, bf, 0.95f);
+        }
+    }
+
+    /** 中心目标光柱：半透明柱身 + 顶部高亮柱头（地标位于领地光亮中心）。 */
+    private static void beaconInto(BufferBuilder buf, Matrix4f m,
+                                   ZoneView zone, int idx, long nowMs) {
+        int[] col = areaColor(zone, nowMs, true);
+        double cx = zone.worldX();
+        double cz = zone.worldZ();
+        double y0 = centerY(idx, zone) + 0.15;
+        double yTop = y0 + BEACON_H;
+        double h = BEACON_HALF;
+        double pad = 0.18;
+        float rf = col[0] / 255f;
+        float gf = col[1] / 255f;
+        float bf = col[2] / 255f;
+        boolean contested = Side.values()[zone.ownerOrdinal()] == Side.DEFENDER
+                && zone.meter() > 1e-3f;
+        quad(buf, m, cx - h, cx + h, cz - h, cz + h, y0, yTop,
+                rf, gf, bf, contested ? 0.50f : 0.36f);
+        quad(buf, m, cx - h - pad, cx + h + pad, cz - h - pad, cz + h + pad,
+                yTop, yTop + 1.1, rf, gf, bf, 0.95f);
+    }
+
+    /** 单层方盒四侧壁+顶（柱体用）。 */
+    private static void quad(BufferBuilder buf, Matrix4f m,
+                             double x0, double x1, double z0, double z1,
+                             double y0, double y1,
+                             float r, float g, float b, float a) {
+        buf.vertex(m, (float) x1, (float) y0, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y0, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y1, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y1, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y0, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y0, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y1, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y1, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y0, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y0, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y1, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y1, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y0, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y0, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y1, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y1, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y1, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y1, (float) z0).color(r, g, b, a);
+        buf.vertex(m, (float) x1, (float) y1, (float) z1).color(r, g, b, a);
+        buf.vertex(m, (float) x0, (float) y1, (float) z1).color(r, g, b, a);
     }
 
     // ================= 高度计算与缓存 =================
@@ -155,8 +354,10 @@ public final class WorldZoneRings {
         long now = System.currentTimeMillis();
         StringBuilder sig = new StringBuilder();
         for (ZoneView z : zones) {
-            sig.append((long) z.worldX() * 4).append(',').append((long) z.worldZ() * 4)
-                    .append(',').append((long) (z.radius() * 4)).append(';');
+            double r = z.radius();
+            sig.append((long) (z.worldX() * 4)).append(',')
+                    .append((long) (z.worldZ() * 4)).append(',')
+                    .append((long) (r * 4)).append(';');
         }
         String s = sig.toString();
         boolean needFit = !s.equals(lastSig) || (now - lastFitMs > REFIT_MS);
@@ -166,15 +367,30 @@ public final class WorldZoneRings {
         lastSig = s;
         lastFitMs = now;
         ground = new double[zones.size()][];
+        perEdge = new int[zones.size()];
         for (int i = 0; i < zones.size(); i++) {
             ZoneView z = zones.get(i);
-            double[] g = new double[SEG + 1];
+            int pe = perEdgeOf(z);
+            perEdge[i] = pe;
+            double[] b = bounds(z);
+            // 中心 + 四边各 pe 个点（顺时针）
+            double[] g = new double[1 + 4 * pe];
             g[0] = groundYAt(world, z.worldX(), z.worldZ());
-            for (int k = 0; k < SEG; k++) {
-                double ang = Math.PI * 2.0 * k / SEG;
-                double sx = z.worldX() + (z.radius() - 0.45) * Math.cos(ang);
-                double sz = z.worldZ() + (z.radius() - 0.45) * Math.sin(ang);
-                g[k + 1] = groundYAt(world, sx, sz);
+            double[][][] edges = {
+                    {{b[0], b[1]}, {b[2], b[1]}},
+                    {{b[2], b[1]}, {b[2], b[3]}},
+                    {{b[2], b[3]}, {b[0], b[3]}},
+                    {{b[0], b[3]}, {b[0], b[1]}},
+            };
+            for (int e = 0; e < 4; e++) {
+                double xa = edges[e][0][0], za = edges[e][0][1];
+                double xb = edges[e][1][0], zb = edges[e][1][1];
+                for (int k = 0; k < pe; k++) {
+                    double t = (double) k / pe;
+                    double sx = xa + (xb - xa) * t;
+                    double sz = za + (zb - za) * t;
+                    g[1 + e * pe + k] = groundYAt(world, sx, sz);
+                }
             }
             ground[i] = g;
         }
@@ -198,6 +414,13 @@ public final class WorldZoneRings {
         return zone.groundY();
     }
 
+    private static double centerY(int idx, double[] gs) {
+        if (gs != null && !Double.isNaN(gs[0])) {
+            return gs[0];
+        }
+        return 0;
+    }
+
     // ================= 颜色 =================
 
     /** 区域基色：守方蓝 / 攻方黄 / 争夺白→橙呼吸。bright=true 给描边线用。 */
@@ -218,165 +441,9 @@ public final class WorldZoneRings {
         return new int[]{r, g, Math.max(0, b), Math.min(255, a)};
     }
 
-    // ================= 几何 =================
-
-    /** 发光外晕：主环带内外各一条低透明宽带（同逐采样贴地画法）。 */
-    private static void fillGlowBandInto(BufferBuilder buf, Matrix4f m,
-                                         ZoneView zone, int idx,
-                                         int r, int g, int b, int a) {
-        double radius = zone.radius();
-        fillBandSegment(buf, m, zone, idx, radius - 0.95, radius - 0.50, r, g, b, a);
-        fillBandSegment(buf, m, zone, idx, radius + 0.42, radius + 0.95, r, g, b, a);
-    }
-
-    /** 外晕呼吸强度（与主环带错相，营造柔和脉动）。 */
+    /** 外晕呼吸强度（与主边带错相）。 */
     private static int glowAlpha(long timeMs) {
         float pulse = (float) ((timeMs % 1400) / 1400.0);
-        return 42 + (int) (20 * Math.sin(pulse * Math.PI * 2.0));
-    }
-
-    /** 高亮环带：r-0.45 → r+0.4 圆环三角带，逐采样点贴地。 */
-    private static void fillRingBandInto(BufferBuilder buf, Matrix4f m,
-                                         ZoneView zone, int idx,
-                                         int r, int g, int b, int a) {
-        double radius = zone.radius();
-        fillBandSegment(buf, m, zone, idx, radius - 0.45, radius + 0.40, r, g, b, a);
-    }
-
-    /** 任意半径区间的一段贴地环带（QUADS，四顶点/段，逐采样点高度）。 */
-    private static void fillBandSegment(BufferBuilder buf, Matrix4f m,
-                                        ZoneView zone, int idx,
-                                        double rIn, double rOut,
-                                        int r, int g, int b, int a) {
-        double cx = zone.worldX();
-        double cz = zone.worldZ();
-        double[] gs = (idx >= 0 && idx < ground.length) ? ground[idx] : null;
-        float rf = r / 255f;
-        float gf = g / 255f;
-        float bf = b / 255f;
-        float af = Math.min(1f, a / 255f);
-        for (int k = 0; k < SEG; k++) {
-            double a0 = Math.PI * 2.0 * k / SEG;
-            double a1 = Math.PI * 2.0 * (k + 1) / SEG;
-            double y0 = (gs != null && !Double.isNaN(gs[k + 1])) ? gs[k + 1] : centerY(idx, zone);
-            double y1 = (gs != null && !Double.isNaN(gs[((k + 1) % SEG) + 1]))
-                    ? gs[((k + 1) % SEG) + 1] : y0;
-            float fy0 = (float) (y0 + LIFT);
-            float fy1 = (float) (y1 + LIFT);
-            double c0 = Math.cos(a0), s0 = Math.sin(a0);
-            double c1 = Math.cos(a1), s1 = Math.sin(a1);
-            buf.vertex(m, (float) (cx + rIn * c0), fy0, (float) (cz + rIn * s0)).color(rf, gf, bf, af);
-            buf.vertex(m, (float) (cx + rOut * c0), fy0, (float) (cz + rOut * s0)).color(rf, gf, bf, af);
-            buf.vertex(m, (float) (cx + rOut * c1), fy1, (float) (cz + rOut * s1)).color(rf, gf, bf, af);
-            buf.vertex(m, (float) (cx + rIn * c1), fy1, (float) (cz + rIn * s1)).color(rf, gf, bf, af);
-        }
-    }
-
-    /** 环带内缘高亮线（r-0.45 处连续折线，逐点贴地）。 */
-    private static void rimBrightLineInto(BufferBuilder buf, Matrix4f m,
-                                          ZoneView zone, int idx,
-                                          int r, int g, int b, int a) {
-        double cx = zone.worldX();
-        double cz = zone.worldZ();
-        double rr = zone.radius() - 0.45;
-        double[] gs = (idx >= 0 && idx < ground.length) ? ground[idx] : null;
-        float rf = r / 255f;
-        float gf = g / 255f;
-        float bf = b / 255f;
-        float af = Math.min(1f, a / 255f);
-        for (int k = 0; k <= SEG; k++) {
-            int kk = k % SEG;
-            double ang = Math.PI * 2.0 * kk / SEG;
-            double y = (gs != null && !Double.isNaN(gs[kk + 1])) ? gs[kk + 1] : centerY(idx, zone);
-            double ax = cx + rr * Math.cos(ang);
-            double az = cz + rr * Math.sin(ang);
-            double ang2 = Math.PI * 2.0 * ((kk + 1) % SEG) / SEG;
-            double y2 = (gs != null && !Double.isNaN(gs[((kk + 1) % SEG) + 1]))
-                    ? gs[((kk + 1) % SEG) + 1] : y;
-            double bx2 = cx + rr * Math.cos(ang2);
-            double bz2 = cz + rr * Math.sin(ang2);
-            buf.vertex(m, (float) ax, (float) (y + LIFT), (float) az).color(rf, gf, bf, af)
-                    .normal(0f, 1f, 0f);
-            buf.vertex(m, (float) bx2, (float) (y2 + LIFT), (float) bz2).color(rf, gf, bf, af)
-                    .normal(0f, 1f, 0f);
-        }
-    }
-
-    /** 半透明圆盘（内部淡色地坪）。 */
-    private static void fillDiscInto(BufferBuilder buf, Matrix4f m,
-                                     double cx, double y, double cz,
-                                     double radius, int r, int g, int b, int a) {
-        if (radius <= 0.3) {
-            return;
-        }
-        float rf = r / 255f;
-        float gf = g / 255f;
-        float bf = b / 255f;
-        float af = Math.min(1f, a / 255f);
-        for (int i = 0; i < DISC_SEG; i++) {
-            double a0 = Math.PI * 2.0 * i / DISC_SEG;
-            double a1 = Math.PI * 2.0 * (i + 1) / DISC_SEG;
-            buf.vertex(m, (float) cx, (float) y, (float) cz).color(rf, gf, bf, af);
-            buf.vertex(m, (float) (cx + radius * Math.cos(a0)), (float) y,
-                    (float) (cz + radius * Math.sin(a0))).color(rf, gf, bf, af);
-            buf.vertex(m, (float) (cx + radius * Math.cos(a1)), (float) y,
-                    (float) (cz + radius * Math.sin(a1))).color(rf, gf, bf, af);
-            buf.vertex(m, (float) cx, (float) y, (float) cz).color(rf, gf, bf, af);
-        }
-    }
-
-    /** 中心目标光柱：半透明柱身 + 顶部高亮柱头（两次方盒）。 */
-    private static void beaconInto(BufferBuilder buf, Matrix4f m,
-                                   ZoneView zone, int idx, long nowMs) {
-        Side owner = Side.values()[zone.ownerOrdinal()];
-        boolean contested = owner == Side.DEFENDER && zone.meter() > 1e-3f;
-        int[] col = areaColor(zone, nowMs, true);
-        double cx = zone.worldX();
-        double cz = zone.worldZ();
-        double y0 = centerY(idx, zone) + 0.15;
-        double yTop = y0 + BEACON_H;
-        double h = BEACON_HALF;
-        double pad = 0.16;
-        float rf = col[0] / 255f;
-        float gf = col[1] / 255f;
-        float bf = col[2] / 255f;
-        // 柱身（细、半透明，顶盖封口）
-        quad(buf, m, cx - h, cx + h, cz - h, cz + h, y0, yTop,
-                rf, gf, bf, contested ? 0.50f : 0.38f);
-        // 柱头（粗一圈、高亮实色，仅柱顶再高 1.0m）
-        quad(buf, m, cx - h - pad, cx + h + pad, cz - h - pad, cz + h + pad,
-                yTop, yTop + 1.0, rf, gf, bf, 0.92f);
-    }
-
-    /** 单层方盒四侧壁（柱头用）：给定 X/Z 范围与 Y 范围。 */
-    private static void quad(BufferBuilder buf, Matrix4f m,
-                             double x0, double x1, double z0, double z1,
-                             double y0, double y1,
-                             float r, float g, float b, float a) {
-        // +x
-        buf.vertex(m, (float) x1, (float) y0, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y0, (float) z1).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y1, (float) z1).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y1, (float) z0).color(r, g, b, a);
-        // -x
-        buf.vertex(m, (float) x0, (float) y0, (float) z1).color(r, g, b, a);
-        buf.vertex(m, (float) x0, (float) y0, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x0, (float) y1, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x0, (float) y1, (float) z1).color(r, g, b, a);
-        // +z
-        buf.vertex(m, (float) x1, (float) y0, (float) z1).color(r, g, b, a);
-        buf.vertex(m, (float) x0, (float) y0, (float) z1).color(r, g, b, a);
-        buf.vertex(m, (float) x0, (float) y1, (float) z1).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y1, (float) z1).color(r, g, b, a);
-        // -z
-        buf.vertex(m, (float) x0, (float) y0, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y0, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y1, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x0, (float) y1, (float) z0).color(r, g, b, a);
-        // 顶
-        buf.vertex(m, (float) x0, (float) y1, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y1, (float) z0).color(r, g, b, a);
-        buf.vertex(m, (float) x1, (float) y1, (float) z1).color(r, g, b, a);
-        buf.vertex(m, (float) x0, (float) y1, (float) z1).color(r, g, b, a);
+        return 40 + (int) (18 * Math.sin(pulse * Math.PI * 2.0));
     }
 }

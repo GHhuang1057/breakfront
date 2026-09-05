@@ -42,7 +42,7 @@ public class BreakfrontClient implements ClientModInitializer {
 
     private static int lastDeployPhaseChange = -1;
 
-    /** M8：管理员面板热键（需 Ctrl+Shift+F6 组合，防误触；F8 被原版平滑镜头占用）。 */
+    /** M8：管理员面板热键（Ctrl+Shift+M；F8/F6 均与渲染/镜头功能冲突）。 */
     private KeyBinding adminKey;
 
     @Override
@@ -110,7 +110,7 @@ public class BreakfrontClient implements ClientModInitializer {
                 (payload, context) -> context.client().execute(
                         () -> AdminState.applyResult(payload.ok(), payload.message())));
 
-        // M8：管理员面板热键注册（F6，要求 Ctrl+Shift 同按；原 F8 与原版平滑镜头硬键冲突）
+        // M8：管理员面板热键注册（M 键，要求 Ctrl+Shift 同按；F 功能行与原版镜头/渲染冲突已弃）
         adminKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.breakfront.admin", InputUtil.Type.KEYSYM,
                 com.breakfront.client.bf.BfKeys.ADMIN, "key.categories.breakfront"));
@@ -145,8 +145,12 @@ public class BreakfrontClient implements ClientModInitializer {
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
 
-        // 据点区域描边（世界空间圆环）——战地式高亮
+        // 据点区域描边（世界空间方形亮边）——战地式高亮
         WorldRenderEvents.AFTER_TRANSLUCENT.register(WorldZoneRings::render);
+
+        // 战场士兵标记（BF ESP）：友军蓝菱形穿墙可见 / 敌军红菱形被墙遮挡
+        WorldRenderEvents.AFTER_TRANSLUCENT.register(
+                com.breakfront.client.hud.FriendlyHostileMarks::render);
 
         // 扇区编辑器地面预览（世界空间圆环，按扇区分色）
         WorldRenderEvents.AFTER_TRANSLUCENT.register(SectorPreviewRenderer::render);
