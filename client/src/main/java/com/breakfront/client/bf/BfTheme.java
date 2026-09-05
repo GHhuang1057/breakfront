@@ -25,6 +25,7 @@ public final class BfTheme {
     public static final int YELLOW_DIM = 0x80F5D44A;
     public static final int BLUE = 0xFF4DA6FF;         // 守方/信息
     public static final int RED = 0xFFFF4A3C;          // 危险
+    public static final int RED_DIM = 0x80FF4A3C;
     public static final int GREEN = 0xFF3EE88C;        // 成功/就绪/攻方占点
     public static final int GREEN_DIM = 0x803EE88C;
 
