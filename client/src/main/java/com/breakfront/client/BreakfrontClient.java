@@ -6,6 +6,7 @@ import com.breakfront.client.hud.SectorPreviewRenderer;
 import com.breakfront.client.hud.WorldZoneRings;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.SectorEditState;
+import com.breakfront.client.ui.BfBootstrapScreen;
 import com.breakfront.client.ui.BfDeployScreen;
 import com.breakfront.client.ui.BreakfrontMainMenu;
 import com.breakfront.net.KillFeedPayload;
@@ -35,6 +36,9 @@ public class BreakfrontClient implements ClientModInitializer {
 
     private static int lastDeployPhaseChange = -1;
 
+    /** 本进程只跑一次启动预检（BootstrapScreen），完成后进主菜单。 */
+    private static volatile boolean bootstrapped = false;
+
     /** 管理控制台已独立为 Web 程序（core /bfadmin），客户端不再内置任何管理 UI。 */
 
     @Override
@@ -46,7 +50,13 @@ public class BreakfrontClient implements ClientModInitializer {
         // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）+ 死亡替换为部署重生页
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.currentScreen instanceof TitleScreen) {
-                client.setScreen(new BreakfrontMainMenu());
+                // 首次进入：先跑「启动预检屏」（更新+音频下载进度），完成后自动进主菜单
+                if (!bootstrapped) {
+                    bootstrapped = true;
+                    client.setScreen(new BfBootstrapScreen());
+                } else {
+                    client.setScreen(new BreakfrontMainMenu());
+                }
                 return;
             }
             if (client.player == null || client.world == null) {

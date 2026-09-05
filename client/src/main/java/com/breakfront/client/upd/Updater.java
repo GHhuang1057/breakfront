@@ -76,7 +76,20 @@ public final class Updater {
         }
     }
 
+    /** 进度回调（预检屏使用）：stage 描述当前阶段，frac ∈ [0,1] 0=未知。 */
+    public interface Progress {
+        void report(String stage, float frac);
+    }
+
     public static Result run(String host, int updatePort) {
+        return runWithProgress(host, updatePort, null);
+    }
+
+    /** 带进度回调的完整检查+下载（Bootstrap 预检屏调用）。 */
+    public static Result runWithProgress(String host, int updatePort, Progress progress) {
+        if (progress != null) {
+            progress.report("正在检查更新源…", 0.02f);
+        }
         try {
             String base = "http://" + host + ":" + updatePort;
             String manifest = fetchWithRetry(base + "/breakfront/manifest.json");
@@ -106,9 +119,15 @@ public final class Updater {
                 }
             }
             if (need.isEmpty()) {
+                if (progress != null) {
+                    progress.report("模组已是最新", 1.0f);
+                }
                 return new Result(Outcome.OK, "已是最新");
             }
 
+            if (progress != null) {
+                progress.report("正在下载更新模组…", 0.30f);
+            }
             // 并行下载到 bfupdate/ 暂存（单文件超时 30s；并行后总时长≈最慢一个文件）
             List<java.util.concurrent.CompletableFuture<Boolean>> jobs = new ArrayList<>();
             for (RemoteFile rf : need) {
@@ -116,6 +135,7 @@ public final class Updater {
                         () -> downloadToStage(base, rf, stageDir)));
             }
             int ok = 0;
+            int done = 0;
             for (var j : jobs) {
                 try {
                     if (Boolean.TRUE.equals(j.get(40, java.util.concurrent.TimeUnit.SECONDS))) {
@@ -124,8 +144,17 @@ public final class Updater {
                 } catch (Exception je) {
                     LOGGER.warn("[Breakfront] parallel download task failed: {}", je.toString());
                 }
+                done++;
+                if (progress != null) {
+                    progress.report("正在下载更新模组…",
+                            0.30f + 0.60f * done / Math.max(1, jobs.size()));
+                }
             }
 
+            if (progress != null) {
+                progress.report(ok == need.size() ? "更新文件校验完成" : "部分下载失败（本次先联机）",
+                        ok == need.size() ? 0.95f : 0.7f);
+            }
             if (ok == need.size()) {
                 // 全部就绪：尝试即时替换（进程内 jar 被占用时自动留给影子脚本）
                 for (RemoteFile rf : need) {

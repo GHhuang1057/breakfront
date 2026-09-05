@@ -35,6 +35,11 @@ public final class ModUpdateServer {
     private HttpServer server;
     private final Map<String, Path> sources = new LinkedHashMap<>();
     private final String manifestJson;
+    /** 音乐库（runDir/breakfront-music/<scene>/*.mp3|ogg）——B 方案：全量外置分发。 */
+    private final Path musicRoot;
+    private String musicJson = "{\"files\":[]}";
+    private long musicScanMs;
+    private static final long MUSIC_CACHE_MS = 60_000;
 
     private ModUpdateServer(Path runDir) throws IOException {
         Path sync = runDir.resolve("breakfront-sync");
@@ -49,6 +54,9 @@ public final class ModUpdateServer {
             }
         }
         manifestJson = buildManifest(sources);
+        musicRoot = runDir.resolve("breakfront-music");
+        musicJson = scanMusicJson();
+        musicScanMs = System.currentTimeMillis();
     }
 
     public static ModUpdateServer start(Path runDir) {
@@ -80,6 +88,34 @@ public final class ModUpdateServer {
             });
             // 独立管理控制台（/bfadmin/*）：浏览器管理，不进入游戏
             mu.server.createContext("/bfadmin/", WebAdminConsole::handle);
+
+            // 音乐库分发（/breakfront/music/*）——客户端启动预检时同步
+            mu.server.createContext("/breakfront/music/music.json", exchange -> {
+                mu.ensureMusicScan();
+                byte[] body = mu.musicJson.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+                exchange.getResponseHeaders().set("Cache-Control", "no-store");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            mu.server.createContext("/breakfront/music/files/", exchange -> {
+                String rel = exchange.getRequestURI().getPath()
+                        .substring("/breakfront/music/files/".length());
+                Path f = mu.musicFile(rel);
+                if (f == null || !Files.isRegularFile(f)) {
+                    exchange.sendResponseHeaders(404, -1);
+                    exchange.close();
+                    return;
+                }
+                byte[] data = Files.readAllBytes(f);
+                exchange.getResponseHeaders().set("Content-Type",
+                        f.getFileName().toString().endsWith(".ogg")
+                                ? "audio/ogg" : "audio/mpeg");
+                exchange.sendResponseHeaders(200, data.length);
+                exchange.getResponseBody().write(data);
+                exchange.close();
+            });
             mu.server.setExecutor(null);
             mu.server.start();
             int count = mu.sources.size();
@@ -97,6 +133,65 @@ public final class ModUpdateServer {
             server.stop(0);
             server = null;
         }
+    }
+
+    // ================= 音乐库 =================
+
+    private void ensureMusicScan() {
+        long now = System.currentTimeMillis();
+        if (now - musicScanMs > MUSIC_CACHE_MS) {
+            musicJson = scanMusicJson();
+            musicScanMs = now;
+        }
+    }
+
+    /** 扫描 runDir/breakfront-music/<scene>/<file> → music.json（含 sha/size）。 */
+    private String scanMusicJson() {
+        StringBuilder sb = new StringBuilder("{\"files\":[");
+        boolean first = true;
+        if (Files.isDirectory(musicRoot)) {
+            try (var stream = Files.list(musicRoot)) {
+                List<Path> scenes = stream.filter(Files::isDirectory).sorted().toList();
+                for (Path scene : scenes) {
+                    String sceneName = scene.getFileName().toString();
+                    try (var fs = Files.list(scene)) {
+                        List<Path> files = fs.filter(p -> {
+                            String n = p.getFileName().toString().toLowerCase();
+                            return Files.isRegularFile(p) && (n.endsWith(".mp3") || n.endsWith(".ogg"));
+                        }).sorted().toList();
+                        for (Path f : files) {
+                            if (!first) {
+                                sb.append(',');
+                            }
+                            first = false;
+                            byte[] data = Files.readAllBytes(f);
+                            sb.append("{\"name\":\"").append(f.getFileName())
+                                    .append("\",\"scene\":\"").append(sceneName)
+                                    .append("\",\"sha256\":\"").append(sha256(data))
+                                    .append("\",\"size\":").append(data.length).append('}');
+                        }
+                    }
+                }
+            } catch (IOException ignored) {
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    /** 相对路径 <scene>/<name> → 文件（防穿越：限定一级 scene + 文件名）。 */
+    private Path musicFile(String rel) {
+        int slash = rel.indexOf('/');
+        if (slash <= 0) {
+            return null;
+        }
+        String scene = rel.substring(0, slash);
+        String name = rel.substring(slash + 1);
+        if (scene.indexOf('.') >= 0 || scene.isEmpty()
+                || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0) {
+            return null;
+        }
+        return musicRoot.resolve(scene).resolve(name).normalize();
     }
 
     private static String buildManifest(Map<String, Path> sources) throws IOException {
