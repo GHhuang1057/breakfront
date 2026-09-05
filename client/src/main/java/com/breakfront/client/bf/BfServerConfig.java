@@ -12,14 +12,14 @@ import java.util.Map;
 /**
  * BREAKFRONT 联机服务器配置。
  *
- * 现阶段默认直连本地开发服；正式上线域名将由运营方在此单点替换
- * （或编辑 config/breakfront-client.properties 的 host/port）。
- * 客户端因此不需要再走原版「服务器选择」。
+ * 默认直连公测服务器（mc.geekhonize.top，香港 frp 中继入口）；
+ * 自建/本地测试服可通过编辑 config/breakfront-client.properties 的
+ * host/port 覆盖，不影响正式客户端。客户端因此不需要再走原版「服务器选择」。
  */
 public final class BfServerConfig {
 
-    /** 上线域名位：换这里即可全网切换。 */
-    public static final String DEFAULT_HOST = "localhost";
+    /** 公测服入口（frps 中继 → frpc → 香港 MC 主机）：换这里即可全网切换。 */
+    public static final String DEFAULT_HOST = "mc.geekhonize.top";
     public static final int DEFAULT_PORT = 25565;
     public static final int DEFAULT_UPDATE_PORT = 25610;
 
@@ -51,7 +51,8 @@ public final class BfServerConfig {
                 Files.createDirectories(file.getParent());
                 Files.writeString(file, String.join("\n",
                         "# BREAKFRONT 联机配置",
-                        "# host 上线后替换为正式服务器域名/地址",
+                        "# 默认即公测服 mc.geekhonize.top（内置），以下两行通常无需改动",
+                        "# 自建/本地测试服请改 host（如 localhost）并保持端口一致",
                         "host=" + DEFAULT_HOST,
                         "port=" + DEFAULT_PORT,
                         "updatePort=" + DEFAULT_UPDATE_PORT) + "\n",
