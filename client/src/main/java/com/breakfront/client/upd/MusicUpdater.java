@@ -39,12 +39,8 @@ public final class MusicUpdater {
     public record SyncResult(int downloaded, int total, long bytes, String msg) {
     }
 
-    /** 进度回调（Bootstrap 预检屏用）。 */
-    public interface Progress {
-        void report(String stage, float frac);
-    }
-
-    public static SyncResult sync(String host, int updatePort, Progress progress) {
+    /** 进度回调（与 {@link Updater.Progress} 同形，复用其定义）。 */
+    public static void sync(String host, int updatePort, Updater.Progress progress) {
         String base = "http://" + host + ":" + updatePort + "/breakfront/music";
         List<MusicFile> remote = new ArrayList<>();
         try {
