@@ -721,19 +721,14 @@ public final class ServerMatch {
     /** 玩家最后被救援时间戳（防抖，避免下坠途中反复瞬移）。 */
     private final java.util.Map<java.util.UUID, Long> lastRescueAt = new java.util.HashMap<>();
 
-    /** 虚空/异常位置救援：真人脚下无实心方块（出生虚空/空中/坠落滞留）即拉回己方出生区。
-     *  每玩家 3s 防抖一次，目标=出生区落点（landingAt 保证脚踩方块）。 */
+    /** 虚空救援（收紧版 2026-09-05 v2）：仅 y<-10 深虚空判定拉回——此前的「脚下无方块」
+     *  判定会误伤正常行走玩家（站姿脚格/半砖判定歧义→每 3s 瞬移回出生，用户报「路都走不了」）。
+     *  高空/悬空不救（玩家自行走回地面即可），杜绝任何正常行走被拉回的可能。 */
     private void rescueVoidedPlayers(MinecraftServer server) {
         ServerWorld overworld = server.getOverworld();
         long now = System.currentTimeMillis();
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            if (p.isSpectator()) {
-                continue;
-            }
-            var feet = p.getBlockPos().down(); // 脚下一格
-            boolean airborne = overworld.getBlockState(feet).isAir()
-                    && overworld.getBlockState(p.getBlockPos()).isAir();
-            if (!airborne && p.getY() > -10) {
+            if (p.isSpectator() || p.getY() > -10) {
                 continue;
             }
             Long last = lastRescueAt.get(p.getUuid());
@@ -749,7 +744,7 @@ public final class ServerMatch {
             double[] sp = spawnFor(side, overworld);
             exec(server, String.format("tp %s %.1f %.1f %.1f",
                     p.getGameProfile().getName(), sp[0], sp[1], sp[2]));
-            BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from airborne/void -> ({},{},{})",
+            BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from void -> ({},{},{})",
                     p.getName().getString(), String.format("%.1f", sp[0]),
                     String.format("%.1f", sp[1]), String.format("%.1f", sp[2]));
         }
