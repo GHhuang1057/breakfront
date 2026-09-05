@@ -218,15 +218,14 @@ public final class NpcSquad {
                 net.minecraft.entity.effect.StatusEffects.FIRE_RESISTANCE, 240000, 0, false, false));
         e.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
                 net.minecraft.entity.effect.StatusEffects.REGENERATION, 240000, 1, false, false));
-        // 兵种主武器挂主手（客户端 BotSoldierRenderer 会画在史蒂夫士兵手上）
+        // 兵种主武器挂主手（客户端 BotSoldierRenderer 会画在史蒂夫士兵手上）。
+        // 用指令 NBT 语法（与 Kits.giveKit 同源）：1.21.1 下 NBT 标签由原版解析写入
+        // CustomData 组件，TaCZ 读取同一键位；规避 Data Component API 直写差异。
         Kits.KitSpec kit = Kits.spec(cls);
-        ItemStack gun = new ItemStack(Registries.ITEM.get(Identifier.of("tacz", "modern_kinetic_gun")));
-        if (!gun.isEmpty()) {
-            NbtCompound nbt = gun.getOrCreateNbt();
-            nbt.putString("GunId", "tacz:" + kit.gunId());
-            nbt.putInt("GunCurrentAmmoCount", kit.magSize());
-            e.equipStack(EquipmentSlot.MAINHAND, gun);
-        }
+        exec(server, String.format(
+                "replaceitem entity @e[tag=%s%s,limit=1] weapon.mainhand "
+                        + "tacz:modern_kinetic_gun{GunId:\"tacz:%s\",GunCurrentAmmoCount:%d} 1",
+                TAG_PREFIX, sid, kit.gunId(), kit.magSize()));
         e.setPosition(p.x, p.y, p.z);
         world.spawnEntity(e);
 
