@@ -206,6 +206,7 @@ public final class WebAdminConsole {
             case COUNTDOWN -> "倒计时";
             case BATTLE -> "战斗中";
             case ROUND_END -> "回合结算";
+            default -> p.name();
         };
     }
 
