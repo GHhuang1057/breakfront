@@ -1,7 +1,6 @@
 package com.breakfront.client.upd;
 
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,7 +23,11 @@ import java.util.Optional;
  *
  * 流程：PLAY 前 GET http://host:updatePort/breakfront/manifest.json，
  * 对比本机已装 breakfront / breakfront-client 的 sha256；
- * 差异则下载替换到 mods/ 同名文件，返回「需重启」结果由界面提示。
+ * 差异则下载到 bfupdate/ 暂存并返回「需重启」结果。
+ *
+ * 由于运行中的 jar 在 Windows 上被 JVM 占用、无法直接覆盖，替换动作交由
+ * {@link #armAutoApply()} 生成的影子脚本完成：游戏进程退出瞬间自动把暂存
+ * 文件拷入 mods/，并尝试用原启动命令行自动重新拉起游戏（全程无需手动操作）。
  * 更新源不可达时不阻塞联机（跳过并照常连接）。
  */
 public final class Updater {
@@ -55,6 +58,9 @@ public final class Updater {
             .connectTimeout(Duration.ofSeconds(3))
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
+
+    /** 影子替换进程本会话只武装一次（同 JVM 重复进入重启卡不重复拉起）。 */
+    private static volatile boolean watcherArmed = false;
 
     /** 轻量探测更新源是否在线（主菜单状态徽章用）。 */
     public static boolean probe(String host, int updatePort) {
@@ -88,57 +94,38 @@ public final class Updater {
             Path gameDir = FabricLoader.getInstance().getGameDir();
             Path modsDir = gameDir.resolve("mods");
             Path stageDir = gameDir.resolve("bfupdate");
-            int applied = 0;
-            int staged = 0;
-            List<String> notes = new ArrayList<>();
+            List<String> changed = new ArrayList<>();
             for (RemoteFile rf : remote) {
                 String modId = "client".equals(rf.role) ? "breakfront-client" : "breakfront";
                 Optional<Path> local = installedJar(modId);
-                boolean need = !local.isPresent()
+                boolean need = local.isEmpty()
                         || !Files.isRegularFile(local.get())
                         || !rf.sha256.equals(sha256File(local.get()));
                 if (!need) {
                     continue;
                 }
-                DownloadOutcome d = download(base, rf, modsDir, stageDir);
-                switch (d) {
-                    case APPLIED -> {
-                        applied++;
-                        notes.add(rf.name + " 已自动替换（重启生效）");
-                    }
-                    case STAGED -> {
-                        staged++;
-                        notes.add(rf.name + " 已下载，关闭游戏后双击 bfupdate\\apply-update.bat 应用");
-                    }
-                    case FAIL -> notes.add(rf.name + " 下载失败，请手动更新");
+                if (stage(base, rf, modsDir, stageDir)) {
+                    changed.add(rf.name);
                 }
             }
-            if (applied == 0 && staged == 0 && notes.isEmpty()) {
+            if (changed.isEmpty()) {
                 return new Result(Outcome.OK, "已是最新");
             }
-            if (applied == 0 && staged == 0) {
-                return new Result(Outcome.ERROR, "更新失败：" + String.join("；", notes));
-            }
-            StringBuilder msg = new StringBuilder("发现新版本模组（").append(applied).append(" 已应用 / ")
-                    .append(staged).append(" 待应用）。");
-            if (!notes.isEmpty()) {
-                msg.append(String.join("；", notes)).append("。");
-            }
-            msg.append("请完全退出并重启游戏后重新进入。");
-            return new Result(Outcome.UPDATED_REQUIRES_RESTART, msg.toString());
+            String names = String.join(" / ", changed);
+            LOGGER.info("[Breakfront] update staged: {} (auto-apply armed on restart)", names);
+            return new Result(Outcome.UPDATED_REQUIRES_RESTART,
+                    "已下载新版本模组：" + names + "。应用更新后自动重启游戏，无需手动操作。");
         } catch (Exception e) {
             LOGGER.info("[Breakfront] update source unreachable: {}", e.toString());
             return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源不可达（跳过更新）");
         }
     }
 
-    private enum DownloadOutcome { APPLIED, STAGED, FAIL }
-
     /**
-     * 下载到 bfupdate/ 暂存（同时生成一键应用脚本），随后尝试直接替换 mods/ 同名文件；
-     * 运行中的 jar 在 Windows 上通常被占用 → 失败则保留暂存并交由脚本/手动应用。
+     * 下载到 bfupdate/ 暂存；若目标未被占用（非 Windows / 非本会话加载的 jar）
+     * 则直接就地替换，否则留待影子脚本在退出后复制。
      */
-    private static DownloadOutcome download(String base, RemoteFile rf, Path modsDir, Path stageDir) {
+    private static boolean stage(String base, RemoteFile rf, Path modsDir, Path stageDir) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(base + "/breakfront/files/" + rf.name))
                     .timeout(Duration.ofSeconds(30))
@@ -146,48 +133,83 @@ public final class Updater {
                     .build();
             HttpResponse<byte[]> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() != 200) {
-                return DownloadOutcome.FAIL;
+                return false;
             }
             byte[] body = resp.body();
             if (!rf.sha256.equals(sha256(body))) {
                 LOGGER.warn("[Breakfront] {} checksum mismatch after download", rf.name);
-                return DownloadOutcome.FAIL;
+                return false;
             }
             Files.createDirectories(stageDir);
             Path staged = stageDir.resolve(rf.name);
             Files.write(staged, body);
-            writeApplyScript(stageDir);
             try {
-                Path target = modsDir.resolve(rf.name);
                 Files.createDirectories(modsDir);
-                Files.move(staged, target, StandardCopyOption.REPLACE_EXISTING);
-                LOGGER.info("[Breakfront] updated {} -> {}", rf.name, rf.sha256.substring(0, 12));
-                return DownloadOutcome.APPLIED;
+                Files.move(staged, modsDir.resolve(rf.name), StandardCopyOption.REPLACE_EXISTING);
+                LOGGER.info("[Breakfront] replaced {} directly", rf.name);
             } catch (IOException e) {
-                LOGGER.info("[Breakfront] {} is locked, staged for apply-update script", rf.name);
-                return DownloadOutcome.STAGED;
+                // 被占用 → 保留暂存，影子脚本在进程退出后处理
+                LOGGER.info("[Breakfront] {} locked -> staged for auto-apply", rf.name);
             }
+            return true;
         } catch (Exception e) {
             LOGGER.warn("[Breakfront] download {} failed: {}", rf.name, e.toString());
-            return DownloadOutcome.FAIL;
+            return false;
         }
     }
 
-    /** 生成「关闭游戏后一键应用更新」脚本（英文输出避免编码问题）。 */
-    private static void writeApplyScript(Path stageDir) {
-        try {
-            Path bat = stageDir.resolve("apply-update.bat");
-            String content = "@echo off\r\n"
-                    + "echo BREAKFRONT: applying mod update...\r\n"
-                    + "copy /Y \"%~dp0*.jar\" \"%~dp0..\\mods\\\"\r\n"
-                    + "echo Done. You can start the game now.\r\n"
-                    + "pause\r\n";
-            if (!Files.isRegularFile(bat)) {
-                Files.writeString(bat, content);
-            }
-        } catch (IOException e) {
-            LOGGER.warn("[Breakfront] write apply-update.bat failed: {}", e.toString());
+    /**
+     * 武装「影子自动应用」：写 apply-update.bat（等待本进程退出 → 拷贝暂存 jar 到
+     * mods → 用原命令行自动拉起游戏），并后台分离启动之。调用方随后应立即退出游戏。
+     *
+     * @return true 表示武装成功（随后 scheduleStop 即可）；false 表示失败（保留暂存，
+     * 可让用户手动运行 bfupdate\apply-update.bat）
+     */
+    public static synchronized boolean armAutoApply() {
+        if (watcherArmed) {
+            return true;
         }
+        try {
+            Path gameDir = FabricLoader.getInstance().getGameDir();
+            Path stageDir = gameDir.resolve("bfupdate");
+            Files.createDirectories(stageDir);
+            Path bat = stageDir.resolve("apply-update.bat");
+            long pid = ProcessHandle.current().pid();
+            String cmdline = ProcessHandle.current().info().commandLine().orElse("");
+            Files.writeString(bat, watcherScript(pid, cmdline));
+            new ProcessBuilder("cmd.exe", "/c", "start", "", "/min",
+                    bat.toAbsolutePath().toString())
+                    .start();
+            watcherArmed = true;
+            LOGGER.info("[Breakfront] auto-apply watcher armed (pid={})", pid);
+            return true;
+        } catch (Exception e) {
+            LOGGER.warn("[Breakfront] arm auto-apply watcher failed: {}", e.toString());
+            return false;
+        }
+    }
+
+    /** 影子脚本内容。cmdline 原样取自游戏启动命令行；为空则只替换不拉起。 */
+    private static String watcherScript(long pid, String cmdline) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("@echo off\r\n");
+        sb.append("rem BREAKFRONT auto-update: wait for game exit, swap jars, relaunch\r\n");
+        sb.append("set \"GAMEPID=").append(pid).append("\"\r\n");
+        sb.append(":wait\r\n");
+        sb.append("tasklist /FI \"PID eq %GAMEPID%\" 2>nul | find \"%GAMEPID%\" >nul\r\n");
+        sb.append("if not errorlevel 1 (\r\n");
+        sb.append("  timeout /t 1 /nobreak >nul\r\n");
+        sb.append("  goto :wait\r\n");
+        sb.append(")\r\n");
+        sb.append("rem game closed -> swap staged jars into mods\r\n");
+        sb.append("copy /Y \"%~dp0*.jar\" \"%~dp0..\\mods\\\" >nul\r\n");
+        sb.append("del /Q \"%~dp0breakfront*.jar\" 2>nul\r\n");
+        if (cmdline != null && !cmdline.isBlank()) {
+            sb.append("rem relaunch game with the original launch command (best-effort)\r\n");
+            sb.append("start \"\" ").append(cmdline).append("\r\n");
+        }
+        sb.append("exit\r\n");
+        return sb.toString();
     }
 
     private static Optional<Path> installedJar(String modId) {

@@ -58,6 +58,8 @@ public class BreakfrontMainMenu extends Screen {
     // 运行态
     private double age;
     private Flow flow = Flow.IDLE;
+    private boolean restarting = false;              // 自动重启已触发（防重入）
+    private long restartDeadline = Long.MAX_VALUE;   // 待重启自动倒计时截止(ms)
     private String flowMsg = "";
     private String flowTitle = "ALL-OUT WARFARE"; // 当前部署加载层的模式名
     private final List<String> noticeLines = new ArrayList<>();
@@ -110,6 +112,7 @@ public class BreakfrontMainMenu extends Screen {
         // 启动即检查更新（本会话一次）；结果驱动徽章与重启卡片
         if (sessionResult != null && !sessionResult.proceedToConnect()) {
             flow = Flow.NEED_RESTART;
+            armRestart();
             wrap(noticeLines, sessionResult.message(), (int) Math.min(width * 0.66, 470) - 60);
         } else {
             flow = Flow.IDLE;
@@ -129,8 +132,30 @@ public class BreakfrontMainMenu extends Screen {
         if (flow == Flow.IDLE) {
             if (!r.proceedToConnect()) {
                 flow = Flow.NEED_RESTART;
+                armRestart();
                 wrap(noticeLines, r.message(), (int) Math.min(width * 0.66, 470) - 60);
             }
+        }
+    }
+
+    /** 进入待重启态：启动 6 秒自动重启倒计时（点「稍后」可暂停）。 */
+    private void armRestart() {
+        restarting = false;
+        restartDeadline = System.currentTimeMillis() + 6000;
+    }
+
+    /** 自动重启：武装影子替换进程 → 退出游戏（退出瞬间由影子脚本替换 mods 并拉起新进程）。 */
+    private void doRestartNow() {
+        if (restarting) {
+            return;
+        }
+        restarting = true;
+        if (Updater.armAutoApply()) {
+            client.scheduleStop();
+        } else {
+            // 武装失败：保留暂存，停在卡片上让用户点「立即重启」重试或手动跑 bat
+            restarting = false;
+            restartDeadline = Long.MAX_VALUE;
         }
     }
 
@@ -151,6 +176,10 @@ public class BreakfrontMainMenu extends Screen {
 
         if (flow == Flow.NEED_RESTART) {
             drawRestartCard(ctx, sw, sh, now);
+            // 倒计时归零 → 自动重启（一次）
+            if (!restarting && restartDeadline != Long.MAX_VALUE && now >= restartDeadline) {
+                doRestartNow();
+            }
         } else if (flow == Flow.CHECKING || flow == Flow.CONNECTING) {
             drawDeployLoading(ctx, sw, sh, now);
         }
@@ -413,28 +442,39 @@ public class BreakfrontMainMenu extends Screen {
     private void drawRestartCard(DrawContext ctx, int sw, int sh, long now) {
         BfDraw.fill(ctx, 0, 0, sw, sh, 0xD806080C);
         int cw = (int) Math.min(sw * 0.66, 470);
-        int ch = 118;
+        int ch = 150;
         int x = sw / 2 - cw / 2;
         int y = sh / 2 - ch / 2;
         BfDraw.fill(ctx, x, y, cw, ch, BfTheme.PANEL);
         BfDraw.fill(ctx, x, y, 4, ch, BfTheme.YELLOW);
-        ctx.drawText(this.textRenderer, Text.literal("模组已更新"), x + 24, y + 18, BfTheme.YELLOW, false);
-        int ly = y + 40;
+        ctx.drawText(this.textRenderer, Text.literal("模组已更新 · 自动重启中"), x + 24, y + 18, BfTheme.YELLOW, false);
+        int ly = y + 42;
         for (String line : noticeLines) {
             ctx.drawText(this.textRenderer, Text.literal(line), x + 24, ly, BfTheme.TEXT_DIM, false);
-            ly += 13;
+            ly += 14;
         }
-        // 按钮：退出游戏（黄实底） / 返回（描边）
+        // 倒计时/暂停状态提示
+        String hint;
+        if (restartDeadline != Long.MAX_VALUE) {
+            int cnt = (int) Math.max(1, (restartDeadline - now + 999) / 1000);
+            hint = cnt + " 秒后自动应用更新并重启游戏（替换 mods 无需手动操作）";
+        } else {
+            hint = "自动重启已暂停 · 点击「立即重启」应用更新";
+        }
+        int hw = this.textRenderer.getWidth(hint);
+        ctx.drawText(this.textRenderer, Text.literal(hint),
+                x + cw / 2 - hw / 2, y + ch - 48, BfTheme.AMBER, false);
+        // 按钮：立即重启（黄实底） / 稍后（描边）
         int bW = 128;
         int bH = 30;
         int by = y + ch - bH - 14;
         BfDraw.parallelogram(ctx, x + cw - bW * 2 - 34, by, bW, bH, 5, BfTheme.YELLOW);
-        int t1w = this.textRenderer.getWidth("退出游戏");
-        ctx.drawText(this.textRenderer, Text.literal("退出游戏"),
+        int t1w = this.textRenderer.getWidth("立即重启");
+        ctx.drawText(this.textRenderer, Text.literal("立即重启"),
                 x + cw - bW * 2 - 34 + bW / 2 - t1w / 2, by + bH / 2 - 4, 0xFF0A0D12, false);
         BfDraw.border(ctx, x + cw - bW - 22, by, bW, bH, BfTheme.PANEL_LINE);
-        int t2w = this.textRenderer.getWidth("返回");
-        ctx.drawText(this.textRenderer, Text.literal("返回"),
+        int t2w = this.textRenderer.getWidth("稍后");
+        ctx.drawText(this.textRenderer, Text.literal("稍后"),
                 x + cw - bW - 22 + bW / 2 - t2w / 2, by + bH / 2 - 4, BfTheme.TEXT_DIM, false);
     }
 
@@ -448,18 +488,18 @@ public class BreakfrontMainMenu extends Screen {
         // 重启卡片
         if (flow == Flow.NEED_RESTART) {
             int cw = (int) Math.min(width * 0.66, 470);
-            int ch = 118;
+            int ch = 150;
             int x = width / 2 - cw / 2;
             int y = height / 2 - ch / 2;
             int bW = 128;
             int bH = 30;
             int by = y + ch - bH - 14;
             if (inRect(mx, my, x + cw - bW * 2 - 34, by, bW, bH)) {
-                client.scheduleStop();
+                doRestartNow();
                 return true;
             }
             if (inRect(mx, my, x + cw - bW - 22, by, bW, bH)) {
-                flow = Flow.IDLE;
+                restartDeadline = Long.MAX_VALUE; // 暂停自动重启，稍后手动
                 return true;
             }
             return false;
@@ -512,8 +552,9 @@ public class BreakfrontMainMenu extends Screen {
             if (sessionResult.proceedToConnect()) {
                 startConnect();
             } else {
-                // 有待应用的更新：重新弹出提示卡片
+                // 有待应用的更新：重新弹出提示卡片（自动重启）
                 flow = Flow.NEED_RESTART;
+                armRestart();
                 wrap(noticeLines, sessionResult.message(), (int) Math.min(width * 0.66, 470) - 60);
             }
             return;
@@ -536,6 +577,7 @@ public class BreakfrontMainMenu extends Screen {
             return;
         }
         flow = Flow.NEED_RESTART;
+        armRestart();
         wrap(noticeLines, r.message(), (int) Math.min(width * 0.66, 470) - 60);
     }
 

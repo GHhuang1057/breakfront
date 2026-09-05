@@ -151,3 +151,14 @@
 7. **批 G**：M7 UI 外壳波 1/波 2 收尾。
 
 每批结束 = push → Actions → dev 发布 → 部署 mcserver → 重启 → RCON 冒烟 → 交付验收条目。
+
+---
+## 执行状态（2026-09-05 10:25 更新）
+- ✅ 批 A（M1+M5+M6 主体）已交付：main bbefc58，本地服已部署重启，RCON 冒烟通过（AI填充=开、雷暴+恒白昼生效、更新源正常）。
+  - M1：主菜单删除单机/SOLO 全部入口，仅多人直连；右侧小卡改模式预告。
+  - M5：真人+NPC 满血 100（PLAYER_MAX_HEALTH）；naturalRegeneration=false；AI 填充按 TPS 动态（≥19.4→16 边，≥18.6→10，低→4）。
+  - M5/M6：客户端首引 mixin 关闭原生 HUD（血/饥饿/护甲/经验/物品栏/准星/Buff/原生 TAB），保留聊天/标题/遮罩；HUD v3＝顶部战况带＋左下血量＋右下武器＋右上矢量雷达（BfMinimap）；新增 S2C PlayerPosPayload(0.25s)。
+  - 环境默认：恒白昼 6000 + 雷暴（weather thunder）。
+  - 技术：loom 1.17 用 tiny remapper 直改 mixin 字符串为 intermediary（无需 refmap，已 javap 验证 method_ 常量）。
+- ⚠️ 过渡说明（批 C 枪械调参前）：枪伤仍是默认枪包 20HP 口径，100HP 下偏弱；Metro 正确点位仍需用 /bfs 重划后 save。
+- ⏳ 后续批次：B=M4 标记重写+小地图细化；C=M2 枪械发放+数值适配；D=M8 管理员模式；E=M3 光影(Iris+低配高质包，客户端装配)；F=M9 AI v2(服务端引擎+Steve 替身)；G=M7 UI 外壳。
