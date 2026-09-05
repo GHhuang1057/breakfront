@@ -79,53 +79,102 @@ public final class Updater {
     public static Result run(String host, int updatePort) {
         try {
             String base = "http://" + host + ":" + updatePort;
-            HttpRequest req = HttpRequest.newBuilder(URI.create(base + "/breakfront/manifest.json"))
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源返回 " + resp.statusCode());
+            String manifest = fetchWithRetry(base + "/breakfront/manifest.json");
+            if (manifest == null) {
+                return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源不可达（跳过更新）");
             }
-            List<RemoteFile> remote = parseManifest(resp.body());
+            List<RemoteFile> remote = parseManifest(manifest);
             if (remote.isEmpty()) {
                 return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源暂未配置模组文件");
             }
             Path gameDir = FabricLoader.getInstance().getGameDir();
             Path modsDir = gameDir.resolve("mods");
             Path stageDir = gameDir.resolve("bfupdate");
-            List<String> changed = new ArrayList<>();
+
+            // 需要更新的文件（本地缺失或 sha 不一致）
+            List<RemoteFile> need = new ArrayList<>();
+            List<String> names = new ArrayList<>();
             for (RemoteFile rf : remote) {
                 String modId = "client".equals(rf.role) ? "breakfront-client" : "breakfront";
                 Optional<Path> local = installedJar(modId);
-                boolean need = local.isEmpty()
+                boolean outdated = local.isEmpty()
                         || !Files.isRegularFile(local.get())
                         || !rf.sha256.equals(sha256File(local.get()));
-                if (!need) {
-                    continue;
-                }
-                if (stage(base, rf, modsDir, stageDir)) {
-                    changed.add(rf.name);
+                if (outdated) {
+                    need.add(rf);
+                    names.add(rf.name);
                 }
             }
-            if (changed.isEmpty()) {
+            if (need.isEmpty()) {
                 return new Result(Outcome.OK, "已是最新");
             }
-            String names = String.join(" / ", changed);
-            LOGGER.info("[Breakfront] update staged: {} (auto-apply armed on restart)", names);
-            return new Result(Outcome.UPDATED_REQUIRES_RESTART,
-                    "已下载新版本模组：" + names + "。应用更新后自动重启游戏，无需手动操作。");
+
+            // 并行下载到 bfupdate/ 暂存（单文件超时 30s；并行后总时长≈最慢一个文件）
+            List<java.util.concurrent.CompletableFuture<Boolean>> jobs = new ArrayList<>();
+            for (RemoteFile rf : need) {
+                jobs.add(java.util.concurrent.CompletableFuture.supplyAsync(
+                        () -> downloadToStage(base, rf, stageDir)));
+            }
+            int ok = 0;
+            for (var j : jobs) {
+                try {
+                    if (Boolean.TRUE.equals(j.get(40, java.util.concurrent.TimeUnit.SECONDS))) {
+                        ok++;
+                    }
+                } catch (Exception je) {
+                    LOGGER.warn("[Breakfront] parallel download task failed: {}", je.toString());
+                }
+            }
+
+            if (ok == need.size()) {
+                // 全部就绪：尝试即时替换（进程内 jar 被占用时自动留给影子脚本）
+                for (RemoteFile rf : need) {
+                    tryReplace(stageDir, modsDir, rf.name);
+                }
+                String joined = String.join(" / ", names);
+                LOGGER.info("[Breakfront] update staged: {} (auto-apply armed on restart)", joined);
+                return new Result(Outcome.UPDATED_REQUIRES_RESTART,
+                        "已下载新版本模组：" + joined + "。应用更新后自动重启游戏，无需手动操作。");
+            }
+            String msg = "模组更新下载未完成（成功 " + ok + "/" + need.size()
+                    + "）：本次先联机，稍后重新进入会自动重试更新。";
+            LOGGER.warn("[Breakfront] {}", msg);
+            return new Result(Outcome.ERROR, msg);
         } catch (Exception e) {
             LOGGER.info("[Breakfront] update source unreachable: {}", e.toString());
             return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源不可达（跳过更新）");
         }
     }
 
-    /**
-     * 下载到 bfupdate/ 暂存；若目标未被占用（非 Windows / 非本会话加载的 jar）
-     * 则直接就地替换，否则留待影子脚本在退出后复制。
-     */
-    private static boolean stage(String base, RemoteFile rf, Path modsDir, Path stageDir) {
+    /** GET 并等待响应体（text）；单次 6s 超时，失败快速重试一次。 */
+    private static String fetchWithRetry(String url) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                        .timeout(Duration.ofSeconds(6))
+                        .GET()
+                        .build();
+                HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200) {
+                    return resp.body();
+                }
+                return null; // 明确非 200 不再重试
+            } catch (Exception e) {
+                if (attempt == 0) {
+                    try {
+                        Thread.sleep(600);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** 下载并校验 sha，写入 bfupdate/ 暂存。成功返回 true。 */
+    private static boolean downloadToStage(String base, RemoteFile rf, Path stageDir) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(base + "/breakfront/files/" + rf.name))
                     .timeout(Duration.ofSeconds(30))
@@ -133,6 +182,7 @@ public final class Updater {
                     .build();
             HttpResponse<byte[]> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() != 200) {
+                LOGGER.warn("[Breakfront] {} download http {}", rf.name, resp.statusCode());
                 return false;
             }
             byte[] body = resp.body();
@@ -141,20 +191,23 @@ public final class Updater {
                 return false;
             }
             Files.createDirectories(stageDir);
-            Path staged = stageDir.resolve(rf.name);
-            Files.write(staged, body);
-            try {
-                Files.createDirectories(modsDir);
-                Files.move(staged, modsDir.resolve(rf.name), StandardCopyOption.REPLACE_EXISTING);
-                LOGGER.info("[Breakfront] replaced {} directly", rf.name);
-            } catch (IOException e) {
-                // 被占用 → 保留暂存，影子脚本在进程退出后处理
-                LOGGER.info("[Breakfront] {} locked -> staged for auto-apply", rf.name);
-            }
+            Files.write(stageDir.resolve(rf.name), body);
             return true;
         } catch (Exception e) {
             LOGGER.warn("[Breakfront] download {} failed: {}", rf.name, e.toString());
             return false;
+        }
+    }
+
+    /** 暂存文件已全部就绪后的即时替换（失败即留给影子脚本在退出后复制）。 */
+    private static void tryReplace(Path stageDir, Path modsDir, String name) {
+        try {
+            Files.createDirectories(modsDir);
+            Files.move(stageDir.resolve(name), modsDir.resolve(name),
+                    StandardCopyOption.REPLACE_EXISTING);
+            LOGGER.info("[Breakfront] replaced {} directly", name);
+        } catch (IOException e) {
+            LOGGER.info("[Breakfront] {} locked -> staged for auto-apply", name);
         }
     }
 

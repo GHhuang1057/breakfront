@@ -70,6 +70,8 @@ public class BreakfrontMainMenu extends Screen {
     /** 每次启动只检查一次更新（跨菜单实例共享）。 */
     private static volatile boolean sessionCheckStarted = false;
     private static volatile Updater.Result sessionResult;
+    /** 检查开始的毫秒时间（徽章超时提示用）。 */
+    private static volatile long sessionCheckStartMs;
 
     private final ExecutorService ioPool = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "breakfront-ui-io");
@@ -120,6 +122,7 @@ public class BreakfrontMainMenu extends Screen {
         age = 0;
         if (!sessionCheckStarted) {
             sessionCheckStarted = true;
+            sessionCheckStartMs = System.currentTimeMillis();
             ioPool.execute(() -> {
                 Updater.Result r = Updater.run(BfServerConfig.host(), BfServerConfig.updatePort());
                 client.execute(() -> applyStartupResult(r));
@@ -261,6 +264,11 @@ public class BreakfrontMainMenu extends Screen {
             return "更新源在线";
         }
         if (sessionResult == null) {
+            // 长时间未返回：提示响应慢（更新源经 frp 首请求可能较慢）
+            if (sessionCheckStartMs > 0
+                    && System.currentTimeMillis() - sessionCheckStartMs > 7000) {
+                return "更新源响应慢，稍候…";
+            }
             return "检查更新中";
         }
         return switch (sessionResult.outcome()) {
