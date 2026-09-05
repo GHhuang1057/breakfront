@@ -4,19 +4,27 @@ import com.breakfront.client.bf.BfServerConfig;
 import com.breakfront.client.hud.BreakfrontHud;
 import com.breakfront.client.hud.SectorPreviewRenderer;
 import com.breakfront.client.hud.WorldZoneRings;
+import com.breakfront.client.state.AdminState;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.SectorEditState;
 import com.breakfront.client.ui.BfDeployScreen;
 import com.breakfront.client.ui.BreakfrontMainMenu;
+import com.breakfront.client.ui.admin.BfAdminGateScreen;
+import com.breakfront.client.ui.admin.BfAdminPanel;
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
 import com.breakfront.net.ScoreboardPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
+import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +42,9 @@ public class BreakfrontClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static int lastDeployPhaseChange = -1;
+
+    /** M8：管理员面板热键（需 Ctrl+Shift+F8 组合，防误触）。 */
+    private KeyBinding adminKey;
 
     @Override
     public void onInitializeClient() {
@@ -94,6 +105,44 @@ public class BreakfrontClient implements ClientModInitializer {
         // S2C 接收：扇区编辑器预览（/bfs 会话）
         ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.SectorEditPayload.ID,
                 (payload, context) -> context.client().execute(() -> SectorEditState.apply(payload)));
+
+        // S2C 接收：管理员登录结果（M8）→ 门禁屏显示结果/切面板
+        ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.AdminLoginResultPayload.ID,
+                (payload, context) -> context.client().execute(
+                        () -> AdminState.applyResult(payload.ok(), payload.message())));
+
+        // M8：管理员面板热键注册（F8，要求 Ctrl+Shift 同按）
+        adminKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.breakfront.admin", InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_F8, "key.categories.breakfront"));
+
+        // M8：组合键状态机 —— 无屏时呼出门禁/面板；登录成功后门禁自动切面板
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (adminKey == null || client.currentScreen instanceof TitleScreen) {
+                return;
+            }
+            boolean combo = adminKey.wasPressed()
+                    && Screen.hasControlDown() && Screen.hasShiftDown();
+            if (!combo) {
+                return;
+            }
+            if (AdminState.isAdmin()) {
+                if (client.currentScreen == null) {
+                    client.setScreen(new BfAdminPanel());
+                } else if (client.currentScreen instanceof BfAdminPanel) {
+                    client.setScreen(null);
+                }
+            } else if (client.currentScreen == null
+                    || client.currentScreen instanceof BfAdminGateScreen) {
+                client.setScreen(new BfAdminGateScreen());
+            }
+        });
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (client.currentScreen instanceof BfAdminGateScreen && AdminState.justGranted()) {
+                AdminState.clearJustGranted();
+                client.setScreen(new BfAdminPanel());
+            }
+        });
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
 

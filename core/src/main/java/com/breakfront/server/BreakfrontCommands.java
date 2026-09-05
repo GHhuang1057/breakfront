@@ -169,6 +169,55 @@ root = root.then(literal("team")
                         .executes(ctx -> kitSelf(ctx.getSource(),
                                 StringArgumentType.getString(ctx, "class")))));
 
+        // M8：管理员会话（文本路径；客户端面板走 C2S 载荷）。goto 需要 op2 或管理员会话。
+        root = root.then(literal("admin")
+                .then(literal("login")
+                        .then(CommandManager.argument("password", StringArgumentType.word())
+                                .executes(ctx -> {
+                                    String pwd = StringArgumentType.getString(ctx, "password");
+                                    if (!(ctx.getSource().getEntity() instanceof ServerPlayerEntity p)) {
+                                        send(ctx.getSource(), "仅玩家可用");
+                                        return 1;
+                                    }
+                                    boolean ok = AdminService.login(p.getUuid(), pwd);
+                                    send(ctx.getSource(), ok
+                                            ? "管理员会话已建立（" + AdminService.timeoutSecs + " 秒有效，/bf admin logout 注销）"
+                                            : "密码错误");
+                                    return 1;
+                                })))
+                .then(literal("logout").executes(ctx -> {
+                    if (ctx.getSource().getEntity() instanceof ServerPlayerEntity p) {
+                        AdminService.logout(p.getUuid());
+                    }
+                    send(ctx.getSource(), "管理员会话已注销");
+                    return 1;
+                }))
+                .then(literal("status").executes(ctx -> {
+                    boolean admin = ctx.getSource().getEntity() instanceof ServerPlayerEntity p
+                            && AdminService.has(p.getUuid());
+                    send(ctx.getSource(), admin ? "管理员会话生效中"
+                            : "未登录管理员（/bf admin login <密码>，或 Ctrl+Shift+F8 面板）");
+                    return 1;
+                }))
+                .then(literal("goto")
+                        .requires(s -> AdminService.allows(s))
+                        .then(CommandManager.argument("zone", StringArgumentType.word())
+                                .executes(ctx -> {
+                                    var match = BreakfrontServer.match();
+                                    if (match == null) {
+                                        send(ctx.getSource(), "对局尚未初始化");
+                                        return 1;
+                                    }
+                                    if (!(ctx.getSource().getEntity() instanceof ServerPlayerEntity p)) {
+                                        send(ctx.getSource(), "仅玩家可用");
+                                        return 1;
+                                    }
+                                    String zone = StringArgumentType.getString(ctx, "zone");
+                                    send(ctx.getSource(), match.adminGoto(
+                                            ctx.getSource().getServer(), p, zone));
+                                    return 1;
+                                }))));
+
         dispatcher.register(root);
     }
 

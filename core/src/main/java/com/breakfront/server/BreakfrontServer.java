@@ -90,6 +90,25 @@ public final class BreakfrontServer {
                     }
                 }));
 
+        // M8：管理员登录（C2S）——校验通过建立会话并回发结果；不提升 op
+        ServerPlayNetworking.registerGlobalReceiver(com.breakfront.net.AdminLoginPayload.ID,
+                (payload, context) -> context.player().server.execute(() -> {
+                    ServerPlayerEntity p = context.player();
+                    if (p == null || p.networkHandler == null) {
+                        return;
+                    }
+                    boolean ok = AdminService.login(p.getUuid(), payload.password());
+                    ServerPlayNetworking.send(p, new com.breakfront.net.AdminLoginResultPayload(
+                            ok, ok ? "管理员会话已建立（" + AdminService.timeoutSecs + " 秒有效）"
+                                    : "密码错误，请重试"));
+                    if (ok) {
+                        LOGGER.info("[Breakfront] admin session granted: {}", p.getName().getString());
+                    } else {
+                        LOGGER.warn("[Breakfront] admin login failed (bad password): {}",
+                                p.getName().getString());
+                    }
+                }));
+
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (match != null) {
                 match.tick(server);

@@ -446,6 +446,26 @@ public final class ServerMatch {
         return true;
     }
 
+    /** M8：管理员传送到某据点正上方（供可视化查验位置），命令文本传送规避映射面。 */
+    public String adminGoto(MinecraftServer server, ServerPlayerEntity player, String zoneId) {
+        if (player == null) {
+            return "仅玩家可用";
+        }
+        if (server == null) {
+            return "服务器未就绪";
+        }
+        ZoneAnchor a = anchors.get(zoneId);
+        if (a == null) {
+            return "据点不存在: " + zoneId + "（/bfs list 查看全部 id）";
+        }
+        ServerWorld world = server.getOverworld();
+        double y = groundY(world, a.x(), a.z()) + 1.5;
+        exec(server, String.format("tp %s %.1f %.1f %.1f",
+                player.getGameProfile().getName(), a.x(), y, a.z()));
+        return String.format("已传送至 %s（x=%.0f, z=%.0f, r=%.0f）",
+                zoneId, a.x(), a.z(), a.radius());
+    }
+
     /** 打包并广播对局状态给所有在线玩家。 */
     private void broadcastState(MinecraftServer server) {
         ServerWorld world = server.getOverworld();
@@ -782,6 +802,19 @@ public final class ServerMatch {
                         autoFill = v.equalsIgnoreCase("on") || v.equals("1") || v.equals("true");
                     } else if (k.equals("autostart")) {
                         autostart = v.equalsIgnoreCase("on") || v.equals("1") || v.equals("true");
+                    } else if (k.equals("admin.password")) {
+                        if (!v.isEmpty()) {
+                            AdminService.password = v;
+                        }
+                    } else if (k.equals("admin.timeout")) {
+                        try {
+                            long t = Long.parseLong(v);
+                            if (t > 0) {
+                                AdminService.timeoutSecs = t;
+                            }
+                        } catch (NumberFormatException ignored) {
+                            // 保留默认
+                        }
                     }
                 }
             }
@@ -797,7 +830,10 @@ public final class ServerMatch {
             Files.writeString(file, String.join("\n",
                     "# BREAKFRONT 服务端运行开关",
                     "fill=" + (autoFill ? "on" : "off"),
-                    "autostart=" + (autostart ? "on" : "off")) + "\n",
+                    "autostart=" + (autostart ? "on" : "off"),
+                    "# 管理员会话（M8）：密码与会话有效期（秒），/bfs 与 /bf admin goto 需此会话",
+                    "admin.password=" + AdminService.password,
+                    "admin.timeout=" + AdminService.timeoutSecs) + "\n",
                     StandardCharsets.UTF_8);
         } catch (IOException e) {
             BreakfrontServer.LOGGER.warn("[Breakfront] cannot save server props: {}", e.toString());

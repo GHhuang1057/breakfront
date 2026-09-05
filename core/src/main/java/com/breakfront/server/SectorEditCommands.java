@@ -42,7 +42,7 @@ public final class SectorEditCommands {
                                 CommandRegistryAccess registryAccess,
                                 CommandManager.RegistrationEnvironment environment) {
         LiteralArgumentBuilder<ServerCommandSource> root = literal("bfs")
-                .requires(s -> s.hasPermissionLevel(2));
+                .requires(s -> AdminService.allows(s)); // op2 或 管理员会话（M8）
 
         root.then(simple("on", (src, match) -> {
             ServerPlayerEntity p = playerOf(src);
