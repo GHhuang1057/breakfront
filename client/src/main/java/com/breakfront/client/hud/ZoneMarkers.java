@@ -45,7 +45,7 @@ public final class ZoneMarkers {
     public static final int PILL_TOP = 6;
     public static final int PILL_H = 32;
 
-    private static final int FONT_CENTER_Y = -4;
+    private static final int FONT_CENTER_Y = -1;
     private static final double TAU = Math.PI * 2.0;
 
     /** 据点推进度平滑缓冲（zoneId -> 当前显示值 0..1）。 */

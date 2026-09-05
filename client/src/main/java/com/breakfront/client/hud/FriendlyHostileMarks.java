@@ -43,7 +43,7 @@ import java.util.Map;
  */
 public final class FriendlyHostileMarks {
 
-    private static final double MAX_DIST = 44.0;
+    private static final double MAX_DIST = 56.0;
     private static final double RAY_LIFT = 1.35; // 标记视线起点（玩家眼部）
     private static final int FRIENDLY = 0xFF4DA6FF;
     private static final int HOSTILE = 0xFFFF5A52;
@@ -154,8 +154,8 @@ public final class FriendlyHostileMarks {
             }
 
             int rgb = friendly ? FRIENDLY : HOSTILE;
-            float aBase = (float) Math.max(0.30, Math.min(1.0, 1.35 - dist / MAX_DIST));
-            float a = friendly && blocked ? aBase * 0.45f : aBase;
+            float aBase = (float) Math.max(0.40, Math.min(1.0, 1.35 - dist / MAX_DIST));
+            float a = friendly && blocked ? aBase * 0.85f : aBase;
 
             double s = Math.max(0.24, Math.min(0.9, 0.42 + 2.6 * (1.0 - Math.min(1.0, dist / MAX_DIST))));
             boolean drew = diamondInto(buf, m, base, right, up, s * 1.5, s * 1.5, 0x000000, a * 0.55f)

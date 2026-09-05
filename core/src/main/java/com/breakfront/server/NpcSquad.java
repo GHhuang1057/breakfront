@@ -127,18 +127,18 @@ public final class NpcSquad {
         killExcess(server, Side.DEFENDER, wantDef);
     }
 
-    /** 战斗中补员（每 5s）：两侧 bot 目标 = target - 该侧在线真人；每 5s 每边最多补 3，
-     *  死亡离场后渐进回到编制，保证战场不空（无真人也维持 AI 演示/对抗）。 */
+    /** 战斗中补员（每 3s）：两侧 bot 目标 = target - 该侧在线真人；每 3s 每边最多补 8，
+     *  快速回满编制，让玩家始终看到成建制的 AI 对抗（无真人也维持演示）。 */
     private void reinforce(ServerMatch match, MinecraftServer server) {
         int wa = targetAttacker - online(match, server, Side.ATTACKER);
         int wd = targetDefender - online(match, server, Side.DEFENDER);
         int spawned = 0;
-        int na = Math.min(Math.max(0, wa), 3);
+        int na = Math.min(Math.max(0, wa), 8);
         for (int i = 0; i < na; i++) {
             spawn(match, server, Side.ATTACKER);
             spawned++;
         }
-        int nd = Math.min(Math.max(0, wd), 3);
+        int nd = Math.min(Math.max(0, wd), 8);
         for (int i = 0; i < nd; i++) {
             spawn(match, server, Side.DEFENDER);
             spawned++;
@@ -316,8 +316,8 @@ public final class NpcSquad {
         if (stepCounter % 20 == 0) {
             sweep(server); // 每秒清扫阵亡单位（顺带消灭「No entity was found」刷屏）
         }
-        if (stepCounter % 100 == 0) {
-            reinforce(match, server); // 每 5s 战斗中补员：AI 全灭/减员后战场不空场
+        if (stepCounter % 60 == 0) {
+            reinforce(match, server); // 每 3s 快速补员：AI 减员后战场快速回满，避免"一闪而过"
         }
         if (units.isEmpty()) {
             return;
