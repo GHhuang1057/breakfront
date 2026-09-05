@@ -113,6 +113,7 @@ public final class FriendlyHostileMarks {
         RenderSystem.setShader(GameRenderer::getPositionColorProgram);
         BufferBuilder buf = Tessellator.getInstance()
                 .begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+        boolean wrote = false;
 
         for (Entity e : actors) {
             if (e == mc.player) {
@@ -157,19 +158,24 @@ public final class FriendlyHostileMarks {
             float a = friendly && blocked ? aBase * 0.45f : aBase;
 
             double s = Math.max(0.24, Math.min(0.9, 0.42 + 2.6 * (1.0 - Math.min(1.0, dist / MAX_DIST))));
-            diamondInto(buf, m, base, right, up, s * 1.5, s * 1.5, 0x000000, a * 0.55f);
-            diamondInto(buf, m, base, right, up, s, s, rgb, a);
+            boolean drew = diamondInto(buf, m, base, right, up, s * 1.5, s * 1.5, 0x000000, a * 0.55f)
+                    || diamondInto(buf, m, base, right, up, s, s, rgb, a);
+            wrote |= drew;
         }
 
+        if (!wrote) {
+            return; // 空 buffer 不 end/draw（否则 BufferBuilder was empty 崩溃）
+        }
         BufferRenderer.drawWithGlobalProgram(buf.end());
     }
 
-    /** 世界坐标画一个面向相机的菱形（中心 base，right/up 为相机横纵基向量）。 */
-    private static void diamondInto(BufferBuilder buf, Matrix4f m,
-                                    Vec3d base, Vec3d right, Vec3d up,
-                                    double hw, double hh, int rgb, float alpha) {
+    /** 世界坐标画一个面向相机的菱形（中心 base，right/up 为相机横纵基向量）。
+     *  返回是否实际写入了顶点。 */
+    private static boolean diamondInto(BufferBuilder buf, Matrix4f m,
+                                       Vec3d base, Vec3d right, Vec3d up,
+                                       double hw, double hh, int rgb, float alpha) {
         if (alpha <= 0.01f) {
-            return;
+            return false;
         }
         float r = ((rgb >> 16) & 0xFF) / 255f;
         float g = ((rgb >> 8) & 0xFF) / 255f;
@@ -182,6 +188,7 @@ public final class FriendlyHostileMarks {
         buf.vertex(m, (float) rgt.x, (float) rgt.y, (float) rgt.z).color(r, g, b, alpha);
         buf.vertex(m, (float) bottom.x, (float) bottom.y, (float) bottom.z).color(r, g, b, alpha);
         buf.vertex(m, (float) left.x, (float) left.y, (float) left.z).color(r, g, b, alpha);
+        return true;
     }
 
     /** 节流版视线遮挡判定。 */
