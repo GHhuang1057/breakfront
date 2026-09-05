@@ -35,7 +35,6 @@ public class BfAdminGateScreen extends Screen {
         passwordField.setMaxLength(64);
         passwordField.setDrawsBackground(false);
         passwordField.setFocused(true);
-        passwordField.setSelected(true);
         loginBtnX = cx + fw / 2 - loginBtnW - 8;
         loginBtnY = cy - 26;
     }
@@ -153,6 +152,10 @@ public class BfAdminGateScreen extends Screen {
 
     private void tryLogin() {
         if (passwordField == null || this.client == null) {
+            return;
+        }
+        if (this.client.getNetworkHandler() == null) {
+            AdminState.applyResult(false, "未连接到服务器");
             return;
         }
         String pwd = passwordField.getText();
