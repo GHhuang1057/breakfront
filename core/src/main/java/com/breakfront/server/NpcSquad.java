@@ -202,7 +202,8 @@ public final class NpcSquad {
                 % Kits.CLASSES.length];
         String label = side == Side.ATTACKER ? "攻方增援" : "守方增援";
         e.setCustomName(Text.literal("[" + label + "] AI-" + sid));
-        e.setCustomNameVisible(true);
+        // 名字牌不显示：头顶阵营标记由客户端 FriendlyHostileMarks 接管（蓝=友/红=敌，穿墙语义不同）
+        e.setCustomNameVisible(false);
         e.setAiDisabled(true);      // 关闭原版 AI：不会乱咬人
         e.setNoGravity(true);       // 位移由命令驱动，防掉落/卡角
         e.setSilent(true);          // 不出僵尸声（配合客户端去原版音效）

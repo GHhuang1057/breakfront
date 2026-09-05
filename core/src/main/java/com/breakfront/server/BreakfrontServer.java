@@ -1,5 +1,6 @@
 package com.breakfront.server;
 
+import com.breakfront.game.Side;
 import com.breakfront.net.KillFeedPayload;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -8,6 +9,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
@@ -118,6 +120,23 @@ public final class BreakfrontServer {
         // 击杀归属桥 · 第 1 层：vanilla 死亡事件（覆盖全部死因，负责扣票）
         ServerLivingEntityEvents.AFTER_DEATH.register(KillListener::onEntityDeath);
 
+        // 友伤豁免：同阵营（真人/真人、真人/AI、AI/AI）之间伤害全部拦截
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (match == null) {
+                return true;
+            }
+            var attacker = source.getAttacker() instanceof LivingEntity le ? le : null;
+            if (attacker == null || attacker == entity) {
+                return true; // 环境伤害/自伤放行
+            }
+            int as = sideOfEntity(attacker);
+            int vs = sideOfEntity(entity);
+            if (as >= 0 && as == vs) {
+                return false; // 同阵营：豁免
+            }
+            return true;
+        });
+
         // W5：命中反馈（白 X）——本玩家造成的非致死伤害
         ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, base, taken, blocked) -> {
             if (taken <= 0f || blocked) {
@@ -147,6 +166,21 @@ public final class BreakfrontServer {
         CommandRegistrationCallback.EVENT.register(SectorEditCommands::register);
 
         LOGGER.info("[Breakfront] server hooks registered");
+    }
+
+    /** 实体所属阵营：玩家查 TeamManager；NPC 读 bf.side 标签；未知返回 -1。 */
+    private static int sideOfEntity(LivingEntity e) {
+        if (e instanceof ServerPlayerEntity p && match != null) {
+            Side s = match.teams().sideOf(p.getUuid());
+            return s == null ? -1 : s.ordinal();
+        }
+        if (e.getCommandTags().contains("bf.side.att")) {
+            return 0;
+        }
+        if (e.getCommandTags().contains("bf.side.def")) {
+            return 1;
+        }
+        return -1;
     }
 
     /** 击杀流广播（服务端线程调用）。 */
