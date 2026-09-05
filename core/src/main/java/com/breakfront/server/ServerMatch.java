@@ -777,7 +777,7 @@ public final class ServerMatch {
         do {
             id = "" + letter + n;
             n++;
-        } while (findZoneIndex(id) >= 0);
+        } while (findZoneIndex(id) != null);
         return id;
     }
 
