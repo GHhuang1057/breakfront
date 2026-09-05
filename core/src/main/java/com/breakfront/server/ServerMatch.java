@@ -180,6 +180,9 @@ public final class ServerMatch {
         if (!envFixed) {
             envFixed = fixArenaEnvironment(server);
         }
+        if (syncCounter % 40 == 0) {
+            rescueVoidedPlayers(server); // 真人落出世界（虚空）每 2s 救援
+        }
         game.tick(0.05);
         syncCounter++;
         boolean syncTick = syncCounter % 10 == 0; // 每 0.5s 广播一次状态
@@ -658,9 +661,17 @@ public final class ServerMatch {
         if (ph == MatchPhase.BATTLE || ph == MatchPhase.COUNTDOWN) {
             deployPlayer(server, player);
             kitPlayer(server, player);
-        } else if (ph == MatchPhase.LOBBY) {
-            // 大厅不部署，但补一次主武器便于打靶房/进服即验
+        } else {
+            // LOBBY / ROUND_END / 其它：也先部署到阵营出生区，杜绝站在地图原版虚空出生点
+            deployPlayer(server, player);
             kitPlayer(server, player);
+        }
+        // 若出生点本身异常（落虚空），向上兜底到世界安全高度
+        if (player.getY() < -10) {
+            double[] sp = spawnFor(teams.sideOf(player.getUuid()), server.getOverworld());
+            double safeY = Math.max(sp[1], 70.0);
+            exec(server, String.format("tp %s %.1f %.1f %.1f",
+                    player.getGameProfile().getName(), sp[0], safeY, sp[2]));
         }
     }
 
@@ -705,6 +716,26 @@ public final class ServerMatch {
                 player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
         exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
                 player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+    }
+
+    /** 虚空/异常位置救援：真人 y<-10 且非旁观即拉回己方出生区安全高度。 */
+    private void rescueVoidedPlayers(MinecraftServer server) {
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p.getY() > -10 || p.isSpectator()) {
+                continue;
+            }
+            Side side = teams.sideOf(p.getUuid());
+            if (side == null) {
+                teams.assignLeast(p.getUuid());
+                side = teams.sideOf(p.getUuid());
+            }
+            double[] sp = spawnFor(side, server.getOverworld());
+            double y = Math.max(sp[1], 64.0);
+            exec(server, String.format("tp %s %.1f %.1f %.1f",
+                    p.getGameProfile().getName(), sp[0], y, sp[2]));
+            BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from void to spawn ({},{})",
+                    p.getName().getString(), String.format("%.1f", sp[0]), String.format("%.1f", sp[2]));
+        }
     }
 
     private void teleportAllToSpawns(MinecraftServer server) {
