@@ -57,6 +57,7 @@ public final class NpcSquad {
         UUID foeId;         // 当前敌人（null=无）
         boolean foeIsNpc;   // 敌人是 NPC（true）还是真人玩家（false）
         long atkAtMs;       // 下次可攻击时间
+        long faceAtMs;      // 站桩转向节流（上次 tp 更新时间）
     }
 
     // ---------- 配置 ----------
@@ -252,9 +253,24 @@ public final class NpcSquad {
                 label + " AI-" + sid, side.labelCn, cls, kit.gunId(), units.size());
     }
 
+    /** 出生点：以阵营出生区中心为基准做 ±9m 随机散布，避免整队叠单点；
+     *  散布点与基准地表高度差过大时回退中心（防止卡进墙/悬空）。 */
+    private static final java.util.Random SPAWN_RNG = new java.util.Random();
+
     private Vec3d spawnPos(ServerMatch match, MinecraftServer server, Side side) {
         double[] s = match.spawnsFor(side, server.getOverworld());
-        return new Vec3d(s[0], s[1], s[2]);
+        double baseY = s[1];
+        for (int attempt = 0; attempt < 6; attempt++) {
+            double ang = SPAWN_RNG.nextDouble() * Math.PI * 2.0;
+            double rad = 1.0 + SPAWN_RNG.nextDouble() * 9.0;
+            double tx = s[0] + Math.cos(ang) * rad;
+            double tz = s[2] + Math.sin(ang) * rad;
+            double g = groundY(server, tx, tz);
+            if (Math.abs(g - baseY) <= 4.0 && g > 0) {
+                return new Vec3d(tx, g + 0.3, tz);
+            }
+        }
+        return new Vec3d(s[0], baseY, s[2]);
     }
 
     // ---------- 每 tick 推进（v0.6：占点 + 寻敌交战） ----------
@@ -403,8 +419,11 @@ public final class NpcSquad {
             }
             return;
         }
-        // 已在攻击范围内：站桩并攻击（转向保持）
-        exec(server, tpCmd(n, n.lastX, n.lastY, n.lastZ, yaw));
+        // 已在攻击范围内：站桩攻击；转向节流（每 ~0.7s 一次 tp 保持朝敌，不逐帧刷 tp）
+        if (now - n.faceAtMs >= 700) {
+            n.faceAtMs = now;
+            exec(server, tpCmd(n, n.lastX, n.lastY, n.lastZ, yaw));
+        }
         if (now < n.atkAtMs) {
             return;
         }
@@ -524,7 +543,9 @@ public final class NpcSquad {
         return Math.abs(g - fromGround) <= 3.5;
     }
 
-    /** 攻方：当前扇区首个点；守方：按单位 id 分散到当前扇区各点。 */
+    /** 攻方：当前扇区首个点；守方：按单位 id 分散到当前扇区各点。
+     *  目标点在 zone 内附加「单位稳定偏移」（hash 派生）→ 同队多人站位自然散开，
+     *  避免全部叠在圆心同一点。 */
     private Vec3d targetFor(ServerMatch match, MinecraftServer server, Npc n) {
         var zones = match.game().currentSector().zones();
         if (zones.isEmpty()) {
@@ -532,12 +553,20 @@ public final class NpcSquad {
         }
         int pick = n.side == Side.ATTACKER ? 0
                 : (n.id.hashCode() & 0x7fffffff) % zones.size();
-        int zoneIdx = match.zoneIndex(zones.get(pick).id());
+        var z = zones.get(pick);
+        int zoneIdx = match.zoneIndex(z.id());
         double[] c = match.zoneCenter(zoneIdx);
         if (c == null) {
             return null;
         }
-        return new Vec3d(c[0], groundY(server, c[0], c[1]) + 1, c[1]);
+        double r = Math.max(2.0, z.radius());
+        // 稳定伪随机偏移：hash 派生 [-0.75r, +0.75r]
+        long h = n.id.hashCode() & 0x7fffffffL;
+        double fx = ((h % 1001) / 1000.0 - 0.5) * 2.0 * 0.75 * r;
+        double fz = (((h >> 16) % 1001) / 1000.0 - 0.5) * 2.0 * 0.75 * r;
+        double tx = c[0] + fx;
+        double tz = c[1] + fz;
+        return new Vec3d(tx, groundY(server, tx, tz) + 1, tz);
     }
 
     private double groundY(MinecraftServer server, double x, double z) {
