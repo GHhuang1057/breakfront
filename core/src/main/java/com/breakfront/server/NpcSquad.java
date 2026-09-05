@@ -4,11 +4,15 @@ import com.breakfront.game.BreakthroughTuning;
 import com.breakfront.game.MatchPhase;
 import com.breakfront.game.Side;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.ZombieEntity;
+import net.minecraft.item.SwordItem;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
 
@@ -48,6 +52,11 @@ public final class NpcSquad {
         double lastX;
         double lastY;
         double lastZ;
+        // 交战状态（2026-09-05 v0.6）
+        long scanAtMs;      // 下次目标扫描时间
+        UUID foeId;         // 当前敌人（null=无）
+        boolean foeIsNpc;   // 敌人是 NPC（true）还是真人玩家（false）
+        long atkAtMs;       // 下次可攻击时间
     }
 
     // ---------- 配置 ----------
@@ -248,7 +257,16 @@ public final class NpcSquad {
         return new Vec3d(s[0], s[1], s[2]);
     }
 
-    // ---------- 每 tick 推进 ----------
+    // ---------- 每 tick 推进（v0.6：占点 + 寻敌交战） ----------
+
+    /** 交战距离（米）：空手近战 <4；持械 ≤30。 */
+    private static final double MELEE_RANGE = 3.4;
+    private static final double GUN_RANGE = 30.0;
+    private static final double SCAN_RANGE = 34.0;
+    /** 目标重扫间隔 / 攻击间隔（ms）。 */
+    private static final long SCAN_MS = 900;
+    private static final long MELEE_ATK_MS = 700;
+    private static final long GUN_ATK_MS = 900;
 
     public void tick(ServerMatch match, MinecraftServer server) {
         if (match.game().phase() != MatchPhase.BATTLE) {
@@ -261,33 +279,227 @@ public final class NpcSquad {
         if (units.isEmpty()) {
             return;
         }
-        if (stepCounter % 3 != 0) { // 每 3 tick（0.15s）动一步，兼顾平顺与开销
+        if (stepCounter % 3 != 0) { // 每 3 tick（0.15s）决策一步，兼顾平顺与开销
             return;
         }
+        long now = System.currentTimeMillis();
         for (Npc n : units.values()) {
-            Vec3d target = targetFor(match, server, n);
-            if (target == null) {
-                continue;
+            LivingEntity foe = resolveFoe(match, server, n, now);
+            if (foe != null) {
+                engage(match, server, n, foe, now);
+            } else {
+                moveToObjective(match, server, n);
             }
-            double dx = target.x - n.lastX;
-            double dz = target.z - n.lastZ;
-            double dist = Math.hypot(dx, dz);
-            if (dist < 1.2) {
-                continue; // 已在点内驻守
-            }
-            double ux = dx / dist;
-            double uz = dz / dist;
-            // 地形跟随 + 轴分离避障：直行不可行则分别试 x/z 单轴，均不可行则原地驻守
-            double[] step = chooseStep(server, n.lastX, n.lastZ, ux, uz);
-            if (step == null) {
-                continue;
-            }
-            double yaw = Math.toDegrees(Math.atan2(step[0] - n.lastX, step[1] - n.lastZ));
-            n.lastX = step[0];
-            n.lastZ = step[1];
-            n.lastY = groundY(server, n.lastX, n.lastZ) + 0.1;
-            exec(server, tpCmd(n, step[0], n.lastY, step[1], yaw));
         }
+    }
+
+    /** 当前敌人是否仍然有效；空则按节流间隔重新扫描。 */
+    private LivingEntity resolveFoe(ServerMatch match, MinecraftServer server, Npc n, long now) {
+        LivingEntity cached = fetchFoe(server, n);
+        if (cached != null && cached.isAlive() && isFoe(match, n, cached)) {
+            return cached;
+        }
+        if (now < n.scanAtMs) {
+            return null;
+        }
+        n.scanAtMs = now + SCAN_MS;
+        LivingEntity foe = findFoe(match, server, n, now);
+        n.foeId = null;
+        n.foeIsNpc = false;
+        if (foe != null) {
+            if (foe instanceof ServerPlayerEntity) {
+                n.foeId = foe.getUuid();
+                n.foeIsNpc = false;
+            } else {
+                n.foeId = foe.getUuid();
+                n.foeIsNpc = true;
+            }
+        }
+        return foe;
+    }
+
+    /** 依据缓存 ID 找回敌人实体。 */
+    private LivingEntity fetchFoe(MinecraftServer server, Npc n) {
+        if (n.foeId == null) {
+            return null;
+        }
+        if (n.foeIsNpc) {
+            var w = server.getOverworld();
+            var e = w.getEntity(n.foeId);
+            return e instanceof LivingEntity le ? le : null;
+        }
+        var p = server.getPlayerManager().getPlayer(n.foeId);
+        return p;
+    }
+
+    /** 阵营敌意判定（玩家查 TeamManager；NPC 读记录）。 */
+    private boolean isFoe(ServerMatch match, Npc n, net.minecraft.entity.Entity e) {
+        if (e instanceof ServerPlayerEntity p) {
+            var s = match.teams().sideOf(p.getUuid());
+            return s != null && s != n.side;
+        }
+        if (e.getCommandTags().contains("bf.side.att")) {
+            return n.side != Side.ATTACKER;
+        }
+        if (e.getCommandTags().contains("bf.side.def")) {
+            return n.side != Side.DEFENDER;
+        }
+        return false;
+    }
+
+    /** 扫描最近敌对目标（真人玩家 + 敌方 NPC）。 */
+    private LivingEntity findFoe(ServerMatch match, MinecraftServer server, Npc n, long now) {
+        LivingEntity best = null;
+        double bestD = SCAN_RANGE * SCAN_RANGE;
+        ServerWorld w = server.getOverworld();
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            var s = match.teams().sideOf(p.getUuid());
+            if (s == null || s == n.side) {
+                continue;
+            }
+            double d = dxz2(n.lastX, n.lastZ, p.getX(), p.getZ());
+            if (d < bestD) {
+                bestD = d;
+                best = p;
+            }
+        }
+        for (Npc o : units.values()) {
+            if (o == n || o.side == n.side) {
+                continue;
+            }
+            var e = w.getEntity(o.id);
+            if (e == null) {
+                continue;
+            }
+            double d = dxz2(n.lastX, n.lastZ, e.getX(), e.getZ());
+            if (d < bestD) {
+                bestD = d;
+                best = (LivingEntity) e;
+            }
+        }
+        return best;
+    }
+
+    /** 交战：朝敌人移动/驻留 + 按节奏攻击（空手近战 / 持械远程）。 */
+    private void engage(ServerMatch match, MinecraftServer server, Npc n, LivingEntity foe, long now) {
+        double dx = foe.getX() - n.lastX;
+        double dz = foe.getZ() - n.lastZ;
+        double dist = Math.hypot(dx, dz);
+        boolean hasGun = hasWeapon(server, n);
+        // 朝向敌人（yaw 每决策帧跟随）
+        double yaw = Math.toDegrees(Math.atan2(dx, dz));
+        if (dist > (hasGun ? 20.0 : MELEE_RANGE - 0.6)) {
+            // 追近（受限于交战距离内），保留轴分离避障
+            if (dist > 0.6) {
+                double ux = dx / dist;
+                double uz = dz / dist;
+                double[] step = chooseStep(server, n.lastX, n.lastZ, ux, uz);
+                if (step != null) {
+                    n.lastX = step[0];
+                    n.lastZ = step[1];
+                    n.lastY = groundY(server, n.lastX, n.lastZ) + 0.1;
+                    exec(server, tpCmd(n, step[0], n.lastY, step[1], yaw));
+                }
+            }
+            return;
+        }
+        // 已在攻击范围内：站桩并攻击（转向保持）
+        exec(server, tpCmd(n, n.lastX, n.lastY, n.lastZ, yaw));
+        if (now < n.atkAtMs) {
+            return;
+        }
+        if (hasGun) {
+            if (dist <= GUN_RANGE && lineOfSight(server, n, foe, dist)) {
+                n.atkAtMs = now + GUN_ATK_MS;
+                strikeFoe(server, n, foe, 7.0, false); // 模拟枪械命中（平衡值后续调）
+            }
+        } else if (dist <= MELEE_RANGE + 0.4) {
+            n.atkAtMs = now + MELEE_ATK_MS;
+            strikeFoe(server, n, foe, 3.0, true); // 空手近战挥击
+        }
+    }
+
+    /** 主手是否持有武器（模组物品一律视为武器；原版剑也算近战武器）。 */
+    private boolean hasWeapon(MinecraftServer server, Npc n) {
+        var w = server.getOverworld();
+        var e = w.getEntity(n.id);
+        if (!(e instanceof LivingEntity le)) {
+            return true; // 找不到实体时按持械处理（保守）
+        }
+        var stack = le.getMainHandStack();
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        Identifier id = Registries.ITEM.getId(stack.getItem());
+        if ("minecraft".equals(id.getNamespace())) {
+            return stack.getItem() instanceof SwordItem;
+        }
+        return true; // 模组/枪包物品视为武器
+    }
+
+    /** 造成伤害（mob 来源，若击杀走 vanilla 事件流计入击杀归属）。melee 同时挥击主手。 */
+    private void strikeFoe(MinecraftServer server, Npc n, LivingEntity foe, double amount, boolean melee) {
+        var w = server.getOverworld();
+        var attacker = w.getEntity(n.id);
+        if (!(attacker instanceof LivingEntity le)) {
+            return;
+        }
+        if (melee) {
+            le.swingHand(net.minecraft.util.Hand.MAIN_HAND);
+        }
+        var src = le.getDamageSources().mobAttack(le);
+        foe.damage(src, (float) amount);
+    }
+
+    /** 视线：npc 眼部到敌人眼部是否被实心方块阻挡。 */
+    private boolean lineOfSight(MinecraftServer server, Npc n, LivingEntity foe, double dist) {
+        var w = server.getOverworld();
+        var e = w.getEntity(n.id);
+        if (!(e instanceof LivingEntity le)) {
+            return true;
+        }
+        Vec3d from = le.getEyePos();
+        Vec3d to = foe.getEyePos();
+        var ctx = new net.minecraft.world.RaycastContext(from, to,
+                net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
+                net.minecraft.world.RaycastContext.FluidHandling.NONE, le);
+        var hit = w.raycast(ctx);
+        if (hit.getType() == net.minecraft.util.hit.HitResult.Type.MISS) {
+            return true;
+        }
+        return hit.getPos().squaredDistanceTo(from) > dist * dist * 0.96;
+    }
+
+    private static double dxz2(double ax, double az, double bx, double bz) {
+        double dx = ax - bx;
+        double dz = az - bz;
+        return dx * dx + dz * dz;
+    }
+
+    /** 无敌人：继续前往目标点（攻方首个点/守方分散占点）。 */
+    private void moveToObjective(ServerMatch match, MinecraftServer server, Npc n) {
+        Vec3d target = targetFor(match, server, n);
+        if (target == null) {
+            return;
+        }
+        double dx = target.x - n.lastX;
+        double dz = target.z - n.lastZ;
+        double dist = Math.hypot(dx, dz);
+        if (dist < 1.2) {
+            return; // 已在点内驻守
+        }
+        double ux = dx / dist;
+        double uz = dz / dist;
+        // 地形跟随 + 轴分离避障：直行不可行则分别试 x/z 单轴，均不可行则原地驻守
+        double[] step = chooseStep(server, n.lastX, n.lastZ, ux, uz);
+        if (step == null) {
+            return;
+        }
+        double yaw = Math.toDegrees(Math.atan2(step[0] - n.lastX, step[1] - n.lastZ));
+        n.lastX = step[0];
+        n.lastZ = step[1];
+        n.lastY = groundY(server, n.lastX, n.lastZ) + 0.1;
+        exec(server, tpCmd(n, step[0], n.lastY, step[1], yaw));
     }
 
     /** 返回下一位置 {x,z}：直行→x 轴→z 轴；条件=目标点地表与当前高度差 ≤3.5。 */

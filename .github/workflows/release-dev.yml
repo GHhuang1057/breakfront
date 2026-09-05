@@ -87,3 +87,24 @@ jobs:
             - 版本锁定：Minecraft 1.21.1 / Fabric API / TaCZ: Refabricated
             - 由 GitHub Actions 自动构建，内容见 manifest.json" \
             --prerelease || true
+
+      # 发布完成后经 frp SSH 隧道（中继 103.24.217.132:10022 → MC 主机）立即触发远程热更。
+      # 需要仓库 Secrets：BF_SSH_KEY(私钥) / BF_HOST / BF_PORT / BF_USER；未配置时本步跳过，
+      # 服务器 30s 轮询守卫仍会兜底完成更新。远程端有 update.lock 防并发，与轮询互不冲突。
+      - name: Trigger remote hot-deploy (frp SSH)
+        if: ${{ secrets.BF_SSH_KEY != '' }}
+        env:
+          BF_SSH_KEY: ${{ secrets.BF_SSH_KEY }}
+          BF_HOST: ${{ secrets.BF_HOST }}
+          BF_PORT: ${{ secrets.BF_PORT }}
+          BF_USER: ${{ secrets.BF_USER }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$BF_SSH_KEY" > ~/.ssh/bf_deploy && chmod 600 ~/.ssh/bf_deploy
+          H="${BF_HOST:-103.24.217.132}"
+          P="${BF_PORT:-10022}"
+          U="${BF_USER:-Administrator}"
+          ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            -o ServerAliveInterval=10 -i ~/.ssh/bf_deploy -p "$P" \
+            "$U@$H" 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\bfdeploy\bf_autoupdater.ps1' \
+            || echo 'remote trigger failed (guard will catch within 30s)'
