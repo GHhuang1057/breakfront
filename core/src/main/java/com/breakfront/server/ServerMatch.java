@@ -669,7 +669,7 @@ public final class ServerMatch {
         // 若出生点本身异常（落虚空），向上兜底到世界安全高度
         if (player.getY() < -10) {
             double[] sp = spawnFor(teams.sideOf(player.getUuid()), server.getOverworld());
-            double safeY = Math.max(sp[1], 70.0);
+            double safeY = sp[1] < 0 ? 70.0 : sp[1]; // 仅异常负值才抬升，正常地表高度原样使用
             exec(server, String.format("tp %s %.1f %.1f %.1f",
                     player.getGameProfile().getName(), sp[0], safeY, sp[2]));
         }
@@ -730,7 +730,7 @@ public final class ServerMatch {
                 side = teams.sideOf(p.getUuid());
             }
             double[] sp = spawnFor(side, server.getOverworld());
-            double y = Math.max(sp[1], 64.0);
+            double y = sp[1] < 0 ? 70.0 : sp[1]; // 仅异常负值抬升；正常地表高度原样落地（避免高空摔伤）
             exec(server, String.format("tp %s %.1f %.1f %.1f",
                     p.getGameProfile().getName(), sp[0], y, sp[2]));
             BreakfrontServer.LOGGER.info("[Breakfront] rescued {} from void to spawn ({},{})",
