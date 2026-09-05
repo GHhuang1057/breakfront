@@ -215,8 +215,10 @@ public final class ZoneMarkers {
         prune(zones);
 
         int count = Math.min(zones.size(), 8);
-        int dia = Math.min(22, h - 6);             // 菱形外接圆直径
-        int tickR = dia / 2 + 4;                    // 进度环半径
+        // 尺寸收紧：环外沿必须留在顶栏内、避开下方票数进度条(gy=y+pillH-4≈34)。
+        // h=30 时 dia=16、tickR=10 → 环外沿 cy0+10+1.3≈33.3 < 34，不再压条。
+        int dia = Math.min(16, h - 10);            // 菱形外接圆直径
+        int tickR = dia / 2 + 2;                    // 进度环半径
         int total = count * (tickR * 2 + 2) - 2;
         int cx0 = x + Math.max(0, (w - total) / 2);
         int cy0 = y + h / 2;
