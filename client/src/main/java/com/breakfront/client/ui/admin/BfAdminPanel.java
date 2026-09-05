@@ -47,15 +47,7 @@ public class BfAdminPanel extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // 屏内再次按组合键 → 收起面板
-        if (keyCode == com.breakfront.client.bf.BfKeys.ADMIN
-                && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0
-                && (modifiers & GLFW.GLFW_MOD_SHIFT) != 0) {
-            if (this.client != null) {
-                this.client.setScreen(null);
-            }
-            return true;
-        }
+        // ESC 由 shouldCloseOnEsc 处理关闭；无组合键需求（命令 /bfp 开关）
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
@@ -75,7 +67,7 @@ public class BfAdminPanel extends Screen {
         BfDraw.fill(ctx, 8, top, 12, 34, BfTheme.YELLOW);
         ctx.drawText(this.textRenderer, Text.literal("ADMIN CONTROL  管理员管控"),
                 28, top + 8, BfTheme.YELLOW, false);
-        String hint = com.breakfront.client.bf.BfKeys.ADMIN_CHORD + " 收起  ·  ESC 关闭  ·  操作以你的身份经 /bfs 执行";
+        String hint = "/bfp 开关 · ESC 关闭 · 操作以你的身份经 /bfs 执行";
         int hw = this.textRenderer.getWidth(hint);
         ctx.drawText(this.textRenderer, Text.literal(hint),
                 sw - hw - 20, top + 11, BfTheme.MUTED, false);

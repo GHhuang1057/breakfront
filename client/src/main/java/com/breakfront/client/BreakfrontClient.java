@@ -16,14 +16,10 @@ import com.breakfront.net.MatchStatePayload;
 import com.breakfront.net.ScoreboardPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,9 +37,6 @@ public class BreakfrontClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static int lastDeployPhaseChange = -1;
-
-    /** M8：管理员面板热键（Ctrl+Shift+M；F8/F6 均与渲染/镜头功能冲突）。 */
-    private KeyBinding adminKey;
 
     @Override
     public void onInitializeClient() {
@@ -110,32 +103,25 @@ public class BreakfrontClient implements ClientModInitializer {
                 (payload, context) -> context.client().execute(
                         () -> AdminState.applyResult(payload.ok(), payload.message())));
 
-        // M8：管理员面板热键注册（M 键，要求 Ctrl+Shift 同按；F 功能行与原版镜头/渲染冲突已弃）
-        adminKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.breakfront.admin", InputUtil.Type.KEYSYM,
-                com.breakfront.client.bf.BfKeys.ADMIN, "key.categories.breakfront"));
+        // 管理员面板入口（M8→命令化 2026-09-05）：聊天输入 /bfp 开关门禁/面板
+        // 不再用快捷键——F8/F6 均与渲染/镜头功能冲突，命令入口零冲突
+        net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register(
+                (dispatcher, registryAccess) -> dispatcher.register(
+                        net.minecraft.server.command.CommandManager.literal("bfp").executes(ctx -> {
+                            MinecraftClient c = MinecraftClient.getInstance();
+                            if (c.currentScreen instanceof TitleScreen || c.currentScreen == null) {
+                                if (AdminState.isAdmin()) {
+                                    c.setScreen(new BfAdminPanel());
+                                } else {
+                                    c.setScreen(new BfAdminGateScreen());
+                                }
+                            } else if (c.currentScreen instanceof BfAdminPanel) {
+                                c.setScreen(null); // 再输入 /bfp 收起面板
+                            }
+                            return 1;
+                        })));
 
-        // M8：组合键状态机 —— 无屏时呼出门禁/面板；登录成功后门禁自动切面板
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (adminKey == null || client.currentScreen instanceof TitleScreen) {
-                return;
-            }
-            boolean combo = adminKey.wasPressed()
-                    && Screen.hasControlDown() && Screen.hasShiftDown();
-            if (!combo) {
-                return;
-            }
-            if (AdminState.isAdmin()) {
-                if (client.currentScreen == null) {
-                    client.setScreen(new BfAdminPanel());
-                } else if (client.currentScreen instanceof BfAdminPanel) {
-                    client.setScreen(null);
-                }
-            } else if (client.currentScreen == null
-                    || client.currentScreen instanceof BfAdminGateScreen) {
-                client.setScreen(new BfAdminGateScreen());
-            }
-        });
+        // 登录成功后门禁自动切面板
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.currentScreen instanceof BfAdminGateScreen && AdminState.justGranted()) {
                 AdminState.clearJustGranted();

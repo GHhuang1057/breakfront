@@ -59,7 +59,7 @@ public class BfAdminGateScreen extends Screen {
         ctx.drawText(this.textRenderer, Text.literal("ADMIN ACCESS  管理员入口"),
                 px + 24, py + 18, BfTheme.YELLOW, false);
         ctx.drawText(this.textRenderer,
-                Text.literal(com.breakfront.client.bf.BfKeys.ADMIN_CHORD + " 呼出 · 会话不提升原版权限（/bfs 编辑器级）"),
+                Text.literal("/bfp 打开 · 会话不提升原版权限（/bfs 编辑器级）"),
                 px + 24, py + 34, BfTheme.MUTED, false);
 
         // 密码输入行（自绘底，透明文本框仅显示文字与光标）
@@ -123,12 +123,9 @@ public class BfAdminGateScreen extends Screen {
             tryLogin();
             return true;
         }
-        // 再按组合键 → 取消关闭
-        if (keyCode == com.breakfront.client.bf.BfKeys.ADMIN
-                && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0
-                && (modifiers & GLFW.GLFW_MOD_SHIFT) != 0) {
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
             if (this.client != null) {
-                this.client.setScreen(null);
+                this.client.setScreen(null); // ESC 关闭门禁（命令 /bfp 重开）
             }
             return true;
         }
