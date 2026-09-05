@@ -9,6 +9,7 @@ import com.breakfront.client.state.SectorEditState;
 import com.breakfront.client.ui.BfBootstrapScreen;
 import com.breakfront.client.ui.BfDeployScreen;
 import com.breakfront.client.ui.BreakfrontMainMenu;
+import com.breakfront.client.ui.vanilla.BfPauseScreen;
 import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
 import com.breakfront.net.ScoreboardPayload;
@@ -17,6 +18,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.minecraft.client.gui.screen.GameMenuScreen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +64,21 @@ public class BreakfrontClient implements ClientModInitializer {
             if (client.player == null || client.world == null) {
                 return;
             }
+
+            // 暂停屏接管：原版 GameMenuScreen(PauseScreen) 出现即替换为 BF 暂停屏。
+            // 选项…通过 parent=this 回跳；返回主菜单走 client.disconnect(TitleScreen)，
+            // 由下方 TitleScreen 分支接管为 BF 主菜单。BfPauseScreen 自身不会被再次命中。
+            if (client.currentScreen != null) {
+                net.minecraft.client.gui.screen.Screen cur = client.currentScreen;
+                boolean isPause = cur instanceof GameMenuScreen
+                        || cur.getClass().getName().endsWith("GameMenuScreen")
+                        || cur.getClass().getName().endsWith("PauseScreen");
+                if (isPause) {
+                    client.setScreen(new BfPauseScreen(cur));
+                    return;
+                }
+            }
+
             int ph = ClientMatchState.phaseOrdinal();
             if (ph == 1) {
                 if (lastDeployPhaseChange != ClientMatchState.phaseChangeCount()) {

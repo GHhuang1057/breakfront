@@ -19,6 +19,19 @@ public final class WeaponCatalog {
 
     private static final Map<String, WeaponSpec> SPECS = new LinkedHashMap<>();
 
+    /**
+     * 兵种 → 可选主武器白名单（任务 B：部署屏兵种/武器选择用）。
+     * 取值指向 {@link #SPECS} 的 id；未知 gunId 在 Kits/指令层回退该兵种默认枪。
+     */
+    private static final Map<String, List<String>> CLASS_GUNS = new LinkedHashMap<>();
+
+    static {
+        CLASS_GUNS.put("assault", List.of("hk416d", "m4a1"));
+        CLASS_GUNS.put("engineer", List.of("aa12", "m590"));
+        CLASS_GUNS.put("support", List.of("m249", "m4a1"));
+        CLASS_GUNS.put("recon", List.of("kar98", "mk14"));
+    }
+
     static {
         register(new WeaponSpec("hk416d", "HK416D", WeaponClass.AR, AmmoType.CAL_556X45,
                 FireMode.AUTO, 30, 180, 20, 1, 1.6, 8, 45, 0.65, 700, 1.5));
@@ -69,6 +82,22 @@ public final class WeaponCatalog {
     public static KitSpec kit(String classId) {
         return KITS.stream().filter(k -> k.kitId().equals(classId))
                 .findFirst().orElse(KITS.get(0));
+    }
+
+    /** 兵种可选主武器白名单（gun id 列表，按推荐顺序）。 */
+    public static List<String> classGuns(String classId) {
+        return CLASS_GUNS.getOrDefault(classId, List.of());
+    }
+
+    /** 某枪是否属于某兵种白名单。 */
+    public static boolean isGunAllowed(String classId, String gunId) {
+        return gunId != null && CLASS_GUNS.getOrDefault(classId, List.of()).contains(gunId);
+    }
+
+    /** 兵种默认枪（白名单首把；未知兵种回退 hk416d）。 */
+    public static String defaultGun(String classId) {
+        List<String> g = CLASS_GUNS.get(classId);
+        return (g == null || g.isEmpty()) ? "hk416d" : g.get(0);
     }
 
     private WeaponCatalog() {

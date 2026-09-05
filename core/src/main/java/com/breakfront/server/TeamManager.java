@@ -14,6 +14,8 @@ public final class TeamManager {
 
     private final Map<UUID, Side> membership = new HashMap<>();
     private final Map<UUID, String> classes = new HashMap<>();
+    /** 玩家所选主武器 id（null = 使用兵种默认枪，不覆盖）。 */
+    private final Map<UUID, String> guns = new HashMap<>();
 
     public static final String[] KNOWN_CLASSES = {"assault", "engineer", "support", "recon"};
 
@@ -28,6 +30,26 @@ public final class TeamManager {
 
     public String classOf(UUID playerId) {
         return classes.getOrDefault(playerId, "assault");
+    }
+
+    /** 设置兵种 + 主武器（gunId 为 null 时仅改兵种，保留既有枪选择）。 */
+    public void setKit(UUID playerId, String classId, String gunId) {
+        setClass(playerId, classId);
+        if (gunId != null) {
+            guns.put(playerId, gunId);
+        }
+    }
+
+    /** 单独设置主武器（不改动兵种）。 */
+    public void setGun(UUID playerId, String gunId) {
+        if (gunId != null) {
+            guns.put(playerId, gunId);
+        }
+    }
+
+    /** 玩家当前主武器 id；null 表示「用兵种默认枪」。 */
+    public String gunIdOf(UUID playerId) {
+        return guns.get(playerId);
     }
 
     public void join(UUID playerId, Side side) {

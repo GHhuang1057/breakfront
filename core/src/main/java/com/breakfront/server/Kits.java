@@ -1,5 +1,6 @@
 package com.breakfront.server;
 
+import com.breakfront.weapon.WeaponCatalog;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 
@@ -23,11 +24,24 @@ public final class Kits {
     public record KitSpec(String gunId, String ammoId, int magSize, int spareAmmo) {
     }
 
+    /** 兵种 → 默认主武器（与 WeaponCatalog.CLASS_GUNS 首把保持一致）。 */
     private static final Map<String, KitSpec> KITS = Map.of(
             "assault", new KitSpec("hk416d", "556x45", 30, 180),
             "engineer", new KitSpec("aa12", "12g", 8, 48),
             "support", new KitSpec("m249", "556x45", 75, 300),
             "recon", new KitSpec("kar98", "792x57", 4, 40));
+
+    /** 单枪 → 发放规格（覆盖所有兵种白名单内的枪 + 若干额外枪）。 */
+    private static final Map<String, KitSpec> GUNS = Map.of(
+            "hk416d", new KitSpec("hk416d", "556x45", 30, 180),
+            "m4a1", new KitSpec("m4a1", "556x45", 30, 180),
+            "aa12", new KitSpec("aa12", "12g", 8, 48),
+            "m590", new KitSpec("m590", "12g", 6, 36),
+            "m249", new KitSpec("m249", "556x45", 75, 300),
+            "kar98", new KitSpec("kar98", "792x57", 4, 40),
+            "mk14", new KitSpec("mk14", "762x39", 20, 80),
+            "ump45", new KitSpec("ump45", "45acp", 25, 150),
+            "glock17", new KitSpec("glock17", "9mm", 17, 68));
 
     /** 兵种轮转顺序（bot 与真人共用同一套）。 */
     public static final String[] CLASSES = {"assault", "engineer", "support", "recon"};
@@ -45,10 +59,17 @@ public final class Kits {
         return spec(classId).gunId();
     }
 
-    /** 套件发放：主武器强制上主手（满弹匣），备弹进背包（指令自动按堆叠上限拆分）。 */
+    /**
+     * 套件发放：按玩家实际「兵种 + 主武器」发放（无选定枪则用兵种默认枪）。
+     * 主武器强制上主手（满弹匣），备弹进背包（指令自动按堆叠上限拆分）。
+     */
     public static void giveKit(ServerMatch match, MinecraftServer server, ServerPlayerEntity player) {
-        KitSpec spec = KITS.getOrDefault(match.teams().classOf(player.getUuid()),
-                KITS.get("assault"));
+        String classId = match.teams().classOf(player.getUuid());
+        String chosen = match.teams().gunIdOf(player.getUuid());
+        // 校验白名单：不在白名单（含未知 gunId）回退该兵种默认枪
+        String gunId = WeaponCatalog.isGunAllowed(classId, chosen)
+                ? chosen : WeaponCatalog.defaultGun(classId);
+        KitSpec spec = GUNS.getOrDefault(gunId, GUNS.get(WeaponCatalog.defaultGun(classId)));
         String name = player.getGameProfile().getName();
 
         // 主手 = 主武器（满弹匣）——replaceitem 无条件覆盖，保证每次发放可预期

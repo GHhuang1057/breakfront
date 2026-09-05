@@ -161,13 +161,23 @@ root = root.then(literal("team")
         }
         root = root.then(anchor);
 
-        // M2：重发兵种装备（/bf kit 自己补装；/bf kit <class> 切兵种并立即补装，管理级）
+        // M2：重发兵种装备（/bf kit 自己补装；/bf kit <class> [gunId] 切兵种/武器并立即补装）
         root = root.then(literal("kit")
-                .executes(ctx -> kitSelf(ctx.getSource(), null))
+                .executes(ctx -> kitSelf(ctx.getSource(), null, null))
                 .then(CommandManager.argument("class", StringArgumentType.word())
-                        .requires(s -> s.hasPermissionLevel(2))
                         .executes(ctx -> kitSelf(ctx.getSource(),
-                                StringArgumentType.getString(ctx, "class")))));
+                                StringArgumentType.getString(ctx, "class"), null))
+                        .then(CommandManager.argument("gun", StringArgumentType.word())
+                                .executes(ctx -> kitSelf(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "class"),
+                                        StringArgumentType.getString(ctx, "gun"))))));
+
+        // 任务 A：部署点选择（死亡/部署页用）。无参不回大厅（仅提示用法）。
+        root = root.then(literal("deploy")
+                .executes(ctx -> deploy(ctx.getSource(), "base"))
+                .then(CommandManager.argument("target", StringArgumentType.word())
+                        .executes(ctx -> deploy(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "target")))));
 
         // M8：管理员会话（文本路径；客户端面板走 C2S 载荷）。goto 需要 op2 或管理员会话。
         root = root.then(literal("admin")
@@ -221,7 +231,7 @@ root = root.then(literal("team")
         dispatcher.register(root);
     }
 
-    private static int kitSelf(ServerCommandSource source, String classId) {
+    private static int kitSelf(ServerCommandSource source, String classId, String gunId) {
         if (!(source.getEntity() instanceof ServerPlayerEntity player)) {
             source.sendError(Text.literal("仅玩家可领装备"));
             return 0;
@@ -232,10 +242,49 @@ root = root.then(literal("team")
             return 0;
         }
         if (classId != null) {
+            if (!java.util.Arrays.asList(TeamManager.KNOWN_CLASSES).contains(classId)) {
+                source.sendError(Text.literal("未知兵种：" + classId));
+                return 0;
+            }
             match.teams().setClass(player.getUuid(), classId);
         }
+        String actualClass = match.teams().classOf(player.getUuid());
+        if (gunId != null) {
+            if (com.breakfront.weapon.WeaponCatalog.isGunAllowed(actualClass, gunId)) {
+                match.teams().setGun(player.getUuid(), gunId);
+            } else {
+                // 不在白名单：回退该兵种默认枪，并提示
+                match.teams().setGun(player.getUuid(),
+                        com.breakfront.weapon.WeaponCatalog.defaultGun(actualClass));
+                source.sendFeedback(() -> Text.literal(
+                        "枪 " + gunId + " 不属于 " + actualClass + " 白名单，已回退默认枪 "
+                                + com.breakfront.weapon.WeaponCatalog.defaultGun(actualClass)), false);
+            }
+        }
         match.kitPlayer(player.getServer(), player);
-        send(source, "装备已补发（兵种 " + match.teams().classOf(player.getUuid()) + "）");
+        String actualGun = match.teams().gunIdOf(player.getUuid());
+        String gunLabel = actualGun != null
+                ? actualGun : com.breakfront.weapon.WeaponCatalog.defaultGun(actualClass);
+        send(source, "装备已补发（兵种 " + actualClass + " / 主武器 " + gunLabel + "）");
+        return 1;
+    }
+
+    private static int deploy(ServerCommandSource source, String target) {
+        if (!(source.getEntity() instanceof ServerPlayerEntity player)) {
+            source.sendError(Text.literal("仅玩家可部署"));
+            return 0;
+        }
+        var match = BreakfrontServer.match();
+        if (match == null) {
+            source.sendError(Text.literal("对局尚未初始化"));
+            return 0;
+        }
+        match.setDeployChoice(player.getServer(), player, target);
+        if ("observe".equalsIgnoreCase(target)) {
+            send(source, "已进入观察模式（旁观）");
+        } else {
+            send(source, "已选择重生点：" + target + "（点击部署后生效）");
+        }
         return 1;
     }
 

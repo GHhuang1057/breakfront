@@ -70,6 +70,7 @@ public final class BreakfrontServer {
         // S2（M2）：玩家重生（死亡后复活）→ 重发兵种装备（死亡默认清包）
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
             if (match != null) {
+                match.clearDeployChoice(newPlayer.getUuid());
                 MinecraftServer srv = newPlayer.getServer();
                 if (srv != null) {
                     match.kitPlayer(srv, newPlayer);

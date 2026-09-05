@@ -7,6 +7,7 @@ import com.breakfront.game.MatchResult;
 import com.breakfront.game.Sector;
 import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
+import com.breakfront.net.SectorEditPayload;
 import com.breakfront.map.SectorLayout;
 import com.breakfront.net.MatchStatePayload;
 import com.breakfront.net.PlayerPosPayload;
@@ -57,6 +58,8 @@ public final class ServerMatch {
     private final ScoreKeeper score = new ScoreKeeper();
     private final NpcSquad npc = new NpcSquad();
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
+    /** 玩家选定的下一重生点：zoneId / "base" / "observe"（一次消费，详见 setDeployChoice）。 */
+    private final Map<UUID, String> deployChoices = new HashMap<>();
     private final List<String> zoneOrder = new ArrayList<>();
     private final Path runDir;
 
@@ -679,15 +682,113 @@ public final class ServerMatch {
     }
 
     /** 玩家死亡：任意阶段都把重生点钉在己方部署区（vanilla 复活即回防线/出生区，
-     *  绝不落到世界原版出生点——低海拔地图的世界出生点可能悬空/虚空）。 */
+     *  绝不落到世界原版出生点——低海拔地图的世界出生点可能悬空/虚空）。
+     *  若玩家此前已通过 /bf deploy 选定了合法重生点（zoneId/base），则钉到所选锚点，随后清除选择。 */
     public void onPlayerDied(MinecraftServer server, ServerPlayerEntity player) {
         Side side = teams.sideOf(player.getUuid());
         if (side == null) {
             return;
         }
-        double[] sp = spawnFor(side, server.getOverworld());
+        String choice = deployChoices.remove(player.getUuid());
+        double[] sp;
+        if (choice != null && !choice.equals("observe")) {
+            double[] z = deploySpawn(side, server.getOverworld(), choice);
+            sp = (z != null) ? z : spawnFor(side, server.getOverworld());
+        } else {
+            sp = spawnFor(side, server.getOverworld());
+        }
         exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
                 player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+    }
+
+    // ================= 部署点选择（任务 A：/bf deploy） =================
+
+    /**
+     * 记录玩家下一重生点选择并（若已阵亡）立即把重生点锚定到所选点。
+     * 闭环：客户端部署屏点击「部署」→ 发 /bf deploy &lt;zoneId|base|observe&gt; →
+     * 本方法设置 choice 并即时 spawnpoint（玩家此时已死）→ 客户端 requestRespawn()
+     * 走 vanilla 重生落到所选点；一次消费后清除，避免污染下次死亡。
+     */
+    public void setDeployChoice(MinecraftServer server, ServerPlayerEntity player, String choice) {
+        Side side = teams.sideOf(player.getUuid());
+        if (side == null || player.getServer() == null) {
+            return;
+        }
+        String resolved = resolveDeployChoice(side, choice);
+        if (resolved == null) {
+            resolved = "base"; // 非法目标回退己方出生区
+        }
+        if (resolved.equals("observe")) {
+            // 观察模式：进入旁观，不走重生点逻辑
+            exec(server, "gamemode spectator " + player.getGameProfile().getName());
+            deployChoices.remove(player.getUuid());
+            return;
+        }
+        deployChoices.put(player.getUuid(), resolved);
+        // 阵亡（部署页已开）时立即锚定，保证 requestRespawn 落点正确；随后消费清除
+        if (!player.isAlive() || player.getHealth() <= 0f) {
+            double[] sp = deploySpawn(side, server.getOverworld(), resolved);
+            if (sp == null) {
+                sp = spawnFor(side, server.getOverworld());
+            }
+            exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
+                    player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+            deployChoices.remove(player.getUuid());
+        }
+    }
+
+    /** 校验部署目标对本方是否合法；不合法返回 null。 */
+    public String resolveDeployChoice(Side side, String choice) {
+        if (choice == null) {
+            return null;
+        }
+        String c = choice.trim().toLowerCase();
+        if (c.equals("base") || c.equals("observe")) {
+            return c;
+        }
+        ZoneState z = findZone(c);
+        if (z == null) {
+            return null;
+        }
+        // 争夺 = 守方名下且推进度>0（前线正在打）；攻方已占区 owner=ATTACKER 且 meter 恒为 1.0（稳固）
+        boolean contested = (z.owner() == Side.DEFENDER && z.meter() > 1e-3);
+        boolean mine = (side == Side.ATTACKER)
+                ? (z.owner() == Side.ATTACKER)                 // 攻方：已控制的据点
+                : (z.owner() == Side.DEFENDER && !contested);  // 守方：稳固防守点（非争夺）
+        return mine ? c : null;
+    }
+
+    /** 出生坐标（含 Y）：base = 己方出生区；zoneId = 该据点内侧安全站面。 */
+    public double[] deploySpawn(Side side, ServerWorld world, String choice) {
+        if (choice == null || choice.equals("base")) {
+            return spawnFor(side, world);
+        }
+        return zoneSpawn(side, world, choice);
+    }
+
+    /** 据点内侧（偏向己方防线一侧）安全站面；anchor 不存在返回 null。 */
+    private double[] zoneSpawn(Side side, ServerWorld world, String zoneId) {
+        ZoneAnchor a = anchors.get(zoneId);
+        if (a == null) {
+            return null;
+        }
+        double ox = (side == Side.ATTACKER ? -1 : 1) * (a.radius() * 0.4);
+        return surfaceLanding(world, a.x() + ox, a.z(), a);
+    }
+
+    /** 在当前扇区按 id 查找据点状态（部署点只来自当前扇区）。 */
+    private ZoneState findZone(String id) {
+        for (ZoneState z : game.currentSector().zones()) {
+            if (z.id().equals(id)) {
+                return z;
+            }
+        }
+        return null;
+    }
+
+    /** 清除某玩家的待消费部署选择（重生后清理，避免污染下次死亡）。 */
+    public void clearDeployChoice(UUID id) {
+        deployChoices.remove(id);
     }
 
     private void deployPlayer(MinecraftServer server, ServerPlayerEntity player) {

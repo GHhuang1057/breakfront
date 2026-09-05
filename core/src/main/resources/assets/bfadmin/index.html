@@ -38,6 +38,30 @@
   .pill{display:inline-block;padding:0 8px;border-radius:10px;font-size:11px}
   input.num{width:70px;background:#0a0f15;border:1px solid var(--line);color:var(--txt);padding:5px 7px;border-radius:3px;margin:0 6px 4px 0}
   #f-sname{background:#0a0f15;border:1px solid var(--line);color:var(--txt);padding:5px 7px;border-radius:3px;margin-right:6px}
+  /* ---- 页签 ---- */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .tabbtn{background:transparent;border:none;color:var(--dim);padding:9px 18px;cursor:pointer;font-size:14px;border-bottom:2px solid transparent;letter-spacing:1px}
+  .tabbtn:hover{color:var(--txt)}
+  .tabbtn.active{color:var(--yellow);border-bottom-color:var(--yellow)}
+  .maproot{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap}
+  .mapmain{flex:1;min-width:0;display:flex;flex-direction:column}
+  .mapbar{display:flex;flex-wrap:wrap;align-items:center;gap:2px;margin-bottom:8px}
+  .mlin{color:var(--dim);font-size:12px;display:inline-flex;align-items:center;gap:4px;margin-left:8px}
+  .mlin select{background:#0a0f15;border:1px solid var(--line);color:var(--txt);padding:4px 6px;border-radius:3px}
+  .mapcanvasbox{position:relative;flex:1;min-height:520px;border:1px solid var(--line);background:#06080c;border-radius:4px;overflow:hidden}
+  #mapcanvas{display:block;width:100%;height:100%}
+  .maptip{position:absolute;pointer-events:none;display:none;background:#0a0f15;border:1px solid var(--line);padding:3px 7px;font:11px var(--mono);color:var(--txt);white-space:nowrap;border-radius:3px;z-index:5}
+  .maplegend{position:absolute;left:8px;bottom:8px;display:flex;gap:12px;font-size:11px;color:var(--dim);background:rgba(10,13,18,.65);padding:4px 8px;border-radius:4px}
+  .maplegend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  .lg-att{background:#4da6ff}.lg-def{background:#ff5a52}.lg-edit{background:#f5cd54}.lg-dim{background:#2a3744}
+  .maphint{color:var(--dim);font-size:11px;margin-top:8px;line-height:1.7}
+  .mapside{width:244px;flex:0 0 244px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:12px;font-size:12px}
+  .sideh{font-size:12px;color:var(--yellow);letter-spacing:1px;margin:2px 0 8px}
+  .mapside label{display:block;color:var(--dim);margin-bottom:4px}
+  .mapside input.num{margin:0 0 6px 4px}
+  .zinfo{background:#0a0f15;border:1px solid var(--line);border-radius:4px;padding:8px;margin-bottom:10px;line-height:1.6;color:var(--txt)}
+  .sidehr{border:none;border-top:1px solid var(--line);margin:12px 0}
+  .sidecalc{margin-top:4px;color:var(--dim)}
 </style>
 </head>
 <body>
@@ -59,6 +83,11 @@
 
   <!-- 控制台 -->
   <div id="console" style="display:none">
+    <div class="tabs">
+      <button class="tabbtn active" id="tab-console-btn" onclick="switchTab('console')">控制台</button>
+      <button class="tabbtn" id="tab-map-btn" onclick="switchTab('map')">地图俯瞰</button>
+    </div>
+    <div id="tab-console" class="tabpane">
     <div class="grid">
       <div class="cell"><div class="k">对局阶段</div><div class="v" id="st-phase">-</div></div>
       <div class="cell"><div class="k">攻方部署资源</div><div class="v" id="st-ticks">-</div></div>
@@ -113,6 +142,60 @@
 
     <h2>执行反馈</h2>
     <div class="log" id="cmdlog">就绪</div>
+    </div><!-- /tab-console -->
+    <div id="tab-map" class="tabpane" style="display:none">
+      <div class="maproot">
+        <div class="mapmain">
+          <div class="mapbar">
+            <button class="btn primary" onclick="mapLoad()">读取布局</button>
+            <button class="btn" onclick="mapOp('save')">保存布局</button>
+            <button class="btn" onclick="mapOp('load')">从磁盘重载</button>
+            <button class="btn" onclick="mapOp('sectorNext')">下一扇区 ▸</button>
+            <button class="btn" onclick="mapOp('sectorPrev')">◂ 上一扇区</button>
+            <label class="mlin">网格
+              <select id="gridsel" onchange="mapState.grid=+this.value; saveCam(); drawMap()">
+                <option value="8">8m</option><option value="16" selected>16m</option><option value="32">32m</option>
+              </select>
+            </label>
+            <button class="btn" onclick="fitView()">适配视角</button>
+            <span id="maphint" class="hint"></span>
+          </div>
+          <div class="mapcanvasbox" id="mapbox">
+            <canvas id="mapcanvas"></canvas>
+            <div id="maptip" class="maptip"></div>
+            <div class="maplegend">
+              <span><i class="lg-att"></i>攻方出生</span>
+              <span><i class="lg-def"></i>守方出生</span>
+              <span><i class="lg-edit"></i>编辑扇区</span>
+              <span><i class="lg-dim"></i>其它扇区</span>
+            </div>
+          </div>
+          <div class="maphint">拖拽移动 · 角点拉伸改半径 · 双击空白建据点 · 滚轮以光标为中心缩放 · 空格/中键平移 · Del 删除 · Ctrl+Z 撤销 · Esc 取消选中</div>
+        </div>
+        <div class="mapside">
+          <h3 class="sideh">据点信息</h3>
+          <div id="zoneinfo" class="zinfo">未选中据点<br><span class="hint">点击画布中的方块进行选中</span></div>
+          <div id="sideedit" style="display:none">
+            <label>字母/编号 <input id="s-letter" class="num" style="width:60px" disabled></label>
+            <label>坐标 X <input id="s-x" class="num" type="number" step="0.5" oninput="updateSideCalc()"></label>
+            <label>坐标 Z <input id="s-z" class="num" type="number" step="0.5" oninput="updateSideCalc()"></label>
+            <label>半径 R <input id="s-r" class="num" type="number" step="0.5" min="1" oninput="updateSideCalc()"></label>
+            <button class="btn" onclick="applySideEdit()">应用</button>
+            <div class="sidecalc" id="sidecalc"></div>
+          </div>
+          <hr class="sidehr">
+          <button class="btn danger" onclick="delSelected()">删除选中 (Del)</button>
+          <button class="btn" onclick="doUndo()">撤销 (Ctrl+Z)</button>
+          <h3 class="sideh">出生点</h3>
+          <label>攻方 X <input id="s-ax" class="num" type="number" step="1"></label>
+          <label>攻方 Z <input id="s-az" class="num" type="number" step="1"></label>
+          <button class="btn" onclick="applySpawn('attacker')">设攻方出生</button>
+          <label>守方 X <input id="s-dx" class="num" type="number" step="1"></label>
+          <label>守方 Z <input id="s-dz" class="num" type="number" step="1"></label>
+          <button class="btn" onclick="applySpawn('defender')">设守方出生</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -186,7 +269,7 @@ async function poll(){
   });
 }
 
-function showConsole(){ $('login').style.display='none'; $('console').style.display=''; }
+function showConsole(){ $('login').style.display='none'; $('console').style.display=''; setupCanvas(); }
 function showLogin(){ $('login').style.display=''; $('console').style.display='none'; }
 function setDot(on){ $('dot').style.background = on ? 'var(--green)' : '#ff5a52'; $('conn').textContent = on ? '已连接' : '未连接'; }
 function log(s){ $('cmdlog').textContent = new Date().toLocaleTimeString() + '  ' + s; }
@@ -238,7 +321,369 @@ async function mapOp(op, side){
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:TOKEN, ...body})});
   log((r.ok?'✓ ':'✗ ') + op + (r.msg ? ' — ' + r.msg : ''));
   setTimeout(loadMap, 400);
+  if(['save','load','sectorNext','sectorPrev','rename'].includes(op)) setTimeout(()=>mapLoad(false), 450);
 }
+/* ================= 地图俯瞰可视化编辑器 ================= */
+const mapState = {
+  raw:null, model:null, selId:null,
+  cam:{cx:0,cz:0,zoom:4}, grid:16,
+  drag:null, pan:null, space:false, _fitted:false
+};
+let undoStack = [];
+const SEC_COLORS = ['#4da6ff','#f5cd54','#6fe873','#ff5a52','#b78bff','#ff9d4d','#4dd0e1'];
+let cv=null, ctx=null, cssW=0, cssH=0, _canvasReady=false;
+
+const r1 = v => Math.round(v*10)/10;                                  // 保留 1 位小数，避免浮点抖动
+const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+const fmt = v => (Math.round(v*100)/100).toString();                  // 坐标显示精简
+const getMono = ()=> 'Consolas,Menlo,monospace';
+function setMapHint(s){ const e=$('maphint'); if(e) e.textContent=s; }
+
+/* 相机视角持久化（localStorage） */
+function saveCam(){ try{ localStorage.setItem('bfadmin_cam', JSON.stringify({cx:mapState.cam.cx,cz:mapState.cam.cz,zoom:mapState.cam.zoom,grid:mapState.grid})); }catch(e){} }
+function loadCam(){ try{ const s=localStorage.getItem('bfadmin_cam'); if(!s) return null; const o=JSON.parse(s); if(o&&o.grid) mapState.grid=o.grid; if(o&&typeof o.zoom==='number'){ mapState.cam.cx=o.cx||0; mapState.cam.cz=o.cz||0; mapState.cam.zoom=o.zoom; } return o; }catch(e){ return null; } }
+
+/* 读取原始地图 */
+async function getMapRaw(){ return await api('/bfadmin/api/map?token='+encodeURIComponent(TOKEN)); }
+
+/* 归一化：兼容已有结构(sectors[].zones[]{id,x,z,r}) 与文档结构(平面 zones[]{zoneId,letter,x,z,radius} + 数组式 spawns) */
+function normalizeMap(r){
+  const out={sectors:[],editorSectorIdx:0,spawns:{}};
+  if(!r) return out;
+  const secs=r.sectors||[];
+  out.sectors = secs.map(s=>({
+    id:s.id, name:s.name||('扇区'+((s.id!=null)?s.id:'?')),
+    zones:(s.zones||[]).map(z=>({id: z.id!=null?z.id:z.zoneId, letter:z.letter, x:+z.x, z:+z.z, r:+(z.r!=null?z.r:z.radius)||0})),
+    editorSector:!!s.editorSector
+  }));
+  let eidx = (r.editorSectorIdx!=null)? r.editorSectorIdx : -1;
+  if(eidx<0 || eidx>=out.sectors.length){ const f=out.sectors.findIndex(s=>s.editorSector); eidx = f>=0?f:0; }
+  out.editorSectorIdx = eidx;
+  // 兼容平面 zones 结构：若扇区无嵌套据点但顶层存在 zones，则挂到编辑扇区
+  if(r.zones && r.zones.length && !out.sectors.some(s=>s.zones&&s.zones.length)){
+    const zs=r.zones.map(z=>({id:z.zoneId!=null?z.zoneId:z.id, letter:z.letter, x:+z.x, z:+z.z, r:+(z.radius!=null?z.radius:z.r)||0}));
+    if(out.sectors.length) out.sectors[out.editorSectorIdx].zones=zs;
+    else { out.sectors=[{id:0,name:'扇区1',zones:zs,editorSector:true}]; out.editorSectorIdx=0; }
+  }
+  const sp=r.spawns||{};
+  out.spawns.attacker = Array.isArray(sp.attacker)? {x:+sp.attacker[0],z:+sp.attacker[2]} : (sp.attacker&&sp.attacker.x!=null? {x:+sp.attacker.x,z:+sp.attacker.z}:null);
+  out.spawns.defender = Array.isArray(sp.defender)? {x:+sp.defender[0],z:+sp.defender[2]} : (sp.defender&&sp.defender.x!=null? {x:+sp.defender.x,z:+sp.defender.z}:null);
+  return out;
+}
+function extractEditorZones(raw){ const m=normalizeMap(raw); const s=m.sectors[m.editorSectorIdx]; return s? s.zones.map(z=>({id:z.id,x:z.x,z:z.z,r:z.r})):[]; }
+function extractEditorSpawns(raw){ const m=normalizeMap(raw); const sp=m.spawns||{}; const f=p=> (p&&p.x!=null)?{x:p.x,z:p.z}:null; return {attacker:f(sp.attacker), defender:f(sp.defender)}; }
+
+/* 读取并刷新画布模型 */
+async function mapLoad(keepUndo){
+  if(!TOKEN) return;
+  const r = await getMapRaw();
+  if(!r.ok){ setMapHint(r.msg||'读取失败'); return; }
+  mapState.raw=r; mapState.model=normalizeMap(r);
+  const gs=$('gridsel'); if(gs) gs.value=mapState.grid;   // 同步网格下拉框与持久化值
+  if(!keepUndo){ undoStack=[]; mapState.selId=null; }
+  const sp=mapState.model.spawns||{};
+  if(sp.attacker){ $('s-ax').value=sp.attacker.x; $('s-az').value=sp.attacker.z; }
+  if(sp.defender){ $('s-dx').value=sp.defender.x; $('s-dz').value=sp.defender.z; }
+  if(!loadCam() && !mapState._fitted){ fitView(); mapState._fitted=true; }   // 首次无存档时自动适配
+  drawMap(); showZoneInfo();
+}
+
+/* 下发编辑操作（操作前缓存完整 JSON，用于撤销） */
+async function applyEdit(op, fields){
+  if(mapState.raw) undoStack.push(JSON.parse(JSON.stringify(mapState.raw)));
+  if(undoStack.length>80) undoStack.shift();
+  const r = await sendEdit(op, fields, false);
+  if(r.ok){ await mapLoad(true); loadMap(); }                 // 回读刷新（保留撤销栈）
+  else setMapHint('操作失败：'+(r.msg||r.code));
+  return r;
+}
+async function sendEdit(op, fields, doReload){
+  const payload = Object.assign({}, fields||{});
+  const body = {token:TOKEN, op:op, name:op, side:(fields&&fields.side)||''};
+  for(const k in fields) body[k]=fields[k];                   // 平铺字段，兼容两种服务端解析方式
+  body.payload = payload;
+  const r = await api('/bfadmin/api/mapedit', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  log((r.ok?'✓ ':'✗ ') + op + (r.msg? ' — '+r.msg : ''));
+  return r;
+}
+
+/* 撤销：以最后一次快照为基准，下发反向操作把当前扇区还原 */
+async function doUndo(){
+  if(!undoStack.length){ setMapHint('没有可撤销的操作'); return; }
+  const snap = undoStack.pop();
+  const cur = await getMapRaw();
+  if(!cur.ok){ setMapHint('撤销失败：读取失败'); return; }
+  const snapZ=extractEditorZones(snap), curZ=extractEditorZones(cur);
+  for(const c of curZ){ if(!snapZ.find(z=>z.id===c.id)) await sendEdit('remove',{id:c.id},false); }   // 多出的→删除
+  for(const z of snapZ){ if(!curZ.find(c=>c.id===z.id)) await sendEdit('add',{x:z.x,z:z.z,r:z.r},false); } // 少了的→补回
+  for(const z of snapZ){ const c=curZ.find(c=>c.id===z.id); if(c){ if(c.x!==z.x||c.z!==z.z) await sendEdit('move',{id:z.id,x:z.x,z:z.z},false); if(c.r!==z.r) await sendEdit('resize',{id:z.id,r:z.r},false); } }
+  const spS=extractEditorSpawns(snap), spC=extractEditorSpawns(cur);
+  for(const side of ['attacker','defender']){ const a=spS[side], b=spC[side]; if(JSON.stringify(a)!==JSON.stringify(b)&&a) await sendEdit('spawn',{side,x:a.x,z:a.z},false); }
+  await mapLoad(true); loadMap();
+  setMapHint('已撤销一步');
+}
+
+/* 画布初始化与坐标变换 */
+function setupCanvas(){
+  loadCam();
+  if(!_canvasReady){
+    cv=$('mapcanvas'); ctx=cv.getContext('2d');
+    cv.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    cv.addEventListener('dblclick', onDbl);
+    cv.addEventListener('wheel', onWheel, {passive:false});
+    cv.addEventListener('mouseleave', onLeave);
+    cv.addEventListener('contextmenu', e=>e.preventDefault());
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    _canvasReady=true;
+  }
+  resizeCanvas();
+}
+function resizeCanvas(){                       // 高 DPI 处理：按 devicePixelRatio 放大画布像素
+  if(!cv) return;
+  const box=$('mapbox'); const w=box.clientWidth||800, h=box.clientHeight||520;
+  const dpr=window.devicePixelRatio||1;
+  cssW=w; cssH=h;
+  cv.width=Math.max(1,Math.round(w*dpr)); cv.height=Math.max(1,Math.round(h*dpr));
+  cv.style.width=w+'px'; cv.style.height=h+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  if(mapState.model) drawMap();
+}
+function w2s(wx,wz){ return [cssW/2+(wx-mapState.cam.cx)*mapState.cam.zoom, cssH/2+(wz-mapState.cam.cz)*mapState.cam.zoom]; }
+function s2w(sx,sy){ return [mapState.cam.cx+(sx-cssW/2)/mapState.cam.zoom, mapState.cam.cz+(sy-cssH/2)/mapState.cam.zoom]; }
+
+/* 渲染 */
+function drawMap(){
+  if(!ctx) return;
+  ctx.clearRect(0,0,cssW,cssH);
+  ctx.fillStyle='#06080c'; ctx.fillRect(0,0,cssW,cssH);
+  if(!mapState.model){ ctx.fillStyle='#7c8a99'; ctx.font='13px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('点击「读取布局」加载地图数据', cssW/2, cssH/2); return; }
+  const m=mapState.model, step=mapState.grid;
+  const [wx0,wz0]=s2w(0,0), [wx1,wz1]=s2w(cssW,cssH);
+  drawGrid(wx0,wx1,wz0,wz1,step);
+  // 先画非编辑扇区（淡），再画编辑扇区（亮，置于顶层）
+  const order=m.sectors.map((s,i)=>i).sort((a,b)=>(b===m.editorSectorIdx?1:0)-(a===m.editorSectorIdx?1:0));
+  order.forEach(si=> drawSector(si, si===m.editorSectorIdx));
+  if(m.spawns.attacker) drawSpawn(m.spawns.attacker,'攻','#4da6ff');
+  if(m.spawns.defender) drawSpawn(m.spawns.defender,'守','#ff5a52');
+  if(mapState.selId!=null) drawSelection();
+}
+function drawGrid(wx0,wx1,wz0,wz1,step){
+  const cam=mapState.cam;
+  let labelStep=step; while(labelStep*cam.zoom<44) labelStep*=2;   // 标签步长自适应，避免过密
+  ctx.lineWidth=1; ctx.font='10px '+getMono();
+  ctx.textBaseline='top'; ctx.textAlign='left';
+  const xS=Math.floor(wx0/step)*step;
+  for(let x=xS; x<=wx1; x+=step){
+    const sx=w2s(x,0)[0]; const syT=w2s(x,wz0)[1], syB=w2s(x,wz1)[1];
+    ctx.strokeStyle=Math.abs(x)<1e-6?'#3a4a5e':'#141d27';
+    ctx.beginPath(); ctx.moveTo(sx, Math.min(syT,syB)); ctx.lineTo(sx, Math.max(syT,syB)); ctx.stroke();
+    if(Math.abs(((x%labelStep)+labelStep)%labelStep) < step/2){ ctx.fillStyle='#5b6b7a'; ctx.fillText('x'+fmt(x), sx+2, 2); }
+  }
+  ctx.textBaseline='middle'; ctx.textAlign='right';
+  const zS=Math.floor(wz0/step)*step;
+  for(let z=zS; z<=wz1; z+=step){
+    const sy=w2s(0,z)[1]; const sxL=w2s(wx0,z)[0], sxR=w2s(wx1,z)[0];
+    ctx.strokeStyle=Math.abs(z)<1e-6?'#3a4a5e':'#141d27';
+    ctx.beginPath(); ctx.moveTo(Math.min(sxL,sxR), sy); ctx.lineTo(Math.max(sxL,sxR), sy); ctx.stroke();
+    if(Math.abs(((z%labelStep)+labelStep)%labelStep) < step/2){ ctx.fillStyle='#5b6b7a'; ctx.fillText('z'+fmt(z), cssW-2, sy); }
+  }
+}
+function drawSector(si, isEdit){
+  const s=mapState.model.sectors[si]; if(!s) return;
+  const col=SEC_COLORS[si%SEC_COLORS.length];
+  s.zones.forEach(z=>{
+    const [cx,cy]=w2s(z.x,z.z);
+    let half=z.r*mapState.cam.zoom; if(z.r<=0) half=4;
+    ctx.globalAlpha = isEdit?0.9:0.25;
+    ctx.fillStyle=col; ctx.fillRect(cx-half, cy-half, half*2, half*2);
+    ctx.globalAlpha=1;
+    ctx.lineWidth = isEdit?2:1;
+    ctx.strokeStyle = isEdit?'#f5cd54':'#33414f';
+    ctx.strokeRect(cx-half, cy-half, half*2, half*2);
+    ctx.font='bold '+clamp(half*0.7,10,40)+'px '+getMono();
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle = isEdit?'#0a0d12':'#aebccb';
+    ctx.globalAlpha = isEdit?1:0.6;
+    ctx.fillText(z.letter!=null?z.letter:String(z.id), cx, cy);
+    ctx.globalAlpha=1;
+  });
+}
+function drawSpawn(p,label,color){            // 出生点：菱形标记 + 阵营字
+  const [sx,sy]=w2s(p.x,p.z);
+  ctx.save(); ctx.translate(sx,sy);
+  ctx.fillStyle=color; ctx.strokeStyle='#0a0d12'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(0,-9); ctx.lineTo(9,0); ctx.lineTo(0,9); ctx.lineTo(-9,0); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#0a0d12'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label,0,0.5); ctx.restore();
+}
+function drawSelection(){                      // 选中：黄虚线框 + 四角手柄
+  const z=findSel(); if(!z) return;
+  const [cx,cy]=w2s(z.x,z.z); const half=z.r*mapState.cam.zoom;
+  ctx.save(); ctx.strokeStyle='#f5cd54'; ctx.lineWidth=2; ctx.setLineDash([5,4]);
+  ctx.strokeRect(cx-half, cy-half, half*2, half*2); ctx.setLineDash([]);
+  const hs=6;
+  [[cx-half,cy-half],[cx+half,cy-half],[cx-half,cy+half],[cx+half,cy+half]].forEach(p=>{
+    ctx.fillStyle='#f5cd54'; ctx.fillRect(p[0]-hs/2,p[1]-hs/2,hs,hs);
+    ctx.strokeStyle='#0a0d12'; ctx.lineWidth=1; ctx.strokeRect(p[0]-hs/2,p[1]-hs/2,hs,hs);
+  });
+  ctx.restore();
+}
+
+/* 命中检测 */
+function findSelById(id){ if(!mapState.model) return null; for(const s of mapState.model.sectors){ const z=s.zones.find(z=>z.id===id); if(z) return z; } return null; }
+function findSel(){ return mapState.selId!=null? findSelById(mapState.selId):null; }
+function hitZone(sx,sy){
+  if(!mapState.model) return null;
+  const m=mapState.model; let best=null;
+  const order=m.sectors.map((s,i)=>i).sort((a,b)=>(b===m.editorSectorIdx?1:0)-(a===m.editorSectorIdx?1:0));
+  for(const si of order){
+    const s=m.sectors[si];
+    for(const z of s.zones){
+      const [cx,cy]=w2s(z.x,z.z); let half=z.r*mapState.cam.zoom; if(z.r<=0) half=4;
+      if(sx>=cx-half&&sx<=cx+half&&sy>=cy-half&&sy<=cy+half){ best={id:z.id, si}; if(si===m.editorSectorIdx) return best; }
+    }
+  }
+  return best;
+}
+function hitHandle(sx,sy){
+  const z=findSel(); if(!z) return -1;
+  const [cx,cy]=w2s(z.x,z.z); const half=z.r*mapState.cam.zoom; const hs=8;
+  const corners=[[cx-half,cy-half],[cx+half,cy-half],[cx-half,cy+half],[cx+half,cy+half]];
+  for(let i=0;i<4;i++){ if(Math.abs(sx-corners[i][0])<=hs && Math.abs(sy-corners[i][1])<=hs) return i; }
+  return -1;
+}
+
+/* 交互事件 */
+function onDown(e){
+  if($('tab-map').style.display==='none') return;          // 仅地图页生效
+  if(!mapState.model) return;
+  const rect=cv.getBoundingClientRect(); const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
+  if(e.button===1 || (e.button===0 && mapState.space)){ mapState.pan={x:sx,y:sy,cx:mapState.cam.cx,cz:mapState.cam.cz}; e.preventDefault(); return; }
+  if(e.button!==0) return;
+  const hh=hitHandle(sx,sy);                                // 先判角点手柄（拉伸）
+  if(hh>=0){ const z=findSel(); mapState.drag={mode:'resize',id:z.id,or:z.r}; return; }
+  const hit=hitZone(sx,sy);
+  if(hit){ mapState.selId=hit.id; const [wx,wz]=s2w(sx,sy); const z=findSel(); mapState.drag={mode:'move',id:z.id,dx:z.x-wx,dz:z.z-wz,ox:z.x,oz:z.z}; showZoneInfo(); drawMap(); return; }
+  mapState.selId=null; showZoneInfo(); drawMap();            // 空白点击=取消选中
+}
+function onMove(e){
+  if($('tab-map').style.display==='none') return;
+  const rect=cv.getBoundingClientRect(); const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
+  const inside = sx>=0&&sy>=0&&sx<=cssW&&sy<=cssH;
+  if(mapState.pan){                                         // 平移画布
+    const dx=(sx-mapState.pan.x)/mapState.cam.zoom, dy=(sy-mapState.pan.y)/mapState.cam.zoom;
+    mapState.cam.cx=mapState.pan.cx-dx; mapState.cam.cz=mapState.pan.cz-dy; drawMap(); return;
+  }
+  if(mapState.drag){                                        // 拖动/拉伸（仅本地预览，抬起才下发）
+    const [wx,wz]=s2w(sx,sy); const z=findSelById(mapState.drag.id);
+    if(z){
+      if(mapState.drag.mode==='move'){ z.x=wx+mapState.drag.dx; z.z=wz+mapState.drag.dz; }
+      else { z.r=Math.max(1, Math.max(Math.abs(wx-z.x), Math.abs(wz-z.z))); }   // 以角点到中心的最大范数定半径
+      showZoneInfo(); drawMap();
+    }
+    return;
+  }
+  if(inside){                                               // 悬停 tooltip
+    const [wx,wz]=s2w(sx,sy); const hit=hitZone(sx,sy);
+    let txt='世界 x='+fmt(wx)+'  z='+fmt(wz);
+    if(hit){ const z=findSelById(hit.id); txt='据点 '+(z&&z.letter!=null?z.letter:'#'+hit.id)+'  x='+fmt(z.x)+'  z='+fmt(z.z)+'  r='+fmt(z.r); }
+    const tip=$('maptip'); tip.style.display='block'; tip.style.left=(sx+12)+'px'; tip.style.top=(sy+12)+'px'; tip.textContent=txt;
+    cv.style.cursor = (hit||hitHandle(sx,sy)>=0)?'pointer':'default';
+  } else { $('maptip').style.display='none'; }
+}
+function onUp(e){
+  if(mapState.pan){ mapState.pan=null; saveCam(); return; }
+  if(mapState.drag){
+    const d=mapState.drag; mapState.drag=null;
+    const z=findSelById(d.id); if(!z){ drawMap(); return; }
+    if(d.mode==='move'){ if(z.x!==d.ox||z.z!==d.oz) applyEdit('move',{id:d.id,x:r1(z.x),z:r1(z.z)}); else drawMap(); }
+    else if(d.mode==='resize'){ if(z.r!==d.or) applyEdit('resize',{id:d.id,r:r1(z.r)}); else drawMap(); }
+    return;
+  }
+}
+function onDbl(e){
+  if($('tab-map').style.display==='none') return;
+  if(!mapState.model) return;
+  const rect=cv.getBoundingClientRect(); const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
+  if(hitZone(sx,sy)) return;                                // 双击据点不创建
+  const [wx,wz]=s2w(sx,sy);
+  applyEdit('add',{x:r1(wx),z:r1(wz),r:6});                 // 落点默认半径 6，服务端归入编辑扇区
+}
+function onWheel(e){
+  if($('tab-map').style.display==='none') return;
+  e.preventDefault();
+  const rect=cv.getBoundingClientRect(); const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
+  const [wx,wz]=s2w(sx,sy);                                 // 以光标处世界坐标为锚点缩放
+  const factor = e.deltaY<0? 1.12 : 1/1.12;
+  let z=mapState.cam.zoom*factor; z=clamp(z,0.4,60);
+  mapState.cam.zoom=z;
+  mapState.cam.cx = wx - (sx-cssW/2)/z;
+  mapState.cam.cz = wz - (sy-cssH/2)/z;
+  saveCam(); drawMap();
+}
+function onKeyDown(e){
+  if(e.target && (e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA')) return;  // 输入框内不拦截
+  if($('tab-map').style.display==='none') return;
+  if(e.code==='Space'){ mapState.space=true; cv.style.cursor='grab'; e.preventDefault(); }
+  if((e.key==='Delete'||e.key==='Backspace') && mapState.selId!=null){ e.preventDefault(); delSelected(); }
+  if((e.ctrlKey||e.metaKey) && (e.key==='z'||e.key==='Z')){ e.preventDefault(); doUndo(); }
+  if(e.key==='Escape'){ mapState.selId=null; showZoneInfo(); drawMap(); }
+}
+function onKeyUp(e){ if(e.code==='Space'){ mapState.space=false; cv.style.cursor='default'; } }
+function onLeave(){ if($('maptip')) $('maptip').style.display='none'; }
+
+/* 信息面板 */
+function showZoneInfo(){
+  const z=findSel();
+  if(!z){ $('zoneinfo').innerHTML='未选中据点<br><span class="hint">点击画布中的方块进行选中</span>'; $('sideedit').style.display='none'; return; }
+  $('zoneinfo').innerHTML='已选中：<b>'+(z.letter!=null?z.letter:'#'+z.id)+'</b> （id='+z.id+'）';
+  $('sideedit').style.display='block';
+  $('s-letter').value = z.letter!=null?z.letter:z.id;
+  $('s-x').value=z.x; $('s-z').value=z.z; $('s-r').value=z.r;
+  updateSideCalc();
+}
+function updateSideCalc(){ const x=+$('s-x').value||0, z=+$('s-z').value||0, r=+$('s-r').value||0; $('sidecalc').textContent='方块范围 X['+fmt(x-r)+','+fmt(x+r)+']  Z['+fmt(z-r)+','+fmt(z+r)+']'; }
+async function applySideEdit(){
+  const z=findSel(); if(!z) return;
+  const nx=+$('s-x').value, nz=+$('s-z').value, nr=+$('s-r').value;
+  if(isNaN(nx)||isNaN(nz)||isNaN(nr)||nr<1){ setMapHint('坐标/半径无效'); return; }
+  if(nx!==z.x||nz!==z.z) await applyEdit('move',{id:z.id,x:r1(nx),z:r1(nz)});
+  if(nr!==z.r) await applyEdit('resize',{id:z.id,r:r1(nr)});
+}
+async function applySpawn(side){
+  const x = side==='attacker'? (+$('s-ax').value) : (+$('s-dx').value);
+  const z = side==='attacker'? (+$('s-az').value) : (+$('s-dz').value);
+  if(isNaN(x)||isNaN(z)){ setMapHint('出生点坐标无效'); return; }
+  await applyEdit('spawn',{side, x:r1(x), z:r1(z)});
+}
+function delSelected(){ if(mapState.selId==null) return; const id=mapState.selId; mapState.selId=null; applyEdit('remove',{id}); }
+function fitView(){                          // 依据编辑扇区 + 出生点包围盒适配视角
+  if(!mapState.model) return;
+  const s=mapState.model.sectors[mapState.model.editorSectorIdx]; if(!s) return;
+  const pts=[];
+  s.zones.forEach(z=>{ pts.push([z.x-z.r,z.z-z.r],[z.x+z.r,z.z+z.r]); });
+  if(mapState.model.spawns.attacker) pts.push([mapState.model.spawns.attacker.x, mapState.model.spawns.attacker.z]);
+  if(mapState.model.spawns.defender) pts.push([mapState.model.spawns.defender.x, mapState.model.spawns.defender.z]);
+  if(!pts.length){ mapState.cam.cx=0; mapState.cam.cz=0; mapState.cam.zoom=4; saveCam(); drawMap(); return; }
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  pts.forEach(p=>{ minX=Math.min(minX,p[0]); maxX=Math.max(maxX,p[0]); minZ=Math.min(minZ,p[1]); maxZ=Math.max(maxZ,p[1]); });
+  const pad=1.3, w=(maxX-minX)||1, h=(maxZ-minZ)||1;
+  mapState.cam.cx=(minX+maxX)/2; mapState.cam.cz=(minZ+maxZ)/2;
+  mapState.cam.zoom=clamp(Math.min(cssW/(w*pad), cssH/(h*pad)),0.4,60);
+  saveCam(); drawMap();
+}
+function switchTab(name){
+  $('tab-console').style.display = name==='console'?'':'none';
+  $('tab-map').style.display = name==='map'?'':'none';
+  $('tab-console-btn').classList.toggle('active', name==='console');
+  $('tab-map-btn').classList.toggle('active', name==='map');
+  if(name==='map'){ resizeCanvas(); if(!mapState.model) mapLoad(false); else drawMap(); }
+}
+
 (async function init(){
   if (TOKEN){
     const r = await api('/bfadmin/api/status?token=' + encodeURIComponent(TOKEN));
