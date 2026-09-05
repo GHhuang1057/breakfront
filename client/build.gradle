@@ -25,6 +25,13 @@ java {
     withSourcesJar()
 }
 
+loom {
+    mixin {
+        // 生产 jar（remap 到 intermediary）下 mixin @Inject method 字符串需要 refmap 定位
+        defaultRefmapName = "breakfront-client.refmap.json"
+    }
+}
+
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 21
     it.options.encoding = 'UTF-8'
