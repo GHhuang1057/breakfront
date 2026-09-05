@@ -107,19 +107,20 @@ public class BreakfrontClient implements ClientModInitializer {
         // 不再用快捷键——F8/F6 均与渲染/镜头功能冲突，命令入口零冲突
         net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register(
                 (dispatcher, registryAccess) -> dispatcher.register(
-                        net.minecraft.server.command.CommandManager.literal("bfp").executes(ctx -> {
-                            MinecraftClient c = MinecraftClient.getInstance();
-                            if (c.currentScreen instanceof TitleScreen || c.currentScreen == null) {
-                                if (AdminState.isAdmin()) {
-                                    c.setScreen(new BfAdminPanel());
-                                } else {
-                                    c.setScreen(new BfAdminGateScreen());
-                                }
-                            } else if (c.currentScreen instanceof BfAdminPanel) {
-                                c.setScreen(null); // 再输入 /bfp 收起面板
-                            }
-                            return 1;
-                        })));
+                        net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("bfp")
+                                .executes(ctx -> {
+                                    MinecraftClient c = MinecraftClient.getInstance();
+                                    if (c.currentScreen instanceof TitleScreen || c.currentScreen == null) {
+                                        if (AdminState.isAdmin()) {
+                                            c.setScreen(new BfAdminPanel());
+                                        } else {
+                                            c.setScreen(new BfAdminGateScreen());
+                                        }
+                                    } else if (c.currentScreen instanceof BfAdminPanel) {
+                                        c.setScreen(null); // 再输入 /bfp 收起面板
+                                    }
+                                    return 1;
+                                })));
 
         // 登录成功后门禁自动切面板
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
