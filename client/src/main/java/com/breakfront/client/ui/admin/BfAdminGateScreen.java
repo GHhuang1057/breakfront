@@ -12,7 +12,7 @@ import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * M8 管理员门禁屏：Ctrl+Shift+F8 呼出，输入密码后经 C2S 校验。
+ * M8 管理员门禁屏：Ctrl+Shift+F6 呼出，输入密码后经 C2S 校验。
  * 密码错误时在屏上显示服务端返回的原因；成功后由客户端 tick 切到管理面板。
  * 不暂停游戏（对局中可随时呼出）。
  */
@@ -59,7 +59,7 @@ public class BfAdminGateScreen extends Screen {
         ctx.drawText(this.textRenderer, Text.literal("ADMIN ACCESS  管理员入口"),
                 px + 24, py + 18, BfTheme.YELLOW, false);
         ctx.drawText(this.textRenderer,
-                Text.literal("Ctrl+Shift+F8 呼出 · 会话不提升原版权限（/bfs 编辑器级）"),
+                Text.literal(com.breakfront.client.bf.BfKeys.ADMIN_CHORD + " 呼出 · 会话不提升原版权限（/bfs 编辑器级）"),
                 px + 24, py + 34, BfTheme.MUTED, false);
 
         // 密码输入行（自绘底，透明文本框仅显示文字与光标）
@@ -123,8 +123,8 @@ public class BfAdminGateScreen extends Screen {
             tryLogin();
             return true;
         }
-        // 再按 Ctrl+Shift+F8 → 取消关闭
-        if (keyCode == GLFW.GLFW_KEY_F8
+        // 再按组合键 → 取消关闭
+        if (keyCode == com.breakfront.client.bf.BfKeys.ADMIN
                 && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0
                 && (modifiers & GLFW.GLFW_MOD_SHIFT) != 0) {
             if (this.client != null) {

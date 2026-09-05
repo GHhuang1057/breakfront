@@ -24,7 +24,6 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
-import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +42,7 @@ public class BreakfrontClient implements ClientModInitializer {
 
     private static int lastDeployPhaseChange = -1;
 
-    /** M8：管理员面板热键（需 Ctrl+Shift+F8 组合，防误触）。 */
+    /** M8：管理员面板热键（需 Ctrl+Shift+F6 组合，防误触；F8 被原版平滑镜头占用）。 */
     private KeyBinding adminKey;
 
     @Override
@@ -111,10 +110,10 @@ public class BreakfrontClient implements ClientModInitializer {
                 (payload, context) -> context.client().execute(
                         () -> AdminState.applyResult(payload.ok(), payload.message())));
 
-        // M8：管理员面板热键注册（F8，要求 Ctrl+Shift 同按）
+        // M8：管理员面板热键注册（F6，要求 Ctrl+Shift 同按；原 F8 与原版平滑镜头硬键冲突）
         adminKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.breakfront.admin", InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_F8, "key.categories.breakfront"));
+                com.breakfront.client.bf.BfKeys.ADMIN, "key.categories.breakfront"));
 
         // M8：组合键状态机 —— 无屏时呼出门禁/面板；登录成功后门禁自动切面板
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
