@@ -77,8 +77,8 @@ public final class BfMinimap {
             Side owner = Side.values()[z.ownerOrdinal()];
             boolean contested = owner == Side.DEFENDER && z.meter() > 1e-3f;
             int edge = contested
-                    ? ((now % 600) < 300 ? 0xFFFFFFFF : BfTheme.YELLOW)
-                    : (owner == Side.ATTACKER ? BfTheme.YELLOW : BfTheme.BLUE);
+                    ? ((now % 600) < 300 ? 0xFFEFFFFF : BfTheme.CYAN)
+                    : (owner == Side.ATTACKER ? BfTheme.GREEN : BfTheme.BLUE);
             int r = Math.max(4, (int) Math.round(Math.max(2.0, z.radius() * 0.35)));
             disc(ctx, (int) sx, (int) sy, r, 0x40000000);
             disc(ctx, (int) sx, (int) sy, Math.max(2, r - 1), edge);
@@ -92,7 +92,7 @@ public final class BfMinimap {
         }
 
         // 友军点
-        int ally = mySide == 0 ? BfTheme.YELLOW : BfTheme.BLUE;
+        int ally = BfTheme.CYAN; // 友方统一青色点（蓝绿主题）
         for (FriendDot f : ClientMatchState.friends()) {
             if (f.sideOrdinal() != mySide || f.sideOrdinal() < 0) {
                 continue;

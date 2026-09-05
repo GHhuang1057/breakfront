@@ -2,6 +2,7 @@ package com.breakfront.client.ui;
 
 import com.breakfront.client.bf.BfDraw;
 import com.breakfront.client.bf.BfEasing;
+import com.breakfront.client.bf.BfGlow;
 import com.breakfront.client.bf.BfServerConfig;
 import com.breakfront.client.bf.BfTheme;
 import com.breakfront.client.upd.Updater;
@@ -215,7 +216,7 @@ public class BreakfrontMainMenu extends Screen {
 
         // 字标
         int textY = topBarH / 2 - this.textRenderer.fontHeight / 2 + slide;
-        BfDraw.diamond(ctx, 22, topBarH / 2.0 + slide, 6.5, BfTheme.YELLOW);
+        BfDraw.diamond(ctx, 22, topBarH / 2.0 + slide, 6.5, BfTheme.TEAL);
         ctx.drawText(this.textRenderer, Text.literal("BREAKFRONT"), 36, textY,
                 argb(BfTheme.TEXT, a), false);
         int w0 = this.textRenderer.getWidth("BREAKFRONT");
@@ -230,13 +231,15 @@ public class BreakfrontMainMenu extends Screen {
             double h = BfEasing.easeOutCubic(navHover[i]);
             boolean selected = i == 0;
 
-            int col = selected ? BfTheme.YELLOW : argb(hov ? BfTheme.TEXT : BfTheme.TEXT_DIM, a);
+            int col = selected ? BfTheme.TEAL : argb(hov ? BfTheme.TEXT : BfTheme.TEXT_DIM, a);
             int tx = navX[i] + (int) (h * 2);
             ctx.drawText(this.textRenderer, Text.literal(NAV_LABELS[i]), tx, textY, col, false);
 
-            // 选中常亮黄线 / hover 白线扩展
+            // 选中常亮青线（带辉光）/ hover 白线扩展
             if (selected) {
-                BfDraw.fill(ctx, navX[i], topBarH - 3, navW[i] - 6, 2, BfTheme.YELLOW);
+                BfGlow.strip(ctx, navX[i], topBarH - 6, navW[i] - 6, 2,
+                        BfTheme.TEAL & 0xFFFFFF, 60);
+                BfDraw.fill(ctx, navX[i], topBarH - 3, navW[i] - 6, 2, BfTheme.TEAL);
             } else if (h > 0.03) {
                 int lw = (int) ((navW[i] - 6) * h);
                 BfDraw.fill(ctx, navX[i], topBarH - 3, lw, 2, argb(0xFFFFFFFF, (int) (180 * h * a / 255)));
@@ -281,7 +284,7 @@ public class BreakfrontMainMenu extends Screen {
 
     private int statusBadgeColor() {
         if (sessionResult != null && !sessionResult.proceedToConnect()) {
-            return BfTheme.YELLOW;
+            return BfTheme.TEAL;
         }
         if (!sessionCheckStarted) {
             return BfTheme.GREEN;
@@ -291,7 +294,7 @@ public class BreakfrontMainMenu extends Screen {
         }
         return switch (sessionResult.outcome()) {
             case OK -> BfTheme.GREEN;
-            case UPDATED_REQUIRES_RESTART -> BfTheme.YELLOW;
+            case UPDATED_REQUIRES_RESTART -> BfTheme.TEAL;
             default -> 0xFF6B7280;
         };
     }
@@ -310,7 +313,7 @@ public class BreakfrontMainMenu extends Screen {
         // 卡片底
         BfDraw.fill(ctx, x, y, cardW, cardH, argb(BfTheme.PANEL, a));
         BfDraw.border(ctx, x, y, cardW, cardH,
-                argb(BfTheme.YELLOW_DIM, (int) (a * (0.35 + 0.65 * ch))));
+                argb(BfTheme.TEAL_DIM, (int) (a * (0.35 + 0.65 * ch))));
 
         // 卡内战场背景（裁剪）：渐变 + 淡化天际线
         ctx.enableScissor(x, y, x + cardW, y + cardH);
@@ -322,7 +325,7 @@ public class BreakfrontMainMenu extends Screen {
         // hover 亮化：内侧左缘黄条随 hover 展开
         int edge = (int) (4 * ch);
         if (edge > 0) {
-            BfDraw.fill(ctx, x, y, edge, cardH, argb(BfTheme.YELLOW, (int) (200 * ch * a / 255)));
+            BfDraw.fill(ctx, x, y, edge, cardH, argb(BfTheme.TEAL, (int) (200 * ch * a / 255)));
         }
         ctx.disableScissor();
 
@@ -330,7 +333,7 @@ public class BreakfrontMainMenu extends Screen {
         int padX = x + 26;
         int py = y + 24;
         ctx.drawText(this.textRenderer, Text.literal("ALL-OUT WARFARE"),
-                padX, py, argb(BfTheme.YELLOW, a), false);
+                padX, py, argb(BfTheme.TEAL, a), false);
         ctx.drawText(this.textRenderer, Text.literal("全面战争"),
                 padX, py + 13, argb(BfTheme.TEXT, a), false);
         ctx.drawText(this.textRenderer,
@@ -349,8 +352,10 @@ public class BreakfrontMainMenu extends Screen {
         deployHover = smooth(deployHover, bHov ? 1 : 0, delta);
         double dh = BfEasing.easeOutCubic(deployHover);
         if (flow == Flow.IDLE) {
-            // 底层：黄
-            BfDraw.parallelogram(ctx, bx, by, deployBtnW, deployBtnH, 6, argb(BfTheme.YELLOW, a));
+            // 辉光层 + 底层青（BF 主行动）
+            BfGlow.rect(ctx, bx - 3, by - 3, deployBtnW + 6, deployBtnH + 6,
+                    BfTheme.TEAL & 0xFFFFFF, 72, 7);
+            BfDraw.parallelogram(ctx, bx, by, deployBtnW, deployBtnH, 6, argb(BfTheme.TEAL, a));
             // 上层：白（hover 反白过渡）
             BfDraw.parallelogram(ctx, bx, by, deployBtnW, deployBtnH, 6,
                     argb(0xFFFFFFFF, (int) (255 * dh)));
@@ -398,9 +403,9 @@ public class BreakfrontMainMenu extends Screen {
             BfDraw.fill(ctx, x, y, sideW, sideCardH,
                     argb(hov && !locked[i] ? 0xE6212A36 : 0xE6161C25, a));
             BfDraw.border(ctx, x, y, sideW, sideCardH,
-                    argb(hov && !locked[i] ? BfTheme.YELLOW_DIM : BfTheme.PANEL_LINE, a));
+                    argb(hov && !locked[i] ? BfTheme.TEAL_DIM : BfTheme.PANEL_LINE, a));
             ctx.drawText(this.textRenderer, Text.literal(cards[i][0]), x + 12, y + 12,
-                    argb(locked[i] ? BfTheme.YELLOW_DIM : BfTheme.YELLOW, a), false);
+                    argb(locked[i] ? BfTheme.TEAL_DIM : BfTheme.TEAL, a), false);
             ctx.drawText(this.textRenderer, Text.literal(cards[i][1]), x + 12, y + 25,
                     argb(BfTheme.TEXT_DIM, a), false);
             if (locked[i]) {
@@ -429,13 +434,13 @@ public class BreakfrontMainMenu extends Screen {
         BfDraw.fill(ctx, 0, 0, sw, sh, 0xF206080C);
         // 顶部：模式名（大写小字）+ 状态大字
         ctx.drawText(this.textRenderer, Text.literal(flowTitle), sw / 2
-                - this.textRenderer.getWidth(flowTitle) / 2, sh / 2 - 52, BfTheme.YELLOW, false);
+                - this.textRenderer.getWidth(flowTitle) / 2, sh / 2 - 52, BfTheme.TEAL, false);
         int lw = this.textRenderer.getWidth(flowMsg);
         ctx.drawText(this.textRenderer, Text.literal(flowMsg), sw / 2 - lw / 2, sh / 2 - 30,
                 BfTheme.TEXT, false);
         // 不定态进度条
         int bw = (int) (sw * 0.42);
-        BfDraw.progressBar(ctx, sw / 2 - bw / 2, sh / 2 + 6, bw, 3, -1, now, BfTheme.YELLOW);
+        BfDraw.progressBar(ctx, sw / 2 - bw / 2, sh / 2 + 6, bw, 3, -1, now, BfTheme.TEAL);
         // 目标地址
         String target = BfServerConfig.address();
         int tw = this.textRenderer.getWidth(target);
@@ -454,8 +459,8 @@ public class BreakfrontMainMenu extends Screen {
         int x = sw / 2 - cw / 2;
         int y = sh / 2 - ch / 2;
         BfDraw.fill(ctx, x, y, cw, ch, BfTheme.PANEL);
-        BfDraw.fill(ctx, x, y, 4, ch, BfTheme.YELLOW);
-        ctx.drawText(this.textRenderer, Text.literal("模组已更新 · 自动重启中"), x + 24, y + 18, BfTheme.YELLOW, false);
+        BfDraw.fill(ctx, x, y, 4, ch, BfTheme.TEAL);
+        ctx.drawText(this.textRenderer, Text.literal("模组已更新 · 自动重启中"), x + 24, y + 18, BfTheme.TEAL, false);
         int ly = y + 42;
         for (String line : noticeLines) {
             ctx.drawText(this.textRenderer, Text.literal(line), x + 24, ly, BfTheme.TEXT_DIM, false);
@@ -476,7 +481,7 @@ public class BreakfrontMainMenu extends Screen {
         int bW = 128;
         int bH = 30;
         int by = y + ch - bH - 14;
-        BfDraw.parallelogram(ctx, x + cw - bW * 2 - 34, by, bW, bH, 5, BfTheme.YELLOW);
+        BfDraw.parallelogram(ctx, x + cw - bW * 2 - 34, by, bW, bH, 5, BfTheme.TEAL);
         int t1w = this.textRenderer.getWidth("立即重启");
         ctx.drawText(this.textRenderer, Text.literal("立即重启"),
                 x + cw - bW * 2 - 34 + bW / 2 - t1w / 2, by + bH / 2 - 4, 0xFF0A0D12, false);

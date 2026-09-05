@@ -98,7 +98,7 @@ public class BreakfrontHud {
             int color;
             if (m.kind() >= 2) {
                 base = 11; // 击杀/爆头：更大
-                color = m.kind() == 3 ? BfTheme.YELLOW : BfTheme.RED;
+                color = m.kind() == 3 ? BfTheme.GREEN : BfTheme.RED;
             } else {
                 base = 7;
                 color = 0xFFF2F4F8;
@@ -131,7 +131,7 @@ public class BreakfrontHud {
         BfDraw.fill(ctx, 0, 0, sw, sh, 0xBF06080C);
         BfDraw.gradientV(ctx, 0, (int) (sh * 0.72), sw, (int) (sh * 0.28), 0x00141B26, 0xFF141B26);
         BfDraw.parallelogram(ctx, -140, sh - 150, sw / 3, 5, 70, 0x16FFFFFF);
-        BfDraw.fill(ctx, sw / 2 - 90, 0, 4, sh, BfTheme.YELLOW);
+        BfDraw.fill(ctx, sw / 2 - 90, 0, 4, sh, BfTheme.GREEN);
 
         // 标题
         String head = "BREAKFRONT  ·  战备大厅";
@@ -140,7 +140,7 @@ public class BreakfrontHud {
         ctx.drawText(font, Text.literal(head), sw / 2 - hw / 2, hy, 0xFFFFFFFF, false);
         String sub = "ALL-OUT WARFARE  ·  等待指挥官部署";
         int subW = font.getWidth(sub);
-        ctx.drawText(font, Text.literal(sub), sw / 2 - subW / 2, hy + 16, BfTheme.YELLOW_DIM, false);
+        ctx.drawText(font, Text.literal(sub), sw / 2 - subW / 2, hy + 16, BfTheme.GREEN_DIM, false);
 
         // 人数卡
         int cw = Math.min(360, sw - 80);
@@ -152,7 +152,7 @@ public class BreakfrontHud {
         int half = cw / 2;
         String att = "进攻方  " + ClientMatchState.attackerOnline();
         String def = "防守方  " + ClientMatchState.defenderOnline();
-        ctx.drawText(font, Text.literal(att), cx + 18, cy + 14, BfTheme.YELLOW, false);
+        ctx.drawText(font, Text.literal(att), cx + 18, cy + 14, BfTheme.GREEN, false);
         ctx.drawText(font, Text.literal(def), cx + half + 18, cy + 14, BfTheme.BLUE, false);
         // 我方阵营（board 行匹配自身）
         String me = client.player != null ? client.player.getName().getString() : "";
@@ -165,7 +165,7 @@ public class BreakfrontHud {
         }
         String sideText = mySide == 0 ? "进攻方" : (mySide == 1 ? "防守方" : "未分配");
         ctx.drawText(font, Text.literal("你的阵营  " + sideText), cx + 18, cy + 36,
-                mySide == 0 ? BfTheme.YELLOW : BfTheme.MUTED, false);
+                mySide == 0 ? BfTheme.GREEN : BfTheme.MUTED, false);
         ctx.drawText(font, Text.literal("指令  /bf team attacker|defender"), cx + half + 18, cy + 36,
                 BfTheme.MUTED, false);
         ctx.drawText(font, Text.literal("分配后由管理员开局，或自动开局启用后满员即开"),
@@ -207,7 +207,7 @@ public class BreakfrontHud {
         int headY = topY;
         int leftX = sw / 2 - colW - gap / 2;
         int rightX = sw / 2 + gap / 2;
-        ctx.drawText(font, Text.literal("进攻方  ATTACKER"), leftX, headY, BfTheme.YELLOW, false);
+        ctx.drawText(font, Text.literal("进攻方  ATTACKER"), leftX, headY, BfTheme.GREEN, false);
         ctx.drawText(font, Text.literal("防守方  DEFENDER"), rightX, headY, BfTheme.BLUE, false);
         // 列头（名称/击杀/死亡/爆头）
         int rowH = font.fontHeight + 7;
@@ -221,7 +221,7 @@ public class BreakfrontHud {
         if (fullH > sh - 24) {
             return; // 放不下就只画头（极小窗口保护）
         }
-        drawColumn(ctx, font, att, leftX, bodyTop, colW, rowH, BfTheme.YELLOW_DIM);
+        drawColumn(ctx, font, att, leftX, bodyTop, colW, rowH, BfTheme.GREEN_DIM);
         drawColumn(ctx, font, def, rightX, bodyTop, colW, rowH, BfTheme.BLUE);
 
         // 底提示
@@ -254,7 +254,7 @@ public class BreakfrontHud {
             ctx.drawText(font, Text.literal(String.valueOf(r.deaths())), kx + 30, y,
                     r.deaths() == 0 ? BfTheme.FAINT : BfTheme.TEXT_DIM, false);
             ctx.drawText(font, Text.literal(String.valueOf(r.headshots())),
-                    kx + 60, y, r.headshots() > 0 ? BfTheme.YELLOW_DIM : BfTheme.FAINT, false);
+                    kx + 60, y, r.headshots() > 0 ? BfTheme.GREEN_DIM : BfTheme.FAINT, false);
             i++;
         }
     }
@@ -274,13 +274,13 @@ public class BreakfrontHud {
         int x = sw / 2 - cw / 2;
         int y = sh / 2 - ch / 2 + rise;
         com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, ch, argb(BfTheme.PANEL, a));
-        com.breakfront.client.bf.BfDraw.border(ctx, x, y, cw, ch, argb(BfTheme.YELLOW_DIM, a));
+        com.breakfront.client.bf.BfDraw.border(ctx, x, y, cw, ch, argb(BfTheme.GREEN_DIM, a));
 
         // 顶部色条 + 胜方
         int winner = ClientMatchState.lastResultOrdinal();
         boolean attWin = winner == 1;
         boolean defWin = winner == 2;
-        int winCol = attWin ? BfTheme.YELLOW : (defWin ? BfTheme.BLUE : BfTheme.MUTED);
+        int winCol = attWin ? BfTheme.GREEN : (defWin ? BfTheme.BLUE : BfTheme.MUTED);
         com.breakfront.client.bf.BfDraw.fill(ctx, x, y, cw, 3, argb(winCol, a));
 
         String head = attWin ? "进攻方获胜  ATTACKERS WIN"
@@ -385,7 +385,7 @@ public class BreakfrontHud {
             int fw = (int) (gw * ratio);
             if (fw > 0) {
                 ctx.fill(gx, gy, gx + fw, gy + 3,
-                        ratio > 0.3f ? BfTheme.YELLOW : BfTheme.RED);
+                        ratio > 0.3f ? BfTheme.GREEN : BfTheme.RED);
             }
         }
 
@@ -406,8 +406,8 @@ public class BreakfrontHud {
         boolean attacker = owner == Side.ATTACKER;
         boolean contested = !attacker && z.meter() > 1e-3f;
         int edge = contested
-                ? ((now % 600) < 300 ? 0xFFFFFFFF : BfTheme.YELLOW)
-                : (attacker ? BfTheme.YELLOW : BfTheme.BLUE);
+                ? ((now % 600) < 300 ? 0xFFEFFFFF : BfTheme.CYAN)
+                : (attacker ? BfTheme.GREEN : BfTheme.BLUE);
         ctx.fill(x, y, x + w, y + h, 0x4010161F);
         ctx.fill(x, y, x + w, y + 1, edge);
         ctx.fill(x, y + h - 1, x + w, y + h, edge);
@@ -420,7 +420,7 @@ public class BreakfrontHud {
         if (attacker || contested) {
             int prog = attacker ? innerW
                     : (int) (innerW * Math.max(0f, Math.min(1f, z.meter())));
-            ctx.fill(x + 2, y + h - 3, x + 2 + Math.max(1, prog), y + h - 2, BfTheme.YELLOW);
+            ctx.fill(x + 2, y + h - 3, x + 2 + Math.max(1, prog), y + h - 2, BfTheme.GREEN);
         } else {
             ctx.fill(x + 2, y + h - 3, x + w - 2, y + h - 2, BfTheme.BLUE);
         }
@@ -492,7 +492,7 @@ public class BreakfrontHud {
         int px = sw - pw - 12;
         int py = sh - ph - 8;
         ctx.fill(px, py, px + pw, py + ph, 0xC010141B);
-        ctx.fill(px, py, px + pw, py + 2, BfTheme.YELLOW);
+        ctx.fill(px, py, px + pw, py + 2, BfTheme.GREEN);
         ctx.fill(px, py + ph - 1, px + pw, py + ph, 0x24FFFFFF);
         ctx.drawText(font, Text.literal("当前武器  CURRENT"), px + 12, py + 7, BfTheme.MUTED, false);
         ctx.drawText(font, Text.literal(wname), px + 12, py + 19, 0xFFFFFFFF, true);
@@ -519,8 +519,8 @@ public class BreakfrontHud {
             long t = System.currentTimeMillis();
             boolean contested = owner == Side.DEFENDER && z.meter() > 1e-3f;
             int edge = contested
-                    ? ((t % 700) < 350 ? 0xFFFFFFFF : 0xFFF5D44A)
-                    : (owner == Side.ATTACKER ? 0xFFF5D44A : BfTheme.BLUE);
+                    ? ((t % 700) < 350 ? 0xFFEFFFFF : BfTheme.CYAN)
+                    : (owner == Side.ATTACKER ? BfTheme.GREEN : BfTheme.BLUE);
             ctx.fill(x, cy, x + bw, cy + 1, edge);
             ctx.fill(x, cy, x + 1, cy + bh, edge);
             ctx.fill(x + bw - 1, cy, x + bw, cy + bh, edge);
@@ -548,7 +548,7 @@ public class BreakfrontHud {
         int x = (sw - tw) / 2;
         int y = 10;
         ctx.fill(x - 8, y - 3, x + tw + 8, y + font.fontHeight + 3, 0x66000000);
-        ctx.drawText(font, Text.literal(txt), x, y, phase == 2 ? BfTheme.TEXT_DIM : BfTheme.YELLOW, false);
+        ctx.drawText(font, Text.literal(txt), x, y, phase == 2 ? BfTheme.TEXT_DIM : BfTheme.GREEN, false);
     }
 
     // ---- 右上：时钟 + 部署资源 ----
@@ -571,11 +571,11 @@ public class BreakfrontHud {
         String tick = String.valueOf(ClientMatchState.attackerTickets());
         int tkW = font.getWidth(tick);
         int tx = sw - 12 - tkW;
-        int ticketsColor = ClientMatchState.attackerTickets() <= 10 ? BfTheme.RED : BfTheme.YELLOW;
+        int ticketsColor = ClientMatchState.attackerTickets() <= 10 ? BfTheme.RED : BfTheme.GREEN;
         ctx.drawText(font, Text.literal(tick), tx, 10, ticketsColor, false);
         ctx.drawText(font, Text.literal("DEPLOY  攻方"), tx, 10 + font.fontHeight + 1, BfTheme.FAINT, false);
         // 竖直锚线
-        ctx.fill(sw - 14, 10, sw - 13, 10 + 24, ticketsColor == BfTheme.RED ? BfTheme.RED : BfTheme.YELLOW);
+        ctx.fill(sw - 14, 10, sw - 13, 10 + 24, ticketsColor == BfTheme.RED ? BfTheme.RED : BfTheme.GREEN);
     }
 
     // ---- 底部：据点推进 ----
@@ -598,7 +598,7 @@ public class BreakfrontHud {
             ctx.fill(x - 2, y - 2, x + width + 2, y + height + 2, 0x77000000);
             Side owner = Side.values()[zone.ownerOrdinal()];
             float meter = Math.max(0f, Math.min(1f, zone.meter()));
-            int fillColor = owner == Side.ATTACKER ? BfTheme.YELLOW : BfTheme.BLUE;
+            int fillColor = owner == Side.ATTACKER ? BfTheme.GREEN : BfTheme.BLUE;
             int progress = owner == Side.ATTACKER ? width : (int) (width * meter);
             if (progress > 0) {
                 ctx.fill(x, y, x + progress, y + height, fillColor);
@@ -610,7 +610,7 @@ public class BreakfrontHud {
                     : (meter > 1e-3f ? String.format("推进 %d%%", (int) (meter * 100)) : "防守中");
             int sw2 = font.getWidth(state);
             ctx.drawText(font, Text.literal(state), (sw + width) / 2 + 4, y - 3,
-                    owner == Side.ATTACKER ? BfTheme.YELLOW_DIM : BfTheme.TEXT_DIM, false);
+                    owner == Side.ATTACKER ? BfTheme.GREEN_DIM : BfTheme.TEXT_DIM, false);
         }
     }
 
@@ -638,7 +638,7 @@ public class BreakfrontHud {
 
             String head = row.headshot() ? "爆头 " : "";
             String line = row.killer() + "  击杀  " + row.victim();
-            ctx.drawText(font, Text.literal(head), x, y + dy, argb(0xFFF5D44A, alpha), false);
+            ctx.drawText(font, Text.literal(head), x, y + dy, argb(BfTheme.TEAL, alpha), false);
             int hw = font.getWidth(head);
             ctx.drawText(font, Text.literal(line), x + hw, y + dy, argb(0xFFF2F4F8, alpha), false);
             if (row.attackerDied()) {

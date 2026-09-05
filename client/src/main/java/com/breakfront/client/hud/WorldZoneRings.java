@@ -49,6 +49,8 @@ public final class WorldZoneRings {
     private static final float BEACON_HALF = 0.28f;
     /** 角柱高度。 */
     private static final float CORNER_H = 2.6f;
+    /** 领地边界「体积墙」高度（Area Selector 式半透明墙，站在里面也看得到范围）。 */
+    private static final float WALL_H = 2.4f;
     /** 沿边每段的期望地面采样步长（米）。 */
     private static final double STEP = 1.5;
     /** 单边采样点数上限（4 边合计上限 160，内存/开销可控）。 */
@@ -116,15 +118,17 @@ public final class WorldZoneRings {
             double yc = centerY(i, zone);
             double[] b = bounds(zone);
             // 内部淡色方坪（单平面贴中心高，低干扰）
-            fillPlateInto(quads, m, b, yc + 0.02, col, 26);
+            fillPlateInto(quads, m, b, yc + 0.02, col, 38);
             // 外晕（边外 +0.75..+1.25）
             fillEdgeBandInto(quads, m, b, i, 0.75, 1.25, col[0], col[1], col[2], glowAlpha(t));
             // 高亮边带（boundary..+0.75 大部分在边外，贴地）
-            fillEdgeBandInto(quads, m, b, i, 0.0, 0.75, col[0], col[1], col[2], 185);
+            fillEdgeBandInto(quads, m, b, i, 0.0, 0.75, col[0], col[1], col[2], 210);
+            // 领地边界体积墙（半透明竖墙，站在领地内也可看清范围）
+            wallSheetInto(quads, m, b, i, col, wallAlpha(zone, t));
         }
         BufferRenderer.drawWithGlobalProgram(quads.end());
 
-        // ---- 2) 边带内缘亮线（boundary-0.08 处） ----
+        // ---- 2) 边带内缘亮线 + 顶部轮廓线（boundary-0.08 / 墙顶高度处） ----
         RenderSystem.setShader(GameRenderer::getRenderTypeLinesProgram);
         RenderSystem.lineWidth(2.0f);
         BufferBuilder lines = Tessellator.getInstance()
@@ -133,6 +137,8 @@ public final class WorldZoneRings {
             ZoneView zone = zones.get(i);
             int[] col = areaColor(zone, t, true);
             rimLineInto(lines, m, bounds(zone), i, col[0], col[1], col[2], 255);
+            topLineInto(lines, m, bounds(zone), i, centerY(i, zone) + WALL_H,
+                    col[0], col[1], col[2], 200);
         }
         BufferRenderer.drawWithGlobalProgram(lines.end());
         RenderSystem.lineWidth(1.0f);
@@ -280,6 +286,75 @@ public final class WorldZoneRings {
         }
     }
 
+    /** 领地边界「半透明体积墙」：沿四边在边界线位置立一竖墙（0..WALL_H），
+     *  站在领地内部也能清楚地看到占领范围边界（Area Selector V1 同款可见性思路）。 */
+    private static void wallSheetInto(BufferBuilder buf, Matrix4f m, double[] b,
+                                      int idx, int[] col, int a) {
+        double[] gs = (idx >= 0 && idx < ground.length) ? ground[idx] : null;
+        int pe = (idx >= 0 && idx < perEdge.length) ? perEdge[idx] : 16;
+        float rf = col[0] / 255f;
+        float gf = col[1] / 255f;
+        float bf = col[2] / 255f;
+        float af = Math.min(1f, a / 255f);
+        double[][][] edges = {
+                {{b[0], b[1]}, {b[2], b[1]}},
+                {{b[2], b[1]}, {b[2], b[3]}},
+                {{b[2], b[3]}, {b[0], b[3]}},
+                {{b[0], b[3]}, {b[0], b[1]}},
+        };
+        for (int e = 0; e < 4; e++) {
+            double xa = edges[e][0][0], za = edges[e][0][1];
+            double xb = edges[e][1][0], zb = edges[e][1][1];
+            double len = Math.hypot(xb - xa, zb - za);
+            if (len < 1e-6) {
+                continue;
+            }
+            int segs = pe;
+            for (int k = 0; k < segs; k++) {
+                double t0 = (double) k / segs;
+                double t1 = (double) (k + 1) / segs;
+                double p0x = xa + (xb - xa) * t0;
+                double p0z = za + (zb - za) * t0;
+                double p1x = xa + (xb - xa) * t1;
+                double p1z = za + (zb - za) * t1;
+                double y0 = edgeY(gs, pe, e, k);
+                double y1 = edgeY(gs, pe, e, Math.min(k + 1, segs - 1));
+                if (Double.isNaN(y0)) y0 = centerY(idx, gs);
+                if (Double.isNaN(y1)) y1 = centerY(idx, gs);
+                float fy0 = (float) (y0 + LIFT);
+                float fy1 = (float) (y1 + LIFT);
+                float fyT = (float) (Math.max(y0, y1) + LIFT + WALL_H);
+                // 两个三角形组成一个竖直墙面段
+                buf.vertex(m, (float) p0x, fy0, (float) p0z).color(rf, gf, bf, af);
+                buf.vertex(m, (float) p0x, fyT, (float) p0z).color(rf, gf, bf, af);
+                buf.vertex(m, (float) p1x, fyT, (float) p1z).color(rf, gf, bf, af);
+                buf.vertex(m, (float) p1x, fy1, (float) p1z).color(rf, gf, bf, af);
+            }
+        }
+    }
+
+    /** 顶部轮廓线：在固定高度 yTop 沿四边画一圈（体积墙顶界，远处也可见盒体）。 */
+    private static void topLineInto(BufferBuilder buf, Matrix4f m, double[] b,
+                                    int idx, double yTop, int r, int g, int bl, int a) {
+        double[][][] edges = {
+                {{b[0], b[1]}, {b[2], b[1]}},
+                {{b[2], b[1]}, {b[2], b[3]}},
+                {{b[2], b[3]}, {b[0], b[3]}},
+                {{b[0], b[3]}, {b[0], b[1]}},
+        };
+        float rf = r / 255f;
+        float gf = g / 255f;
+        float bf = bl / 255f;
+        float af = Math.min(1f, a / 255f);
+        float fy = (float) yTop;
+        for (double[][] ed : edges) {
+            buf.vertex(m, (float) ed[0][0], fy, (float) ed[0][1]).color(rf, gf, bf, af)
+                    .normal(0f, 1f, 0f);
+            buf.vertex(m, (float) ed[1][0], fy, (float) ed[1][1]).color(rf, gf, bf, af)
+                    .normal(0f, 1f, 0f);
+        }
+    }
+
     /** 四角竖直角柱（y0..y0+CORNER_H，顶加粗亮块）。 */
     private static void cornersInto(BufferBuilder buf, Matrix4f m, double[] b,
                                     double y0, int[] col) {
@@ -423,22 +498,36 @@ public final class WorldZoneRings {
 
     // ================= 颜色 =================
 
-    /** 区域基色：守方蓝 / 攻方黄 / 争夺白→橙呼吸。bright=true 给描边线用。 */
+    /** 区域基色（#44 主题：2042 科幻蓝绿）——攻方占点=荧光绿、守方稳固=电光蓝、
+     *  争夺=青白呼吸。bright=true 给描边线用（更亮）。 */
     private static int[] areaColor(ZoneView zone, long timeMs, boolean bright) {
         Side owner = Side.values()[zone.ownerOrdinal()];
         float pulse = (float) ((timeMs % 800) / 800.0);
         if (owner == Side.ATTACKER) {
-            return new int[]{245, 205, 84, bright ? 255 : 210};      // 攻方黄
+            return new int[]{58, 235, 150, bright ? 255 : 215};      // 攻方绿
         }
         if (owner == Side.DEFENDER && zone.meter() < 1e-3f) {
-            return new int[]{76, 158, 255, bright ? 255 : 200};      // 守方蓝
+            return new int[]{66, 190, 255, bright ? 255 : 205};      // 守方电光蓝
         }
-        // 争夺中：白 ↔ 橙 呼吸
-        int r = (int) (255 - 30 * pulse);
-        int g = (int) (225 - 130 * pulse);
-        int b = (int) (130 - 90 * pulse);
+        // 争夺中：青 ↔ 白 呼吸（科幻感）
+        int r = (int) (120 + 120 * pulse);
+        int g = (int) (235 + 20 * pulse);
+        int b = (int) (225 + 30 * pulse);
         int a = (int) ((bright ? 255 : 150) + 70 * pulse);
-        return new int[]{r, g, Math.max(0, b), Math.min(255, a)};
+        return new int[]{r, g, Math.min(255, b), Math.min(255, a)};
+    }
+
+    /** 体积墙透明度：争夺/攻占中更亮并呼吸；守方稳固低一些。 */
+    private static int wallAlpha(ZoneView zone, long timeMs) {
+        Side owner = Side.values()[zone.ownerOrdinal()];
+        float p = (float) ((timeMs % 1200) / 1200.0);
+        if (owner == Side.ATTACKER) {
+            return 120;
+        }
+        if (owner == Side.DEFENDER && zone.meter() < 1e-3f) {
+            return 78;
+        }
+        return 120 + (int) (46 * Math.sin(p * Math.PI * 2.0));
     }
 
     /** 外晕呼吸强度（与主边带错相）。 */

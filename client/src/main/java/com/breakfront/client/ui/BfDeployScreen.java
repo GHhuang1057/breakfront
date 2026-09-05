@@ -58,7 +58,7 @@ public class BfDeployScreen extends Screen {
         BfDraw.gradientV(ctx, 0, 0, sw, sh, 0xFF0A0D12, 0xFF141B26);
         BfDraw.parallelogram(ctx, -120, sh - 190, sw / 2, 5, 60, 0x14FFFFFF);
         BfDraw.parallelogram(ctx, sw / 3, -30, sw / 3, 4, -40, 0x0FFFFFFF);
-        BfDraw.fill(ctx, 0, 0, 4, sh, BfTheme.YELLOW);
+        BfDraw.fill(ctx, 0, 0, 4, sh, BfTheme.TEAL);
 
         double in = BfEasing.staged(age, 0.05, 0.5);
         int a = (int) (255 * in);
@@ -73,7 +73,7 @@ public class BfDeployScreen extends Screen {
 
         // ---- COUNTDOWN 部署模式 ----
         ctx.drawText(this.textRenderer, Text.literal("DEPLOYMENT  部署"),
-                pad, ty, argb(BfTheme.YELLOW, a), false);
+                pad, ty, argb(BfTheme.TEAL, a), false);
         ctx.drawText(this.textRenderer, Text.literal("ALL-OUT WARFARE  ·  全面战争"),
                 pad, ty + 13, argb(BfTheme.MUTED, a), false);
 
@@ -81,7 +81,7 @@ public class BfDeployScreen extends Screen {
         String cd = String.format("%.0f", Math.max(0, ClientMatchState.countdownRemainingSeconds()));
         int cdW = this.textRenderer.getWidth(cd);
         ctx.drawText(this.textRenderer, Text.literal(cd), sw / 2 - cdW / 2, sh / 2 - 70,
-                argb(0xFFF5D44A, a), false);
+                argb(BfTheme.TEAL, a), false);
         String lbl = "开战倒计时";
         int lw = this.textRenderer.getWidth(lbl);
         ctx.drawText(this.textRenderer, Text.literal(lbl), sw / 2 - lw / 2, sh / 2 - 46,
@@ -111,14 +111,14 @@ public class BfDeployScreen extends Screen {
             int ry = rowY + i * rowH;
             Side owner = Side.values()[z.ownerOrdinal()];
             BfDraw.diamond(ctx, panelX + 16, ry + 12, 6,
-                    owner == Side.ATTACKER ? BfTheme.YELLOW : BfTheme.BLUE);
+                    owner == Side.ATTACKER ? BfTheme.TEAL : BfTheme.BLUE);
             ctx.drawText(this.textRenderer, Text.literal(z.letter()),
                     panelX + 12, ry + 7, 0xFF0A0D12, false);
             String state = owner == Side.ATTACKER
                     ? "已占领"
                     : (z.meter() > 1e-3f ? "争夺中 " + (int) (z.meter() * 100) + "%" : "防守中");
             ctx.drawText(this.textRenderer, Text.literal(state), panelX + 32, ry + 8,
-                    argb(owner == Side.ATTACKER ? BfTheme.YELLOW : BfTheme.TEXT_DIM, a), false);
+                    argb(owner == Side.ATTACKER ? BfTheme.TEAL : BfTheme.TEXT_DIM, a), false);
             String coord = String.format("(%.0f, %.0f)", z.worldX(), z.worldZ());
             int cw2 = this.textRenderer.getWidth(coord);
             ctx.drawText(this.textRenderer, Text.literal(coord),
@@ -127,7 +127,7 @@ public class BfDeployScreen extends Screen {
                 ctx.fill(panelX + 14, ry + 24, panelX + panelW - 14, ry + 25, 0x33FFFFFF);
                 ctx.fill(panelX + 14, ry + 24,
                         panelX + 14 + (int) ((panelW - 28) * Math.min(1, z.meter())),
-                        ry + 25, BfTheme.YELLOW);
+                        ry + 25, BfTheme.TEAL);
             }
         }
 
@@ -146,13 +146,13 @@ public class BfDeployScreen extends Screen {
             boolean sel = i == selected;
             int cardCol = argb(sel ? 0xE6303E50 : BfTheme.PANEL, a);
             BfDraw.fill(ctx, clsX, cy, clsW, cardH, cardCol);
-            int edge = sel ? BfTheme.YELLOW : (hov ? argb(BfTheme.TEXT_DIM, a) : argb(BfTheme.PANEL_LINE, a));
+            int edge = sel ? BfTheme.TEAL : (hov ? argb(BfTheme.TEXT_DIM, a) : argb(BfTheme.PANEL_LINE, a));
             BfDraw.border(ctx, clsX, cy, clsW, cardH, edge);
             if (sel) {
-                BfDraw.fill(ctx, clsX, cy, 3, cardH, BfTheme.YELLOW);
+                BfDraw.fill(ctx, clsX, cy, 3, cardH, BfTheme.TEAL);
             }
             ctx.drawText(this.textRenderer, Text.literal(CLASSES[i][2]),
-                    clsX + 14, cy + 9, argb(sel ? BfTheme.YELLOW : BfTheme.TEXT, a), false);
+                    clsX + 14, cy + 9, argb(sel ? BfTheme.TEAL : BfTheme.TEXT, a), false);
             ctx.drawText(this.textRenderer, Text.literal(CLASSES[i][3]),
                     clsX + 14, cy + 24, argb(BfTheme.MUTED, a), false);
             String cn = CLASSES[i][1];
@@ -160,7 +160,7 @@ public class BfDeployScreen extends Screen {
             ctx.drawText(this.textRenderer, Text.literal(cn),
                     clsX + clsW - cnW - 12, cy + 8, argb(BfTheme.FAINT, a), false);
             if (sel) {
-                BfDraw.fill(ctx, clsX + clsW - 26, cy + cardH / 2 - 6, 14, 12, BfTheme.YELLOW);
+                BfDraw.fill(ctx, clsX + clsW - 26, cy + cardH / 2 - 6, 14, 12, BfTheme.TEAL);
                 ctx.drawText(this.textRenderer, Text.literal("✓"),
                         clsX + clsW - 23, cy + cardH / 2 - 5, 0xFF0A0D12, false);
             }
@@ -188,9 +188,9 @@ public class BfDeployScreen extends Screen {
         int bx = sw / 2 - bw / 2;
         int by = (int) (sh * 0.62);
         boolean hov = mx >= bx && mx <= bx + bw && my >= by && my <= by + bh;
-        BfDraw.fill(ctx, bx, by, bw, bh, hov ? 0xFF0A0D12 : BfTheme.YELLOW);
-        BfDraw.border(ctx, bx, by, bw, bh, hov ? BfTheme.YELLOW : BfTheme.YELLOW_DIM);
-        int tCol = hov ? BfTheme.YELLOW : 0xFF0A0D12;
+        BfDraw.fill(ctx, bx, by, bw, bh, hov ? 0xFF0A0D12 : BfTheme.TEAL);
+        BfDraw.border(ctx, bx, by, bw, bh, hov ? BfTheme.TEAL : BfTheme.TEAL_DIM);
+        int tCol = hov ? BfTheme.TEAL : 0xFF0A0D12;
         String txt = "部署  DEPLOY";
         int tw = this.textRenderer.getWidth(txt);
         ctx.drawText(this.textRenderer, Text.literal(txt), sw / 2 - tw / 2, by + 15, tCol, false);

@@ -250,7 +250,7 @@ public final class ZoneMarkers {
                 triggerPulse(zone.zoneId(), KIND_RECAPT, now, 0xFF4DA6FF);
             } else if (!wasAtt && isAtt) {
                 // 攻方占领成功
-                triggerPulse(zone.zoneId(), KIND_CAPTURED, now, 0xFFF5D44A);
+                triggerPulse(zone.zoneId(), KIND_CAPTURED, now, 0xFF3EE88C);
             } else if (!isAtt && last.meter < 0.03f && meter >= 0.05f) {
                 // 进入争夺（防守据点开始被推进）
                 triggerPulse(zone.zoneId(), KIND_CONTEST, now, 0xFFFFFFFF);

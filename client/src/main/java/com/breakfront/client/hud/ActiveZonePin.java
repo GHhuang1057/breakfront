@@ -1,6 +1,7 @@
 package com.breakfront.client.hud;
 
 import com.breakfront.client.bf.BfEasing;
+import com.breakfront.client.bf.BfGlow;
 import com.breakfront.client.bf.BfTheme;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.ZoneView;
@@ -152,7 +153,7 @@ public final class ActiveZonePin {
     private static int zoneColor(ZoneView z) {
         boolean attacker = z.ownerOrdinal() == 0;
         boolean contested = !attacker && z.meter() > 1e-3f;
-        return contested ? BfTheme.YELLOW : (attacker ? BfTheme.YELLOW : BfTheme.BLUE);
+        return contested ? BfTheme.CYAN : (attacker ? BfTheme.GREEN : BfTheme.BLUE);
     }
 
     private static void drawDiamond(DrawContext ctx, int cx, int cy, int size, int rgb, int a) {
@@ -187,9 +188,11 @@ public final class ActiveZonePin {
         int b = BfTheme.PANEL & 0xFF;
         int bg = (a << 24) | (r << 16) | (g << 8) | b;
         ctx.fill(x, y, x + PIN_W, y + PIN_H, bg);
-        ctx.fill(x, y, x + PIN_W, y + 1, BfTheme.YELLOW); // 顶强调线
         int edge = zoneColor(z);
-        ctx.fill(x, y + 1, x + 3, y + PIN_H - 1, edge);   // 左侧领地色边
+        // 顶强调线 + 自然辉光
+        BfGlow.strip(ctx, x - 2, y - 3, PIN_W + 4, 2, edge & 0xFFFFFF, 46);
+        ctx.fill(x, y, x + PIN_W, y + 1, edge);             // 顶强调线
+        ctx.fill(x, y + 1, x + 3, y + PIN_H - 1, edge);     // 左侧领地色边
 
         int ta = a * 3 / 4;
         // 标题：领地字母 + 语义
