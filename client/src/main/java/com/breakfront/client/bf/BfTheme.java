@@ -26,6 +26,7 @@ public final class BfTheme {
     public static final int BLUE = 0xFF4DA6FF;         // 守方/信息
     public static final int RED = 0xFFFF4A3C;          // 危险
     public static final int GREEN = 0xFF3EE88C;        // 成功/就绪/攻方占点
+    public static final int GREEN_DIM = 0x803EE88C;
 
     // 2042 科幻蓝绿主强调（新 UI 一律使用；色块需要辉光时配 BfGlow）
     public static final int TEAL = 0xFF35E6D2;         // 主强调：荧光青
