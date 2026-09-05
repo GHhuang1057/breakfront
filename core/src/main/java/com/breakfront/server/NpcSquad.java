@@ -559,7 +559,7 @@ public final class NpcSquad {
         if (c == null) {
             return null;
         }
-        double r = Math.max(2.0, z.radius());
+        double r = Math.max(2.0, match.zoneRadius(zoneIdx));
         // 稳定伪随机偏移：hash 派生 [-0.75r, +0.75r]
         long h = n.id.hashCode() & 0x7fffffffL;
         double fx = ((h % 1001) / 1000.0 - 0.5) * 2.0 * 0.75 * r;

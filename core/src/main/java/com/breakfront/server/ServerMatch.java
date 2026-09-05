@@ -614,6 +614,15 @@ public final class ServerMatch {
         return new double[]{a.x(), a.z(), 0};
     }
 
+    /** 据点半径（半边长），序号越界返回 8.0 兜底。 */
+    public double zoneRadius(int globalIndex) {
+        if (globalIndex < 0 || globalIndex >= zoneOrder.size()) {
+            return 8.0;
+        }
+        ZoneAnchor a = anchors.get(zoneOrder.get(globalIndex));
+        return a == null ? 8.0 : a.radius();
+    }
+
     /** NPC 被玩家击杀：只给击杀者记分，不建 NPC 条目。 */
     public void recordBotKill(ServerPlayerEntity killer, int botSideOrd) {
         Side ks = teams.sideOf(killer.getUuid());
