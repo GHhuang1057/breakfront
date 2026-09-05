@@ -21,6 +21,7 @@ import net.minecraft.world.RaycastContext;
 import org.joml.Matrix4f;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -84,13 +85,18 @@ public final class FriendlyHostileMarks {
         Vec3d right = look.crossProduct(new Vec3d(0, 1, 0)).normalize();
         Vec3d up = right.crossProduct(look).normalize();
 
+        // 扫描战场角色（真人 + AI 增援），一次取回两遍共用
+        var scanBox = mc.player.getBoundingBox().expand(MAX_DIST + 8);
+        var actors = world.getEntitiesByClass(Entity.class, scanBox,
+                e -> e instanceof PlayerEntity || e instanceof ZombieEntity);
+
         // 友军 pass（穿墙）：先关深度再画；敌军 pass（被墙挡）：恢复深度再画
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableDepthTest();
-        drawPass(world, camPos, look, right, up, context.positionMatrix(), selfSide, true);
+        drawPass(actors, camPos, look, right, up, context.positionMatrix(), selfSide, true);
         RenderSystem.enableDepthTest();
-        drawPass(world, camPos, look, right, up, context.positionMatrix(), selfSide, false);
+        drawPass(actors, camPos, look, right, up, context.positionMatrix(), selfSide, false);
         RenderSystem.disableBlend();
 
         // 清理离开视野距离过久的 ray 缓存
@@ -99,15 +105,16 @@ public final class FriendlyHostileMarks {
     }
 
     /** 单遍绘制：friendlyOnly=true 友军（disableDepthTest 已在外部设置），false 敌军。 */
-    private static void drawPass(ClientWorld world, Vec3d camPos, Vec3d look, Vec3d right, Vec3d up,
+    private static void drawPass(List<Entity> actors, Vec3d camPos, Vec3d look, Vec3d right, Vec3d up,
                                  Matrix4f m, int selfSide, boolean friendlyOnly) {
         long now = System.currentTimeMillis();
         MinecraftClient mc = MinecraftClient.getInstance();
+        ClientWorld world = mc.world;
         RenderSystem.setShader(GameRenderer::getPositionColorProgram);
         BufferBuilder buf = Tessellator.getInstance()
                 .begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
 
-        for (Entity e : world.getEntities().getAll()) {
+        for (Entity e : actors) {
             if (e == mc.player) {
                 continue;
             }
@@ -200,7 +207,8 @@ public final class FriendlyHostileMarks {
         if (hit.getType() == HitResult.Type.MISS) {
             return false;
         }
-        return hit.squaredDistanceTo(start) < distSq * 0.96;
+        Vec3d hp = hit.getPos();
+        return hp.squaredDistanceTo(start) < distSq * 0.96;
     }
 
     // ================= 阵营判定 =================
