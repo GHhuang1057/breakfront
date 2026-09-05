@@ -39,6 +39,9 @@ public class BreakfrontClient implements ClientModInitializer {
 
     private static int lastDeployPhaseChange = -1;
 
+    /** 主页「管理」入口置位：进服成功即自动弹管理员门禁/面板（一次性消费）。 */
+    public static volatile boolean openAdminOnJoin = false;
+
     @Override
     public void onInitializeClient() {
         LOGGER.info("[Breakfront] client initialized (BF2042 UI)");
@@ -130,6 +133,24 @@ public class BreakfrontClient implements ClientModInitializer {
                 client.setScreen(new BfAdminPanel());
             }
         });
+
+        // 主页「管理」入口的进服联动：连接成功即弹门禁/面板（未登录弹门禁输密码）
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register(
+                (handler, sender, client) -> {
+                    if (!openAdminOnJoin) {
+                        return;
+                    }
+                    openAdminOnJoin = false;
+                    client.execute(() -> {
+                        if (client.currentScreen == null || client.currentScreen instanceof TitleScreen) {
+                            if (AdminState.isAdmin()) {
+                                client.setScreen(new BfAdminPanel());
+                            } else {
+                                client.setScreen(new BfAdminGateScreen());
+                            }
+                        }
+                    });
+                });
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
 
