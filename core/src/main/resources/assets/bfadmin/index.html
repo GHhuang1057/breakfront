@@ -36,6 +36,8 @@
   .banner input{background:#0a0f15;border:1px solid var(--line);color:var(--txt);padding:9px 12px;width:260px;border-radius:3px;margin-right:8px}
   .hint{color:var(--dim);font-size:12px;margin-top:10px}
   .pill{display:inline-block;padding:0 8px;border-radius:10px;font-size:11px}
+  input.num{width:70px;background:#0a0f15;border:1px solid var(--line);color:var(--txt);padding:5px 7px;border-radius:3px;margin:0 6px 4px 0}
+  #f-sname{background:#0a0f15;border:1px solid var(--line);color:var(--txt);padding:5px 7px;border-radius:3px;margin-right:6px}
 </style>
 </head>
 <body>
@@ -84,6 +86,30 @@
     <h2>在线玩家</h2>
     <table><thead><tr><th>玩家</th><th>阵营</th><th>兵种</th><th>坐标</th><th>HP</th></tr></thead>
       <tbody id="tb-players"></tbody></table>
+
+    <h2>地图布局（扇区 / 据点 / 出生点）</h2>
+    <button class="btn primary" onclick="loadMap()">读取布局</button>
+    <button class="btn" onclick="mapOp('save')">保存布局</button>
+    <button class="btn" onclick="mapOp('load')">从磁盘重载</button>
+    <button class="btn" onclick="mapOp('sectorNext')">下一扇区(到底新建)</button>
+    <button class="btn" onclick="mapOp('sectorPrev')">上一扇区</button>
+    <span id="mapmsg" style="color:var(--dim);margin-left:10px"></span>
+    <div style="margin:8px 0">
+      重命名当前扇区: <input id="f-sname" style="width:140px"> <button class="btn" onclick="mapOp('rename')">更名</button>
+    </div>
+    <table><thead><tr><th>扇区</th><th>据点</th><th>坐标</th><th>半径</th></tr></thead>
+      <tbody id="tb-map"></tbody></table>
+    <div style="margin:8px 0;font-size:12px;color:var(--dim)">
+      新增据点 → x:<input id="f-x" class="num" value="0"> z:<input id="f-z" class="num" value="0"> 半径:<input id="f-r" class="num" value="6">
+      <button class="btn" onclick="mapOp('add')">添加</button>
+      移动据点 → id:<input id="f-id" class="num"> → x:<input id="f-mx" class="num"> z:<input id="f-mz" class="num">
+      <button class="btn" onclick="mapOp('move')">移动</button>
+      移除据点 → id:<input id="f-rid" class="num"> <button class="btn" onclick="mapOp('remove')">删除</button>
+    </div>
+    <div style="margin:4px 0;font-size:12px;color:var(--dim)">
+      攻方出生点 → x:<input id="f-ax" class="num"> z:<input id="f-az" class="num"> <button class="btn" onclick="mapOp('spawn','attacker')">设攻方出生</button>
+      守方出生点 → x:<input id="f-dx" class="num"> z:<input id="f-dz" class="num"> <button class="btn" onclick="mapOp('spawn','defender')">设守方出生</button>
+    </div>
 
     <h2>执行反馈</h2>
     <div class="log" id="cmdlog">就绪</div>
@@ -166,6 +192,53 @@ function setDot(on){ $('dot').style.background = on ? 'var(--green)' : '#ff5a52'
 function log(s){ $('cmdlog').textContent = new Date().toLocaleTimeString() + '  ' + s; }
 
 $('pw').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
+
+/* ---- 地图布局 ---- */
+let MAP = null;
+async function loadMap(){
+  if (!TOKEN) return;
+  const r = await api('/bfadmin/api/map?token=' + encodeURIComponent(TOKEN));
+  if (r.code === 401){ return; }
+  if (!r.ok){ $('mapmsg').textContent = r.msg || '读取失败'; return; }
+  MAP = r;
+  $('mapmsg').textContent = '共 ' + r.totalZones + ' 个据点 · ' + (r.sectors||[]).length + ' 扇区';
+  const tb=$('tb-map'); tb.innerHTML='';
+  (r.sectors||[]).forEach((s, si)=>{
+    const head = el('tr');
+    const c1=el('td','', (si===r.editorSectorIdx?'→ ':'') + (si+1) + '. ' + s.name);
+    c1.rowSpan = Math.max(1, s.zones.length);
+    head.appendChild(c1);
+    head.appendChild(el('td','', s.zones.length ? '' : '（空）'));
+    head.appendChild(el('td','',''));
+    head.appendChild(el('td','',''));
+    tb.appendChild(head);
+    s.zones.forEach(z=>{
+      const tr=el('tr');
+      tr.appendChild(el('td','',z.id));
+      tr.appendChild(el('td','','x='+z.x+'  z='+z.z));
+      tr.appendChild(el('td','', 'r='+z.r));
+      tb.appendChild(tr);
+    });
+  });
+  // 预填出生点
+  if (r.spawns){
+    if(r.spawns.attacker){ $('f-ax').value = r.spawns.attacker.x; $('f-az').value = r.spawns.attacker.z; }
+    if(r.spawns.defender){ $('f-dx').value = r.spawns.defender.x; $('f-dz').value = r.spawns.defender.z; }
+  }
+}
+function gv(id){ const e=$(id); return e ? parseFloat(e.value)||0 : 0; }
+async function mapOp(op, side){
+  const body = {name:op, op:op, side: side||''};
+  if (op==='add'){ body.x=gv('f-x'); body.z=gv('f-z'); body.r=gv('f-r'); }
+  if (op==='move'){ body.id=$('f-id').value; body.x=gv('f-mx'); body.z=gv('f-mz'); }
+  if (op==='remove'){ body.id=$('f-rid').value; }
+  if (op==='rename'){ body.name=$('f-sname').value; }
+  if (op==='spawn'){ body.x = side==='defender'?gv('f-dx'):gv('f-ax'); body.z = side==='defender'?gv('f-dz'):gv('f-az'); }
+  const r = await api('/bfadmin/api/mapedit', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:TOKEN, ...body})});
+  log((r.ok?'✓ ':'✗ ') + op + (r.msg ? ' — ' + r.msg : ''));
+  setTimeout(loadMap, 400);
+}
 (async function init(){
   if (TOKEN){
     const r = await api('/bfadmin/api/status?token=' + encodeURIComponent(TOKEN));

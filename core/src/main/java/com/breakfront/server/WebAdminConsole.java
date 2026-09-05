@@ -48,6 +48,10 @@ public final class WebAdminConsole {
                 login(ex);
             } else if (path.equals("/bfadmin/api/status") && m.equalsIgnoreCase("GET")) {
                 status(ex);
+            } else if (path.equals("/bfadmin/api/map") && m.equalsIgnoreCase("GET")) {
+                map(ex);
+            } else if (path.equals("/bfadmin/api/mapedit") && m.equalsIgnoreCase("POST")) {
+                mapEdit(ex);
             } else if (path.equals("/bfadmin/api/cmd") && m.equalsIgnoreCase("POST")) {
                 cmd(ex);
             } else if (path.equals("/bfadmin/") || path.equals("/bfadmin")) {
@@ -143,6 +147,93 @@ public final class WebAdminConsole {
         }
         sb.append("]}");
         json(ex, 200, sb.toString());
+    }
+
+    /** 地图布局快照（扇区顺序+据点坐标+出生点）。 */
+    private static void map(HttpExchange ex) throws IOException {
+        if (!auth(ex)) {
+            json(ex, 401, "{\"ok\":false,\"msg\":\"未授权\"}");
+            return;
+        }
+        MinecraftServer server = BreakfrontServer.server();
+        ServerMatch match = BreakfrontServer.match();
+        if (server == null || match == null) {
+            json(ex, 200, "{\"ok\":false,\"msg\":\"服务端未就绪\"}");
+            return;
+        }
+        json(ex, 200, match.layoutJson(server));
+    }
+
+    /** 地图布局编辑：add/move/resize/remove/save/load/sectorNext/sectorPrev/rename/spawn。 */
+    private static void mapEdit(HttpExchange ex) throws IOException {
+        if (!auth(ex)) {
+            json(ex, 401, "{\"ok\":false,\"msg\":\"未授权\"}");
+            return;
+        }
+        String body = readBody(ex);
+        String op = quoted(body, "op");
+        String id = quoted(body, "id");
+        double x = num(body, "x", 0);
+        double z = num(body, "z", 0);
+        double r = num(body, "r", 6);
+        String name = quoted(body, "name");
+        String sideS = quoted(body, "side");
+        MinecraftServer server = BreakfrontServer.server();
+        ServerMatch match = BreakfrontServer.match();
+        if (server == null || match == null) {
+            json(ex, 200, "{\"ok\":false,\"msg\":\"服务端未就绪\"}");
+            return;
+        }
+        String msg;
+        try {
+            msg = switch (op == null ? "" : op) {
+                case "add" -> match.editorAdd(server, x, z, r);
+                case "move" -> id == null ? "缺少 id" : match.editorMove(server, id, x, z);
+                case "resize" -> id == null ? "缺少 id" : match.editorResize(server, id, r);
+                case "remove" -> id == null ? "缺少 id" : match.editorRemove(server, id);
+                case "save" -> match.saveLayout();
+                case "load" -> match.loadLayout(server);
+                case "sectorNext" -> match.editorSectorNext(server);
+                case "sectorPrev" -> match.editorSectorPrev(server);
+                case "rename" -> match.editorSectorRename(server, name == null ? "" : name);
+                case "spawn" -> sideS != null && sideS.equalsIgnoreCase("defender")
+                        ? (match.setSpawnOverride(Side.DEFENDER, x, z) ? "守方出生点已设为 " + fmt(x) + "," + fmt(z) : "设置失败")
+                        : (match.setSpawnOverride(Side.ATTACKER, x, z) ? "攻方出生点已设为 " + fmt(x) + "," + fmt(z) : "设置失败");
+                default -> "未知操作: " + op;
+            };
+        } catch (Exception e) {
+            msg = "执行失败: " + e;
+        }
+        Breakfront.LOGGER.info("[BF-Admin] mapedit {} -> {}", op, msg);
+        json(ex, 200, "{\"ok\":true,\"msg\":\"" + esc(msg) + "\"}");
+    }
+
+    private static String fmt(double v) {
+        return String.format("%.1f", v);
+    }
+
+    private static double num(String body, String key, double dflt) {
+        int k = body.indexOf('"' + key + '"');
+        if (k < 0) {
+            return dflt;
+        }
+        int c = body.indexOf(':', k);
+        if (c < 0) {
+            return dflt;
+        }
+        int e = body.length();
+        for (int i = c + 1; i < body.length(); i++) {
+            char ch = body.charAt(i);
+            if (ch == ',' || ch == '}' || ch == ' ') {
+                e = i;
+                break;
+            }
+        }
+        try {
+            return Double.parseDouble(body.substring(c + 1, e).trim());
+        } catch (NumberFormatException ex2) {
+            return dflt;
+        }
     }
 
     private static void cmd(HttpExchange ex) throws IOException {

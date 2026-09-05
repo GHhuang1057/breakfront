@@ -760,74 +760,65 @@ public final class ServerMatch {
     }
 
     /** 出生坐标（含 Y），攻/守默认锚定在首/末据点的阵营侧；可 /bf spawns set 覆盖。
-     *  落点经 {@link #landingAt}：优先「与据点街区同层(≤街区顶+2)」的站面——
-     *  锚点地面是已证实实的方块层（AI 一直在其上走动），绝不在虚空或高架顶出生。 */
+     *  出生/重生落点一律经 {@link #surfaceLanding}：优先目标柱顶实体表面，
+     *  兜底逐级找锚点/世界出生「有实体的站面」——玩家重生直接落在实体表面上，
+     *  不再有虚空/假高度/被拉回。（2026-09-05 v4 定案） */
     private double[] spawnFor(Side side, ServerWorld world) {
         double[] ov = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
         int idx = side == Side.ATTACKER ? 0 : Math.max(0, zoneOrder.size() - 1);
         ZoneAnchor a = anchors.get(zoneOrder.get(idx));
-        double anchorTop = a == null ? Double.NaN : anchorGroundY(world, a);
         if (!Double.isNaN(ov[0])) {
-            return landingAt(world, ov[0], ov[1], anchorTop, a);
+            return surfaceLanding(world, ov[0], ov[1], a);
         }
         if (a == null) {
-            return new double[]{8, 65, 8};
+            return surfaceLanding(world, 8, 8, null);
         }
         double dir = side == Side.ATTACKER ? -1 : 1;
         double sx = a.x() + dir * (a.radius() + 5);
-        return landingAt(world, sx, a.z(), anchorTop, a);
+        return surfaceLanding(world, sx, a.z(), a);
     }
 
-    /** 在 (tx,tz) 的 ±6 邻域找落点，优先「站面≤anchorTop+2 中最高」= 据点街区层；
-     *  无低层站面（全在楼顶）才取最高站面；全空回退锚点柱；再退 (8,65,8) 安全桩。
-     *  返回 {x, 站立Y(方块顶+1), z}——脚底下必有方块。 */
-    private double[] landingAt(ServerWorld world, double tx, double tz,
-                               double anchorTop, ZoneAnchor fallbackAnchor) {
-        double lowBest = Double.NEGATIVE_INFINITY;
-        double anyBest = Double.NEGATIVE_INFINITY;
-        double lx = tx, lz = tz, ax = tx, az = tz;
-        for (int dx = -6; dx <= 6; dx++) {
-            for (int dz = -6; dz <= 6; dz++) {
-                double cx = tx + dx;
-                double cz = tz + dz;
-                double t = columnTopY(world, cx, cz);
-                if (Double.isNaN(t)) {
-                    continue;
-                }
-                if (t > anyBest) {
-                    anyBest = t;
-                    ax = cx;
-                    az = cz;
-                }
-                if (!Double.isNaN(anchorTop) && t <= anchorTop + 2.0 && t > lowBest) {
-                    lowBest = t;
-                    lx = cx;
-                    lz = cz;
-                }
+    /** 「实体表面落点」：依次取 目标柱顶 → 向锚点方向逐米最近有块柱 →
+     *  锚点柱 → 世界出生点柱。每一级都是 MOTION_BLOCKING 真实柱顶（实体可站立面），
+     *  绝不返回架空高度；全空仅剩世界级兜底用世界出生柱。 */
+    private double[] surfaceLanding(ServerWorld world, double tx, double tz, ZoneAnchor anchor) {
+        // 1) 目标柱顶
+        double t = columnTopY(world, tx, tz);
+        if (!Double.isNaN(t)) {
+            return new double[]{tx, t + 1, tz};
+        }
+        // 2) 向锚点（或反向兜底原点）方向逐米找最近有块柱
+        double ax = anchor == null ? 8 : anchor.x();
+        double az = anchor == null ? 8 : anchor.z();
+        double dx = ax - tx;
+        double dz = az - tz;
+        double len = Math.hypot(dx, dz);
+        double ux = len > 1e-6 ? dx / len : 1;
+        double uz = len > 1e-6 ? dz / len : 0;
+        for (int step = 1; step <= 40; step++) {
+            double cx = tx + ux * step;
+            double cz = tz + uz * step;
+            double ct = columnTopY(world, cx, cz);
+            if (!Double.isNaN(ct)) {
+                return new double[]{cx, ct + 1, cz};
             }
         }
-        double pick;
-        double px;
-        double pz;
-        if (!Double.isNaN(lowBest)) {
-            pick = lowBest;
-            px = lx;
-            pz = lz;
-        } else if (!Double.isNaN(anyBest)) {
-            pick = anyBest;
-            px = ax;
-            pz = az;
-        } else {
-            // 邻域全空（极端）：回退锚点柱；再退 (8,65,8) 安全桩
-            if (fallbackAnchor != null) {
-                double t = columnTopY(world, fallbackAnchor.x(), fallbackAnchor.z());
-                if (!Double.isNaN(t)) {
-                    return new double[]{fallbackAnchor.x(), t + 1, fallbackAnchor.z()};
-                }
+        // 3) 锚点柱
+        if (anchor != null) {
+            double at = columnTopY(world, anchor.x(), anchor.z());
+            if (!Double.isNaN(at)) {
+                return new double[]{anchor.x(), at + 1, anchor.z()};
             }
-            return new double[]{8, 65, 8};
         }
-        return new double[]{px, pick + 1, pz};
+        // 4) 世界出生点柱（终级兜底，仍是实体站面）
+        var sp = world.getSpawnPos();
+        double st = columnTopY(world, sp.getX() + 0.5, sp.getZ() + 0.5);
+        if (!Double.isNaN(st)) {
+            return new double[]{sp.getX() + 0.5, st + 1, sp.getZ() + 0.5};
+        }
+        // 极极端：任意已加载区块第一柱
+        double lt = columnTopY(world, 0.5, 0.5);
+        return new double[]{0.5, Double.isNaN(lt) ? 80 : lt + 1, 0.5};
     }
 
     /** 柱顶方块 Y（方块顶面坐标）；该柱无方块（虚空）返回 NaN。 */
@@ -883,7 +874,63 @@ public final class ServerMatch {
         double[] t = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
         t[0] = x;
         t[1] = z;
+        saveServerProps(); // 持久化（props spawn.attacker/defender），重启不丢
         return true;
+    }
+
+    /** props 键值：override 生效时 "x,z"，否则空（不写）。 */
+    private static String spawnKey(double[] ov) {
+        return Double.isNaN(ov[0]) ? "" : String.format("%.1f,%.1f", ov[0], ov[1]);
+    }
+
+    /** Web 管理台「地图布局」快照：扇区顺序+据点坐标+出生点（JSON）。 */
+    public String layoutJson(MinecraftServer server) {
+        ServerWorld w = server.getOverworld();
+        StringBuilder sb = new StringBuilder("{\"ok\":true,\"sectors\":[");
+        var defs = layout.sectors();
+        for (int si = 0; si < defs.size(); si++) {
+            if (si > 0) {
+                sb.append(',');
+            }
+            var def = defs.get(si);
+            sb.append("{\"idx\":").append(si)
+                    .append(",\"name\":\"").append(esc(def.name())).append("\",\"zones\":[");
+            var zs = def.zones();
+            for (int zi = 0; zi < zs.size(); zi++) {
+                if (zi > 0) {
+                    sb.append(',');
+                }
+                var z = zs.get(zi);
+                sb.append("{\"id\":\"").append(esc(z.id()))
+                        .append("\",\"x\":").append(String.format("%.1f", z.x()))
+                        .append(",\"z\":").append(String.format("%.1f", z.z()))
+                        .append(",\"r\":").append(String.format("%.1f", z.radius())).append('}');
+            }
+            sb.append("]}");
+        }
+        sb.append("],\"editorSectorIdx\":").append(editorSectorIdx)
+                .append(",\"totalZones\":").append(layout.zoneCount()).append(',');
+        if (w != null) {
+            double[] aa = spawnFor(Side.ATTACKER, w);
+            double[] dd = spawnFor(Side.DEFENDER, w);
+            sb.append("\"spawns\":{\"attacker\":{\"x\":").append(String.format("%.1f", aa[0]))
+                    .append(",\"y\":").append(String.format("%.1f", aa[1]))
+                    .append(",\"z\":").append(String.format("%.1f", aa[2])).append('}')
+                    .append(",\"defender\":{\"x\":").append(String.format("%.1f", dd[0]))
+                    .append(",\"y\":").append(String.format("%.1f", dd[1]))
+                    .append(",\"z\":").append(String.format("%.1f", dd[2])).append("}}");
+        } else {
+            sb.append("\"spawns\":{}");
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
+    private static String esc(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     public String spawnsText(MinecraftServer server) {
@@ -929,6 +976,19 @@ public final class ServerMatch {
                         } catch (NumberFormatException ignored) {
                             // 保留默认
                         }
+                    } else if (k.equals("spawn.attacker") || k.equals("spawn.defender")) {
+                        int ci = v.indexOf(',');
+                        if (ci > 0) {
+                            try {
+                                double sx = Double.parseDouble(v.substring(0, ci).trim());
+                                double sz = Double.parseDouble(v.substring(ci + 1).trim());
+                                double[] t = k.equals("spawn.attacker") ? attackerSpawn : defenderSpawn;
+                                t[0] = sx;
+                                t[1] = sz;
+                            } catch (NumberFormatException ignored) {
+                                // 忽略坏值
+                            }
+                        }
                     }
                 }
             }
@@ -947,7 +1007,10 @@ public final class ServerMatch {
                     "autostart=" + (autostart ? "on" : "off"),
                     "# 管理员会话（M8）：密码与会话有效期（秒），/bfs 与 /bf admin goto 需此会话",
                     "admin.password=" + AdminService.password,
-                    "admin.timeout=" + AdminService.timeoutSecs) + "\n",
+                    "admin.timeout=" + AdminService.timeoutSecs,
+                    "# 出生点覆盖（/bf spawns set 或 Web 管理端写）：x,z",
+                    "spawn.attacker=" + spawnKey(attackerSpawn),
+                    "spawn.defender=" + spawnKey(defenderSpawn)) + "\n",
                     StandardCharsets.UTF_8);
         } catch (IOException e) {
             BreakfrontServer.LOGGER.warn("[Breakfront] cannot save server props: {}", e.toString());
