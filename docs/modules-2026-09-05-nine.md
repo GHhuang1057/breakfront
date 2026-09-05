@@ -106,11 +106,11 @@
 **实现**
 - 服务端 `server/ServerMatch`：`admin.password`（properties，默认 `breakfront`）；新增 C2S `AdminLoginPayload(password)` → 校验通过把 uuid 记入 `adminSessions`（不提升原版 op，避免越权），超时 30min 失效；管理动作走既有 /bfs 语义但放宽到 admin 会话（`SectorEditCommands` 增加"权限=op 或 admin 会话"判定）。
 - 客户端：
-  - 热键默认 `Ctrl+Shift+F8`（`options.txt`/properties 可改）→ 弹 `BfAdminGateScreen`（BF 风密码输入）。
+  - 热键默认 `Ctrl+Shift+F6`（F8 与原版电影镜头/平滑镜头硬键冲突、按下致画面模糊，故弃；`options.txt`/properties 可改）→ 弹 `BfAdminGateScreen`（BF 风密码输入）。
   - 通过后进入 `BfAdminPanel`（可随时热键开关的矢量面板）：左侧实时据点列表（id/所属/进度/半径/距玩家距离），右侧世界视图复用 M4 圈+M8 高亮：点选据点→面板显示详情；按钮：传送到该点、here 移动该点圆心到脚下、resize、remove、undo、save、apply；以上均走 C2S AdminAction 载荷或直发 /bfs 命令文本（复用既有解析，零新协议成本——采用后者，客户端合成 command 由服务端 `ServerCommandSource` 以玩家身份执行）。
 **文件**：core `server/ServerMatch`(admin 会话)、`server/SectorEditCommands`(权限判定)、新 `net/AdminLoginPayload`+注册；client 新 `ui/admin/BfAdminGateScreen`、`ui/admin/BfAdminPanel`、`net/AdminLoginPayload` 桩、`state/AdminState`、`BreakfrontClient`(热键注册)。
 **配置**：`admin.password`、`admin.key`(组合键名)、`admin.timeout=1800`。
-**验收**：游戏内 Ctrl+Shift+F8→输错拒绝、输对进面板；面板数字与 M4/M6 圈一致；对点"移动到这里"后圈即时跟随并在 save/apply 后生效（重启后仍在=sectors.json）。
+**验收**：游戏内 Ctrl+Shift+F6→输错拒绝、输对进面板；面板数字与 M4/M6 圈一致；对点"移动到这里"后圈即时跟随并在 save/apply 后生效（重启后仍在=sectors.json）。
 
 ## M9 AI v2（Steve 外观 · 持枪 · 占点 · 交战 · 强度逼近真人）
 **目标**：机器人：默认史蒂夫皮肤外观；自主前往据点占领（推进米数）；发现敌人→持当前枪"射击"并移动规避；配合 /bf fill 数量机制；强度分档可调。

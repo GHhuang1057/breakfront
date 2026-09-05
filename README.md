@@ -20,12 +20,15 @@ Minecraft（Fabric **1.21.1**）32v32 大战场整合包 —— 攻防模式（B
 ## 开发指令（服务端 /bf）
 
 ```
-/bf team attacker|defender        加入阵营
-/bf start / stop / end            对局控制
-/bf status / board / npc status   实时状态/击杀榜/人机
-/bf autostart on                  双阵营就绪自动开局
-/bf npc add attacker|defender <n> 增援人机
-/bf anchor <i> set <x> <z>        在地图上定点配据点
+/bf team attacker|defender            加入阵营
+/bf start / stop / end                对局控制
+/bf status / board / npc status       实时状态 / 击杀榜 / 人机
+/bf autostart on                      大厅双阵营就绪自动开局
+/bf fill on|off                       真人 + AI 自动填充（SOLO 单机语义）
+/bf npc add attacker|defender <n>     增援人机
+/bf kit [assault|engineer|support|recon]   补发兵种装备 / 切换兵种
+/bf admin login|logout|goto <zone>   管理员会话（客户端 Ctrl+Shift+F6 密码门禁）
+/bfs on / here / move / resize / remove / undo / save / apply   游戏内扇区/据点编辑器（权限2）
 /bf spawns set attacker|defender <x> <z>   覆盖出生区
 ```
 
@@ -43,10 +46,6 @@ Minecraft（Fabric **1.21.1**）32v32 大战场整合包 —— 攻防模式（B
 | `pack/` | 整合包组装（客户端/服务端模组清单、配置、启动脚本） |
 | `maps/` | 首发图「高架走廊」viaduct 的地图资产与配置包 |
 | `.github/workflows/` | GitHub Actions：编译模组 jar / 冒烟产物 |
-
-## 设计文档
-
-见 [`docs/bf-modpack-charter.md`](docs/bf-modpack-charter.md)。
 
 ## 构建
 
