@@ -747,20 +747,63 @@ public final class ServerMatch {
         }
     }
 
-    /** 出生坐标（含 Y），攻/守默认锚定在首/末据点的阵营侧；可 /bf spawns set 覆盖。 */
+    /** 出生坐标（含 Y），攻/守默认锚定在首/末据点的阵营侧；可 /bf spawns set 覆盖。
+     *  落点一律经 {@link #landingAt}：在目标点邻域内找「真实存在方块的站面」，
+     *  杜绝虚空/假高度出生（此前空柱回退 64/70 会把人放高空或虚空）。 */
     private double[] spawnFor(Side side, ServerWorld world) {
         double[] ov = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
         if (!Double.isNaN(ov[0])) {
-            return new double[]{ov[0], groundY(world, ov[0], ov[1]) + 1, ov[1]};
+            return landingAt(world, ov[0], ov[1], null);
         }
         int idx = side == Side.ATTACKER ? 0 : Math.max(0, zoneOrder.size() - 1);
         ZoneAnchor a = anchors.get(zoneOrder.get(idx));
         if (a == null) {
-            return new double[]{8, 70, 8};
+            return new double[]{8, 65, 8};
         }
         double dir = side == Side.ATTACKER ? -1 : 1;
         double sx = a.x() + dir * (a.radius() + 5);
-        return new double[]{sx, anchorGroundY(world, a) + 1, a.z()};
+        return landingAt(world, sx, a.z(), a);
+    }
+
+    /** 在 (tx,tz) 的 ±6 邻域内找最高「实心方块顶」落点；全空则回退 side 锚点/全局 8,8。
+     *  返回 {x, 站立Y(方块顶+1), z}——保证脚底下有方块、不会从半空摔落。 */
+    private double[] landingAt(ServerWorld world, double tx, double tz, ZoneAnchor fallbackAnchor) {
+        double bestY = Double.NEGATIVE_INFINITY;
+        double bx = tx;
+        double bz = tz;
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                double cx = tx + dx;
+                double cz = tz + dz;
+                double t = columnTopY(world, cx, cz);
+                if (Double.isNaN(t)) {
+                    continue;
+                }
+                if (t > bestY) {
+                    bestY = t;
+                    bx = cx;
+                    bz = cz;
+                }
+            }
+        }
+        if (Double.isNaN(bestY)) {
+            // 邻域全空（极端）：回退锚点柱；再退 8,8 安全桩
+            if (fallbackAnchor != null) {
+                double t = columnTopY(world, fallbackAnchor.x(), fallbackAnchor.z());
+                if (!Double.isNaN(t)) {
+                    return new double[]{fallbackAnchor.x(), t + 1, fallbackAnchor.z()};
+                }
+            }
+            return new double[]{8, 65, 8};
+        }
+        return new double[]{bx, bestY + 1, bz};
+    }
+
+    /** 柱顶方块 Y（方块顶面坐标）；该柱无方块（虚空）返回 NaN。 */
+    private static double columnTopY(ServerWorld world, double x, double z) {
+        int topY = world.getTopY(Heightmap.Type.MOTION_BLOCKING,
+                (int) Math.floor(x), (int) Math.floor(z));
+        return topY <= world.getBottomY() ? Double.NaN : (double) topY;
     }
 
     private double groundY(ServerWorld world, double x, double z) {
