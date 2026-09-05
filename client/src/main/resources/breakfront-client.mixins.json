@@ -3,7 +3,8 @@
   "package": "com.breakfront.client.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "InGameHudMixin"
+    "InGameHudMixin",
+    "SoundManagerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

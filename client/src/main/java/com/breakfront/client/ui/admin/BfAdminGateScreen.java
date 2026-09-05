@@ -45,7 +45,8 @@ public class BfAdminGateScreen extends Screen {
         int sh = this.height;
         int cx = sw / 2;
         int cy = sh / 2;
-        BfDraw.gradientV(ctx, 0, 0, sw, sh, 0xB005070A, 0xD80A0D12);
+        // 背景近不透明——光影/动态世界透过半透明层会造成「糊」与不可读（用户实测反馈）
+        BfDraw.gradientV(ctx, 0, 0, sw, sh, 0xF605070A, 0xFC0A0D12);
         BfDraw.fill(ctx, 0, 0, 4, sh, BfTheme.YELLOW);
 
         int pw = 460;

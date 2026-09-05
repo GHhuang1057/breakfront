@@ -65,9 +65,12 @@ public class BfAdminPanel extends Screen {
         int sh = this.height;
         buttons.clear();
 
+        // 全屏压暗层（保证世界画面不致「透过面板糊掉文字」，又保留可观感）
+        BfDraw.fill(ctx, 0, 0, sw, sh, 0x8805070A);
+
         // —— 顶部品牌条（保留上方视野观察世界）——
         int top = 8;
-        BfDraw.fill(ctx, 8, top, sw - 16, 34, 0xE61A222D);
+        BfDraw.fill(ctx, 8, top, sw - 16, 34, 0xEE1A222D);
         BfDraw.border(ctx, 8, top, sw - 16, 34, BfTheme.PANEL_LINE);
         BfDraw.fill(ctx, 8, top, 12, 34, BfTheme.YELLOW);
         ctx.drawText(this.textRenderer, Text.literal("ADMIN CONTROL  管理员管控"),
@@ -87,7 +90,7 @@ public class BfAdminPanel extends Screen {
         listW = Math.min(sw - 300, 440);
         listW = Math.max(listW, 300);
         int listH = Math.min(sh - py - 12, 30 + Math.max(1, zones.size()) * listRowH + 14);
-        BfDraw.fill(ctx, listX, listY, listW, listH, 0xCC12171F);
+        BfDraw.fill(ctx, listX, listY, listW, listH, 0xE612171F);
         BfDraw.border(ctx, listX, listY, listW, listH, BfTheme.PANEL_LINE);
         ctx.drawText(this.textRenderer, Text.literal("据点列表  ·  SECTOR "
                         + (ClientMatchState.sectorIndex() + 1) + "/" + ClientMatchState.sectorCount()),
@@ -154,7 +157,7 @@ public class BfAdminPanel extends Screen {
 
         int totalH = actions.size() * btnH + (actions.size() - 1) * gap + 20;
         int ay = py;
-        BfDraw.fill(ctx, ax, ay, aw, totalH, 0xCC12171F);
+        BfDraw.fill(ctx, ax, ay, aw, totalH, 0xE612171F);
         BfDraw.border(ctx, ax, ay, aw, totalH, BfTheme.PANEL_LINE);
         ctx.drawText(this.textRenderer, Text.literal("操作"),
                 ax + 12, ay + 7, BfTheme.TEXT_DIM, false);

@@ -29,7 +29,20 @@ public final class Kits {
             "support", new KitSpec("m249", "556x45", 75, 300),
             "recon", new KitSpec("kar98", "792x57", 4, 40));
 
+    /** 兵种轮转顺序（bot 与真人共用同一套）。 */
+    public static final String[] CLASSES = {"assault", "engineer", "support", "recon"};
+
     private Kits() {
+    }
+
+    /** 按兵种 id 查套件（未知兵种回退突击兵）。 */
+    public static KitSpec spec(String classId) {
+        return KITS.getOrDefault(classId, KITS.get("assault"));
+    }
+
+    /** 兵种主武器枪 id（无 tacz: 前缀，供 bot 挂装备/同步展示）。 */
+    public static String gunIdOf(String classId) {
+        return spec(classId).gunId();
     }
 
     /** 套件发放：主武器强制上主手（满弹匣），备弹进背包（指令自动按堆叠上限拆分）。 */

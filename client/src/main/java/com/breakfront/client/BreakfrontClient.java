@@ -151,5 +151,9 @@ public class BreakfrontClient implements ClientModInitializer {
 
         // 扇区编辑器地面预览（世界空间圆环，按扇区分色）
         WorldRenderEvents.AFTER_TRANSLUCENT.register(SectorPreviewRenderer::render);
+
+        // AI 增援：僵尸实体 → 史蒂夫士兵渲染（玩家模型+默认皮肤+持枪装备）
+        net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
+                net.minecraft.entity.EntityType.ZOMBIE, com.breakfront.client.render.BotSoldierRenderer::new);
     }
 }

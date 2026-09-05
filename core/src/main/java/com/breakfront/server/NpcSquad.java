@@ -4,11 +4,16 @@ import com.breakfront.game.BreakthroughTuning;
 import com.breakfront.game.MatchPhase;
 import com.breakfront.game.Side;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.mob.ZombieEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
 
@@ -36,11 +41,15 @@ public final class NpcSquad {
     private int targetAttacker;
     private int targetDefender;
     private int stepCounter;
+    /** 各阵营 bot 生成序号（用于兵种轮转分配）。 */
+    private int attSeq;
+    private int defSeq;
 
     private static final class Npc {
         Side side;
         String shortId;
         UUID id;
+        String cls;    // 兵种：assault/engineer/support/recon
         double lastX;
         double lastY;
         double lastZ;
@@ -193,13 +202,18 @@ public final class NpcSquad {
         Vec3d p = spawnPos(match, server, side);
         ZombieEntity e = new ZombieEntity(EntityType.ZOMBIE, world);
         String sid = UUID.randomUUID().toString().substring(0, 8);
+        // 兵种轮转分配（双方同序循环，保证 4 兵种都有）
+        String cls = Kits.CLASSES[((side == Side.ATTACKER ? attSeq++ : defSeq++))
+                % Kits.CLASSES.length];
         String label = side == Side.ATTACKER ? "攻方增援" : "守方增援";
         e.setCustomName(Text.literal("[" + label + "] AI-" + sid));
         e.setCustomNameVisible(true);
         e.setAiDisabled(true);      // 关闭原版 AI：不会乱咬人
         e.setNoGravity(true);       // 位移由命令驱动，防掉落/卡角
+        e.setSilent(true);          // 不出僵尸声（配合客户端去原版音效）
         e.addCommandTag("breakfront.npc");
         e.addCommandTag("bf.side." + (side == Side.ATTACKER ? "att" : "def"));
+        e.addCommandTag("bf.cls." + cls);
         e.addCommandTag(TAG_PREFIX + sid);
         e.getAttributeInstance(net.minecraft.entity.attribute.EntityAttributes.GENERIC_MAX_HEALTH)
                 .setBaseValue(BreakthroughTuning.PLAYER_MAX_HEALTH);
@@ -209,6 +223,15 @@ public final class NpcSquad {
                 net.minecraft.entity.effect.StatusEffects.FIRE_RESISTANCE, 240000, 0, false, false));
         e.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
                 net.minecraft.entity.effect.StatusEffects.REGENERATION, 240000, 1, false, false));
+        // 兵种主武器挂主手（客户端 BotSoldierRenderer 会画在史蒂夫士兵手上）
+        Kits.KitSpec kit = Kits.spec(cls);
+        ItemStack gun = new ItemStack(Registries.ITEM.get(Identifier.of("tacz", "modern_kinetic_gun")));
+        if (!gun.isEmpty()) {
+            NbtCompound nbt = gun.getOrCreateNbt();
+            nbt.putString("GunId", "tacz:" + kit.gunId());
+            nbt.putInt("GunCurrentAmmoCount", kit.magSize());
+            e.equipStack(EquipmentSlot.MAINHAND, gun);
+        }
         e.setPosition(p.x, p.y, p.z);
         world.spawnEntity(e);
 
@@ -216,12 +239,13 @@ public final class NpcSquad {
         n.side = side;
         n.shortId = sid;
         n.id = e.getUuid();
+        n.cls = cls;
         n.lastX = p.x;
         n.lastY = p.y;
         n.lastZ = p.z;
         units.put(n.id, n);
-        BreakfrontServer.LOGGER.info("[Breakfront] npc {} spawned ({}) alive={}",
-                label + " AI-" + sid, side.labelCn, units.size());
+        BreakfrontServer.LOGGER.info("[Breakfront] npc {} spawned ({} / {} , {}) alive={}",
+                label + " AI-" + sid, side.labelCn, cls, kit.gunId(), units.size());
     }
 
     private Vec3d spawnPos(ServerMatch match, MinecraftServer server, Side side) {
