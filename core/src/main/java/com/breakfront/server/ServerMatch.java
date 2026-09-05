@@ -470,6 +470,7 @@ public final class ServerMatch {
         var payload = new MatchStatePayload(
                 game.phase().ordinal(),
                 game.attackerTickets(),
+                game.attackerTicketsMax(),
                 (float) game.matchRemaining(),
                 (float) game.countdownRemaining(),
                 game.sectorIndex(),

@@ -16,6 +16,7 @@ import java.util.List;
 public record MatchStatePayload(
         int phaseOrdinal,
         int attackerTickets,
+        int attackerTicketsMax,
         float matchRemainingSeconds,
         float countdownRemainingSeconds,
         int sectorIndex,
@@ -35,6 +36,7 @@ public record MatchStatePayload(
     private void write(PacketByteBuf buf) {
         buf.writeInt(phaseOrdinal);
         buf.writeInt(attackerTickets);
+        buf.writeInt(attackerTicketsMax);
         buf.writeFloat(matchRemainingSeconds);
         buf.writeFloat(countdownRemainingSeconds);
         buf.writeInt(sectorIndex);
@@ -51,6 +53,7 @@ public record MatchStatePayload(
     /** 客户端 → 构造：从 buf 严格还原。 */
     public MatchStatePayload(PacketByteBuf buf) {
         this(
+                buf.readInt(),
                 buf.readInt(),
                 buf.readInt(),
                 buf.readFloat(),

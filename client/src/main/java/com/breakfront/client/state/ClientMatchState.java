@@ -17,6 +17,7 @@ public final class ClientMatchState {
     // 对局状态
     private static volatile int phaseOrdinal;
     private static volatile int attackerTickets;
+    private static volatile int attackerTicketsMax;
     private static volatile float matchRemainingSeconds;
     private static volatile float countdownRemainingSeconds;
     private static volatile int sectorIndex;
@@ -56,6 +57,7 @@ public final class ClientMatchState {
         }
         phaseOrdinal = payload.phaseOrdinal();
         attackerTickets = payload.attackerTickets();
+        attackerTicketsMax = payload.attackerTicketsMax();
         matchRemainingSeconds = payload.matchRemainingSeconds();
         countdownRemainingSeconds = payload.countdownRemainingSeconds();
         sectorIndex = payload.sectorIndex();
@@ -104,6 +106,10 @@ public final class ClientMatchState {
 
     public static int attackerTickets() {
         return attackerTickets;
+    }
+
+    public static int attackerTicketsMax() {
+        return attackerTicketsMax > 0 ? attackerTicketsMax : 250;
     }
 
     public static float matchRemainingSeconds() {

@@ -327,60 +327,74 @@ public class BreakfrontHud {
 
     // ================= HUD v3：顶部战况带 / 左下血量 / 右下武器 =================
 
+    /** 顶栏 v4：细长半透明条（不再挡视野），中心 = 固定菱形目标带(ZoneMarkers)，左右=双方票数/得分。 */
     private void renderTopBar(DrawContext ctx, TextRenderer font, int sw) {
-        int bh = 64;
-        int bw = Math.min(sw - 24, 780);
+        int pillH = ZoneMarkers.PILL_H;
+        int bw = Math.min(sw - 260, 600);
+        if (bw < 280) {
+            bw = Math.min(sw - 40, 600);
+        }
         int x = (sw - bw) / 2;
-        int y = 8;
-        ctx.fill(x, y, x + bw, y + bh, 0xD50B0F15);
-        ctx.fill(x, y, x + bw, y + 2, BfTheme.YELLOW);
-        ctx.fill(x, y + bh - 1, x + bw, y + bh, 0x26FFFFFF);
+        int y = ZoneMarkers.PILL_TOP;
 
-        int sideCol = Math.min(168, bw / 4);
-        // 进攻方（左）：得分 + 兵力
-        int lx = x + 16;
-        ctx.drawText(font, Text.literal("ATTACKERS  进攻方"), lx, y + 9, BfTheme.MUTED, false);
-        String aScore = String.valueOf(ClientMatchState.attackerTeamKills());
-        ctx.drawText(font, Text.literal(aScore), lx, y + 18, 0xFFFFFFFF, false);
-        ctx.drawText(font, Text.literal("得分 · 兵力 " + ClientMatchState.attackerTickets()),
-                lx, y + 18 + font.fontHeight + 1, BfTheme.YELLOW_DIM, false);
-        // 防守方（右，右对齐）
-        int rColX = x + bw - sideCol;
-        int rightEdge = x + bw - 16;
-        ctx.drawText(font, Text.literal("DEFENDERS  防守方"),
-                rightEdge - font.getWidth("DEFENDERS  防守方"), y + 9, BfTheme.MUTED, false);
-        String dScore = String.valueOf(ClientMatchState.defenderTeamKills());
-        ctx.drawText(font, Text.literal(dScore),
-                rightEdge - font.getWidth(dScore), y + 18, 0xFFFFFFFF, false);
-        String dSub = "得分 · 守点 " + ClientMatchState.zones().size();
-        ctx.drawText(font, Text.literal(dSub),
-                rightEdge - font.getWidth(dSub), y + 18 + font.fontHeight + 1, BfTheme.TEXT_DIM, false);
+        // 细长底条（高透明，不遮视野中心）
+        ctx.fill(x, y, x + bw, y + pillH, 0x990B0F15);
+        ctx.fill(x, y, x + bw, y + 1, 0x30FFFFFF);
+        ctx.fill(x, y + pillH - 1, x + bw, y + pillH, 0x1AFFFFFF);
 
-        // 中央：据点胶囊（含占领/争夺状态与推进进度）
-        int cx0 = x + sideCol + 10;
-        int cx1 = x + bw - sideCol - 10;
+        // 左侧：进攻方剩余部署票（顶栏唯一「进度数字」）
+        int leftColW = 118;
+        int lx = x + 14;
+        int ly = y + 5;
+        ctx.drawText(font, Text.literal("ATTACKERS  进攻方"), lx, ly, BfTheme.MUTED, false);
+        String tk = String.valueOf(ClientMatchState.attackerTickets());
+        ctx.drawText(font, Text.literal(tk), lx, ly + 11, 0xFFFFFFFF, true);
+        ctx.drawText(font, Text.literal("部署剩余"), lx + font.getWidth(tk) + 6, ly + 15,
+                BfTheme.FAINT, false);
+
+        // 右侧：防守方得分（无票数制，仅显示击杀得分）
+        int rightColW = 118;
+        int rr = x + bw - 14;
+        int ry = y + 5;
+        String dl = "DEFENDERS  防守方";
+        ctx.drawText(font, Text.literal(dl), rr - font.getWidth(dl), ry, BfTheme.MUTED, false);
+        String dk = String.valueOf(ClientMatchState.defenderTeamKills());
+        ctx.drawText(font, Text.literal(dk), rr - font.getWidth(dk), ry + 11, BfTheme.BLUE, true);
+        String dSub = "得分";
+        ctx.drawText(font, Text.literal(dSub), rr - font.getWidth(dSub), ry + 15, BfTheme.FAINT, false);
+
+        // 中央：固定菱形目标带（含占点进度刻度环）
+        int bandX = x + leftColW + 6;
+        int bandW = bw - leftColW - rightColW - 12;
         List<ZoneView> zones = ClientMatchState.zones();
-        if (cx1 > cx0 + 20 && !zones.isEmpty()) {
-            int n = Math.min(zones.size(), 8);
-            int gap = 6;
-            int cw = Math.min(52, Math.max(20, (cx1 - cx0 - gap * (n - 1)) / n));
-            int totalW = n * cw + (n - 1) * gap;
-            int cx = (sw - totalW) / 2;
-            for (int i = 0; i < n; i++) {
-                drawTopChip(ctx, font, cx, y + 12, cw, 28, zones.get(i));
-                cx += cw + gap;
+        if (!zones.isEmpty() && bandW > 60) {
+            ZoneMarkers.renderRailInto(ctx, font, bandX, y + 1, bandW, pillH - 2, zones);
+        }
+
+        // 底部 3px：进攻方剩余票数进度条（唯一进度条，tickets/max）
+        if (ClientMatchState.attackerTicketsMax() > 0 && ClientMatchState.phaseOrdinal() == 2) {
+            int gx = x + 12;
+            int gw = bw - 24;
+            int gy = y + pillH - 4;
+            ctx.fill(gx, gy, gx + gw, gy + 3, 0x2E0A0D12);
+            float ratio = (float) ClientMatchState.attackerTickets()
+                    / ClientMatchState.attackerTicketsMax();
+            ratio = Math.max(0f, Math.min(1f, ratio));
+            int fw = (int) (gw * ratio);
+            if (fw > 0) {
+                ctx.fill(gx, gy, gx + fw, gy + 3,
+                        ratio > 0.3f ? BfTheme.YELLOW : BfTheme.RED);
             }
         }
-        // 中央下沿：时钟 / 扇区 / 倒计时
+
+        // 顶部最左上：时钟 / 扇区 小字（无底板，不占视野）
         int phase = ClientMatchState.phaseOrdinal();
         String info = phase == 1
                 ? "倒计时 " + (int) Math.max(0, Math.ceil(ClientMatchState.countdownRemainingSeconds()))
                 : formatClock(ClientMatchState.matchRemainingSeconds())
-                        + "  ·  扇区 " + Math.min(ClientMatchState.sectorIndex() + 1,
-                        ClientMatchState.sectorCount())
-                        + "/" + ClientMatchState.sectorCount();
-        int iw = font.getWidth(info);
-        ctx.drawText(font, Text.literal(info), sw / 2 - iw / 2, y + 44, BfTheme.FAINT, false);
+                        + " · " + Math.min(ClientMatchState.sectorIndex() + 1, ClientMatchState.sectorCount())
+                        + "/" + ClientMatchState.sectorCount() + " 扇区";
+        ctx.drawText(font, Text.literal(info), 10, 10, BfTheme.FAINT, false);
     }
 
     /** 顶部战况带中的单个据点胶囊。 */
@@ -410,7 +424,7 @@ public class BreakfrontHud {
         }
     }
 
-    /** 左下血量 + 右下武器（BF2042 布局角）。 */
+    /** 左下血量（紧凑无底板）+ 右下武器（带暗色矩形底衬）。 */
     private void renderHealthWeapon(DrawContext ctx, TextRenderer font, int sw, int sh) {
         var player = MinecraftClient.getInstance().player;
         if (player == null) {
@@ -419,40 +433,40 @@ public class BreakfrontHud {
         float hp = player.getHealth();
         float max = Math.max(1f, player.getMaxHealth());
 
-        // —— 左下：血量（100 制）——
-        int bw2 = 210;
-        int bx = 16;
-        int by = sh - 70;
-        ctx.fill(bx, by, bx + bw2, by + 44, 0xB30A0D12);
-        ctx.fill(bx, by + 43, bx + bw2, by + 44, 0x26FFFFFF);
-        ctx.fill(bx, by, bx + 2, by + 44, BfTheme.YELLOW);
+        // —— 左下：大数字 + 细血条（去掉原大块底板，不再挡视野）——
         String hpText = String.valueOf((int) Math.ceil(hp));
-        ctx.drawText(font, Text.literal(hpText), bx + 16, by + 5, 0xFFFFFFFF, true);
-        String hpLab = "/ " + (int) max + "  HEALTH";
-        ctx.drawText(font, Text.literal(hpLab), bx + 18 + font.getWidth(hpText), by + 9,
+        int bx = 14;
+        int by = sh - font.fontHeight - 6;
+        ctx.drawText(font, Text.literal(hpText), bx, by, 0xFFFFFFFF, true);
+        String lab = "/ " + (int) max;
+        ctx.drawText(font, Text.literal(lab), bx + font.getWidth(hpText) + 4, by + 2,
                 BfTheme.MUTED, false);
-        int barX = bx + 16;
-        int barY = by + 28;
-        int barW = bw2 - 32;
-        ctx.fill(barX, barY, barX + barW, barY + 4, 0x33FFFFFF);
+        // 细血条（紧贴数字行下方）
+        int barX = bx + 2;
+        int barY = by + font.fontHeight + 3;
+        int barW = 96;
+        ctx.fill(barX, barY, barX + barW, barY + 3, 0x300A0D12);
         float ratio = Math.max(0f, Math.min(1f, hp / max));
-        int fillW = (int) (barW * ratio);
         int col = ratio > 0.5f ? 0xFF7EE87E : (ratio > 0.25f ? BfTheme.YELLOW : BfTheme.RED);
+        int fillW = (int) (barW * ratio);
         if (fillW > 0) {
-            ctx.fill(barX, barY, barX + fillW, barY + 4, col);
+            ctx.fill(barX, barY, barX + fillW, barY + 3, col);
         }
 
-        // —— 右下：当前武器 ——
+        // —— 右下：武器信息 + 矩形底衬 ——
         var stack = player.getMainHandStack();
-        String wname = stack.isEmpty() ? "徒手" : stack.getName().getString();
-        int xr = sw - 18;
-        int yr = sh - 74;
-        String cap = "手持  PRIMARY";
-        ctx.drawText(font, Text.literal(cap), xr - font.getWidth(cap), yr, BfTheme.MUTED, false);
-        ctx.drawText(font, Text.literal(wname), xr - font.getWidth(wname), yr + 12, 0xFFFFFFFF, true);
-        String state = "READY  准备就绪";
-        ctx.drawText(font, Text.literal(state), xr - font.getWidth(state), yr + 25,
-                BfTheme.TEXT_DIM, false);
+        String wname = stack.isEmpty() ? "徒手  UNARMED" : stack.getName().getString();
+        int pw = 216;
+        int ph = 46;
+        int px = sw - pw - 12;
+        int py = sh - ph - 8;
+        ctx.fill(px, py, px + pw, py + ph, 0xC010141B);
+        ctx.fill(px, py, px + pw, py + 2, BfTheme.YELLOW);
+        ctx.fill(px, py + ph - 1, px + pw, py + ph, 0x24FFFFFF);
+        ctx.drawText(font, Text.literal("当前武器  CURRENT"), px + 12, py + 7, BfTheme.MUTED, false);
+        ctx.drawText(font, Text.literal(wname), px + 12, py + 19, 0xFFFFFFFF, true);
+        String state = "READY  待命";
+        ctx.drawText(font, Text.literal(state), px + 12, py + ph - 14, BfTheme.TEXT_DIM, false);
     }
 
     // ---- 左上：目标胶囊 ----

@@ -114,10 +114,6 @@ public final class BfMinimap {
         int[] ay = {cy - 9, cy + 5, cy + 5};
         BfDraw.fill(ctx, cx - 1, cy - 8, cx + 1, cy + 5, 0xFF0A0D12);
         tri(ctx, ax, ay, 0xFFFFFFFF);
-
-        // 角标：攻/守 图例小字
-        ctx.drawText(font, Text.literal("敌方在射程内将显示于战场"), cx - RADIUS + 4, cy + RADIUS + 6,
-                BfTheme.FAINT, false);
     }
 
     /** 简易填充圆（水平扫描行画线）。 */

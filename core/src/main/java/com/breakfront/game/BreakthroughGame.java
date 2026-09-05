@@ -187,6 +187,10 @@ public class BreakthroughGame {
         return attackerTickets;
     }
 
+    public int attackerTicketsMax() {
+        return attackerTicketsMax;
+    }
+
     public int sectorIndex() {
         return sectorIndex;
     }
