@@ -25,10 +25,12 @@ import java.util.List;
  * 锯齿离散线太细、固定高度遇高差/建筑即埋地或悬空。本版彻底改画法：
  *
  * 1) 外圈「实色高亮环带」——半径 r-0.45..r+0.4 的连续圆环（QUADS 三角带），
- *    高饱和实色 alpha≈175，约 0.9m 宽，是"描边"的主体，任何距离都清晰。
- * 2) 环带内缘一条 2px 亮线精描边（状态色最高亮度）。
- * 3) 内部极淡地坪（alpha≈22）标出占区范围，不干扰视觉。
- * 4) 中心「目标光柱」——半透明竖柱 + 顶部亮色柱头，楼群/高差中远处可定位。
+ *    高饱和实色 alpha≈180，约 0.9m 宽，是"描边"的主体，任何距离都清晰。
+ * 2) 主环带内外两条「发光外晕」（r-0.9..r-0.5 / r+0.45..r+0.9，alpha≈55）——
+ *    GD656 Killicon 多层发光同思路，复杂地形/远距离下先看到晕再看到环。
+ * 3) 环带内缘一条 2px 亮线精描边（状态色最高亮度）。
+ * 4) 内部极淡地坪（alpha≈30）标出占区范围，不干扰视觉。
+ * 5) 中心「目标光柱」——半透明竖柱 + 顶部亮色柱头，楼群/高差中远处可定位。
  *    柱高按中心地表 +5.4m；柱头实色（守蓝/攻黄/争夺白橙呼吸）。
  *
  * 地面锚定：不再信任服务端 groundY（外部图/自建城高差会错位）。
@@ -112,9 +114,11 @@ public final class WorldZoneRings {
             ZoneView zone = zones.get(i);
             int[] col = areaColor(zone, t, false);
             double yc = centerY(i, zone);
+            // 发光外晕（主环带内外各一条低透明宽带，先画作底层）
+            fillGlowBandInto(quads, m, zone, i, col[0], col[1], col[2], glowAlpha(t));
             // 内部淡地坪（平面，低 alpha）
             fillDiscInto(quads, m, zone.worldX(), yc + 0.02, zone.worldZ(),
-                    zone.radius() - 0.45, col[0], col[1], col[2], 22);
+                    zone.radius() - 0.45, col[0], col[1], col[2], 30);
             // 外圈高亮环带（逐采样点贴地）
             fillRingBandInto(quads, m, zone, i, col[0], col[1], col[2], 180);
         }
@@ -216,15 +220,36 @@ public final class WorldZoneRings {
 
     // ================= 几何 =================
 
+    /** 发光外晕：主环带内外各一条低透明宽带（同逐采样贴地画法）。 */
+    private static void fillGlowBandInto(BufferBuilder buf, Matrix4f m,
+                                         ZoneView zone, int idx,
+                                         int r, int g, int b, int a) {
+        double radius = zone.radius();
+        fillBandSegment(buf, m, zone, idx, radius - 0.95, radius - 0.50, r, g, b, a);
+        fillBandSegment(buf, m, zone, idx, radius + 0.42, radius + 0.95, r, g, b, a);
+    }
+
+    /** 外晕呼吸强度（与主环带错相，营造柔和脉动）。 */
+    private static int glowAlpha(long timeMs) {
+        float pulse = (float) ((timeMs % 1400) / 1400.0);
+        return 42 + (int) (20 * Math.sin(pulse * Math.PI * 2.0));
+    }
+
     /** 高亮环带：r-0.45 → r+0.4 圆环三角带，逐采样点贴地。 */
     private static void fillRingBandInto(BufferBuilder buf, Matrix4f m,
                                          ZoneView zone, int idx,
                                          int r, int g, int b, int a) {
+        double radius = zone.radius();
+        fillBandSegment(buf, m, zone, idx, radius - 0.45, radius + 0.40, r, g, b, a);
+    }
+
+    /** 任意半径区间的一段贴地环带（QUADS，四顶点/段，逐采样点高度）。 */
+    private static void fillBandSegment(BufferBuilder buf, Matrix4f m,
+                                        ZoneView zone, int idx,
+                                        double rIn, double rOut,
+                                        int r, int g, int b, int a) {
         double cx = zone.worldX();
         double cz = zone.worldZ();
-        double radius = zone.radius();
-        double rIn = radius - 0.45;
-        double rOut = radius + 0.40;
         double[] gs = (idx >= 0 && idx < ground.length) ? ground[idx] : null;
         float rf = r / 255f;
         float gf = g / 255f;

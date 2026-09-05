@@ -1,15 +1,17 @@
 package com.breakfront.client.hud;
 
+import com.breakfront.client.bf.BfEasing;
+import com.breakfront.client.bf.BfTheme;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.ZoneView;
 import com.breakfront.game.Side;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.BufferBuilder;
 import net.minecraft.client.render.BufferRenderer;
 import net.minecraft.client.render.GameRenderer;
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.render.Tessellator;
 import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
@@ -17,23 +19,25 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 地标（BF2042 式）重做版 —— 两块内容：
+ * 地标（BF2042 式）v3 —— 渲染工程参照 GD656 Killicon（MIT，GitHub MinecraftGD656/GD656Killicon）：
  *
- * 1) 固定目标带（renderRailInto）：主菜单顶栏中段绘制的菱形序列。
- *    每个据点一颗菱形，内部字母颜色随占领方；菱形外侧一圈「进度刻度」——
- *    防守方安定=淡蓝圈、攻方已占=满圈黄、争夺中=白/橙呼吸 + 按攻方推进度
- *    meter 亮起相应弧段。进度做逐帧平滑，不跳变。
+ * 进度「环」不再用 24 颗点阵刻度，改走 GD656 IconRingEffect 同款连续圆环：
+ * TRIANGLE_STRIP 三角带绘制（annulus），推进弧按 meter 平滑扫过、防守安定整圈弱蓝、
+ * 攻方安定整圈亮黄、争夺弧白/橙呼吸。
  *
- * 2) 屏缘方位箭头（render）：据点中心不在视窗/超出距离时，贴屏幕边缘画
- *    对应方向的小菱形箭头（颜色同占领方），同一侧多条按序错开，不再重叠
- *    成团。据点实际位置改由世界空间「方块描边」高亮表达，屏幕不再堆浮标。
+ * 事件动效（对齐 GD656 时间线风格：ms 基准 + cubic ease-out + alpha² 衰减）：
+ *   - 据点首现：300ms 菱形 1.65→1.0 缩放入位 + 淡入；
+ *   - 进入争夺：白色冲击环 420ms 小扩散；
+ *   - 攻占成功：黄色冲击环 650ms 大扩散；被夺回：蓝色冲击环。
  *
- * 纯 2D 几何绘制（QUADS 拆菱形 + fill 画刻度），不引入贴图。
+ * 屏缘方位箭头保留（世界内方块描边不可见时兜底指方向）。
+ * 纯 2D 几何矢量绘制，无贴图。
  */
 public final class ZoneMarkers {
 
@@ -41,11 +45,50 @@ public final class ZoneMarkers {
     public static final int PILL_TOP = 6;
     public static final int PILL_H = 32;
 
-    private static final int RING_TICKS = 24;       // 进度刻度颗粒数
     private static final int FONT_CENTER_Y = -4;
+    private static final double TAU = Math.PI * 2.0;
 
     /** 据点推进度平滑缓冲（zoneId -> 当前显示值 0..1）。 */
     private static final Map<String, Float> smoothMeter = new HashMap<>();
+    /** 据点首现时间（入场动画）。 */
+    private static final Map<String, Long> enterAt = new HashMap<>();
+    /** 上一帧状态（事件检测）。 */
+    private static final Map<String, LastState> lastState = new HashMap<>();
+    /** 活动中的事件脉冲（同一据点同时最多一个，新事件覆盖旧事件）。 */
+    private static final List<Pulse> pulses = new ArrayList<>();
+
+    private static final int KIND_CONTEST = 0;   // 进入争夺
+    private static final int KIND_CAPTURED = 1;  // 攻方占领
+    private static final int KIND_RECAPT = 2;    // 防守夺回
+
+    private static final class LastState {
+        int ownerOrdinal;
+        float meter;
+
+        LastState(int ownerOrdinal, float meter) {
+            this.ownerOrdinal = ownerOrdinal;
+            this.meter = meter;
+        }
+    }
+
+    private static final class Pulse {
+        final String zoneId;
+        final int kind;
+        final long at;
+        final int color;
+
+        Pulse(String zoneId, int kind, long at, int color) {
+            this.zoneId = zoneId;
+            this.kind = kind;
+            this.at = at;
+            this.color = color;
+        }
+
+        /** 脉冲总时长 ms。 */
+        long duration() {
+            return kind == KIND_CAPTURED ? 650L : (kind == KIND_RECAPT ? 650L : 420L);
+        }
+    }
 
     private ZoneMarkers() {
     }
@@ -160,7 +203,7 @@ public final class ZoneMarkers {
 
     /**
      * 在顶栏中央区域绘制据点菱形序列。x/y/w/h 为可用带区（BreakfrontHud 传入）。
-     * 菱形带颜色字母 + 外侧进度刻度环（平滑）。返回实际占用的水平宽度。
+     * 菱形带颜色字母 + 外侧连续圆环进度（平滑）。返回实际占用的水平宽度。
      */
     public static int renderRailInto(DrawContext ctx, TextRenderer font,
                                      int x, int y, int w, int h, List<ZoneView> zones) {
@@ -168,9 +211,12 @@ public final class ZoneMarkers {
             return 0;
         }
         long now = System.currentTimeMillis();
+        detectEvents(zones, now);
+        prune(zones);
+
         int count = Math.min(zones.size(), 8);
         int dia = Math.min(22, h - 6);             // 菱形外接圆直径
-        int tickR = dia / 2 + 4;                    // 刻度环半径
+        int tickR = dia / 2 + 4;                    // 进度环半径
         int total = count * (tickR * 2 + 2) - 2;
         int cx0 = x + Math.max(0, (w - total) / 2);
         int cy0 = y + h / 2;
@@ -178,10 +224,64 @@ public final class ZoneMarkers {
         for (int i = 0; i < count; i++) {
             ZoneView zone = zones.get(i);
             int cx = cx0 + i * (tickR * 2 + 2);
-            drawRailDiamond(ctx, font, cx, cy0, dia / 2, tickR, zone, now);
+            drawRailDiamond(ctx, font, cx, cy0, dia / 2.0, tickR, zone, now);
             used += tickR * 2 + 2;
         }
         return used;
+    }
+
+    /** 帧级事件检测：状态跃迁 → 触发冲击脉冲；补齐入场时间。 */
+    private static void detectEvents(List<ZoneView> zones, long now) {
+        for (ZoneView zone : zones) {
+            enterAt.computeIfAbsent(zone.zoneId(), k -> now);
+            Side owner = Side.values()[zone.ownerOrdinal()];
+            float meter = Math.max(0f, Math.min(1f, zone.meter()));
+            LastState last = lastState.get(zone.zoneId());
+            if (last == null) {
+                lastState.put(zone.zoneId(), new LastState(zone.ownerOrdinal(), meter));
+                continue;
+            }
+            boolean wasAtt = last.ownerOrdinal == Side.ATTACKER.ordinal();
+            boolean isAtt = owner == Side.ATTACKER;
+            if (wasAtt && !isAtt) {
+                // 攻方据点被防守方夺回
+                triggerPulse(zone.zoneId(), KIND_RECAPT, now, 0xFF4DA6FF);
+            } else if (!wasAtt && isAtt) {
+                // 攻方占领成功
+                triggerPulse(zone.zoneId(), KIND_CAPTURED, now, 0xFFF5D44A);
+            } else if (!isAtt && last.meter < 0.03f && meter >= 0.05f) {
+                // 进入争夺（防守据点开始被推进）
+                triggerPulse(zone.zoneId(), KIND_CONTEST, now, 0xFFFFFFFF);
+            }
+            lastState.put(zone.zoneId(), new LastState(zone.ownerOrdinal(), meter));
+        }
+    }
+
+    private static void triggerPulse(String zoneId, int kind, long now, int color) {
+        pulses.removeIf(p -> p.zoneId.equals(zoneId));
+        pulses.add(new Pulse(zoneId, kind, now, color));
+    }
+
+    private static Pulse activePulse(String zoneId, long now) {
+        for (Pulse p : pulses) {
+            if (p.zoneId.equals(zoneId) && now - p.at < p.duration()) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /** 清理已不在列表的据点的缓冲/事件。 */
+    private static void prune(List<ZoneView> zones) {
+        java.util.Set<String> live = new java.util.HashSet<>();
+        for (ZoneView z : zones) {
+            live.add(z.zoneId());
+        }
+        lastState.keySet().removeIf(id -> !live.contains(id));
+        enterAt.keySet().removeIf(id -> !live.contains(id));
+        smoothMeter.keySet().removeIf(id -> !live.contains(id));
+        long now = System.currentTimeMillis();
+        pulses.removeIf(p -> now - p.at > p.duration());
     }
 
     private static void drawRailDiamond(DrawContext ctx, TextRenderer font,
@@ -199,52 +299,83 @@ public final class ZoneMarkers {
         }
         smoothMeter.put(zone.zoneId(), shown);
 
-        // 底影菱形 + 状态色菱形（黑边视觉）
-        drawDiamond(ctx, cx, cy, half + 1.2, half + 1.2, 0, 0, 0, 0xB0);
+        // 入场动画（菱形缩放 + 整体淡入）
+        Long ent = enterAt.get(zone.zoneId());
+        float eIn = (float) BfEasing.easeOutCubic(BfEasing.clamp01((now - (ent == null ? now : ent)) / 300.0));
+        double sc = 1.0 + 0.40 * (1.0 - eIn);          // 1.40 → 1.0（不越出 32px 顶栏）
+        int eAlpha = Math.max(1, (int) (255 * eIn));
+
+        // 1) 事件冲击环（在最底层：先画）
+        Pulse pulse = activePulse(zone.zoneId(), now);
+        if (pulse != null) {
+            double pt = BfEasing.clamp01((now - pulse.at) / (double) pulse.duration());
+            double pEase = BfEasing.easeOutCubic(pt);
+            double pR0 = tickR + 1.5;
+            double pR1 = tickR + (pulse.kind == KIND_CONTEST ? 9.0 : 16.0);
+            double pr = pR0 + (pR1 - pR0) * pEase;
+            int pA = (int) (235 * (1.0 - pt) * (1.0 - pt));   // alpha² 衰减（GD656 式）
+            double pw = Math.max(0.8, 2.8 * (1.0 - pt));
+            int pCol = pulse.color;
+            drawRingArc(ctx, cx, cy, pr - pw / 2, pr + pw / 2, 0, TAU,
+                    (pCol >> 16) & 0xFF, (pCol >> 8) & 0xFF, pCol & 0xFF,
+                    (int) (pA * (eAlpha / 255.0)));
+        }
+
+        // 2) 底影菱形 + 状态色菱形（缩放入位）
+        double hs = half * sc;
+        drawDiamond(ctx, cx, cy, hs + 1.4, hs + 1.4, 0, 0, 0, (int) (0xB0 * (eAlpha / 255.0)));
         int flicker = contested && (now % 500) < 250 ? 46 : 0;
-        drawDiamond(ctx, cx, cy, half, half,
+        drawDiamond(ctx, cx, cy, hs, hs,
                 Math.min(255, col[0] + flicker),
                 Math.min(255, col[1] + flicker),
                 Math.min(255, col[2] + flicker),
-                Math.min(255, col[3] + flicker));
-        // 字母（黑/白按底色亮度）
+                Math.min(255, (int) (col[3] * (eAlpha / 255.0)) + flicker));
+
+        // 3) 字母
         String letter = zone.letter();
         int lw = font.getWidth(letter);
         int textCol = (col[0] * 3 + col[1] * 6 + col[2]) > 1500 ? 0xFF0A0D12 : 0xFFFFFFFF;
-        ctx.drawText(font, Text.literal(letter),
-                cx - lw / 2, cy - font.fontHeight / 2 + FONT_CENTER_Y,
-                textCol, false);
+        ctx.drawText(font, Text.literal(letter), cx - lw / 2,
+                cy - font.fontHeight / 2 + FONT_CENTER_Y, textCol, false);
 
-        // 刻度环：争夺中显示推进弧；安定显示一圈弱色；攻方已占满圈亮黄
-        int ticks = RING_TICKS;
-        int active = (int) Math.ceil(shown * ticks);
-        int ringColor;
-        int ringA;
+        // 4) 连续圆环：弱底全环 + 进度亮弧
+        double rc = tickR;
+        double th = 2.6;
+        // 状态决定环样式
+        int dimColor;
+        int dimA;
+        int litColor;
+        double sweep;
         if (owner == Side.ATTACKER) {
-            ringColor = 0xF5D44A;
-            ringA = 235;
-            active = ticks;
+            dimColor = 0xF5D44A;
+            dimA = 110;
+            litColor = 0xF5D44A;
+            sweep = TAU;
         } else if (!contested) {
-            ringColor = 0x4C9EFF;
-            ringA = 90;
-            active = 0;
+            dimColor = 0x4DA6FF;
+            dimA = 70;
+            litColor = 0x4DA6FF;
+            sweep = 0;
         } else {
-            ringColor = (now % 500) < 250 ? 0xFFFFFF : 0xF5D44A;
-            ringA = 235;
+            dimColor = 0xFFFFFF;
+            dimA = 60;
+            litColor = (now % 700) < 350 ? 0xFFFFFF : 0xF5D44A;
+            sweep = TAU * shown;
         }
-        for (int k = 0; k < ticks; k++) {
-            double ang = -Math.PI / 2 + Math.PI * 2.0 * k / ticks;
-            int px = (int) Math.round(cx + tickR * Math.cos(ang));
-            int py = (int) Math.round(cy + tickR * Math.sin(ang));
-            boolean on = k < active;
-            int a = on ? ringA : (contested ? 60 : ringA / 2);
-            ctx.fill(px - 1, py - 1, px + 2, py + 2,
-                    on ? rgba(ringColor, a) : rgba(ringColor, Math.max(30, a)));
+        drawRingArc(ctx, cx, cy, rc - th / 2, rc + th / 2, 0, TAU,
+                (dimColor >> 16) & 0xFF, (dimColor >> 8) & 0xFF, dimColor & 0xFF,
+                (int) (dimA * (eAlpha / 255.0)));
+        if (sweep > 0.02) {
+            drawRingArc(ctx, cx, cy, rc - th / 2, rc + th / 2,
+                    -Math.PI / 2, -Math.PI / 2 + sweep,
+                    (litColor >> 16) & 0xFF, (litColor >> 8) & 0xFF, litColor & 0xFF,
+                    (int) (235 * (eAlpha / 255.0)));
         }
     }
 
     // ================= 几何工具 =================
 
+    /** 据点状态主色（2D 用）。 */
     private static int[] markerColor(Side owner, boolean contested, long now) {
         if (owner == Side.ATTACKER) {
             return new int[]{245, 212, 74, 245};  // 攻方黄
@@ -281,8 +412,42 @@ public final class ZoneMarkers {
         RenderSystem.disableBlend();
     }
 
-    private static int rgba(int rgb, int a) {
-        int aa = Math.max(0, Math.min(255, a));
-        return (aa << 24) | (rgb & 0xFFFFFF);
+    /**
+     * GD656 IconRingEffect.drawRing 同款连续圆环（2D GUI 三角带）。
+     * 绘制 [from,to] 角度（弧度，0=右、正=顺时针）之间的圆环带，内外径等差细分。
+     */
+    private static void drawRingArc(DrawContext ctx, double cx, double cy,
+                                    double rIn, double rOut,
+                                    double from, double to,
+                                    int r, int g, int b, int a) {
+        if (rIn <= 0 || rOut <= rIn || a <= 0) {
+            return;
+        }
+        double span = to - from;
+        if (span <= 0) {
+            return;
+        }
+        int segs = (int) Math.max(4, Math.min(96, Math.ceil(Math.abs(span) / TAU * 56)));
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
+        Matrix4f m = ctx.getMatrices().peek().getPositionMatrix();
+        float fr = r / 255f;
+        float fg = g / 255f;
+        float fb = b / 255f;
+        float fa = Math.min(1f, a / 255f);
+        BufferBuilder buf = Tessellator.getInstance()
+                .begin(VertexFormat.DrawMode.TRIANGLE_STRIP, VertexFormats.POSITION_COLOR);
+        for (int i = 0; i <= segs; i++) {
+            double ang = from + span * i / segs;
+            double cos = Math.cos(ang);
+            double sin = Math.sin(ang);
+            buf.vertex(m, (float) (cx + cos * rOut), (float) (cy + sin * rOut), 0)
+                    .color(fr, fg, fb, fa);
+            buf.vertex(m, (float) (cx + cos * rIn), (float) (cy + sin * rIn), 0)
+                    .color(fr, fg, fb, fa);
+        }
+        BufferRenderer.drawWithGlobalProgram(buf.end());
+        RenderSystem.disableBlend();
     }
 }
