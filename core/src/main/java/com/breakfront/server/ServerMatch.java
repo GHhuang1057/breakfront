@@ -541,12 +541,28 @@ public final class ServerMatch {
         return layout;
     }
 
-    /** 开局统一入口：重开状态机、清战绩、补 NPC、复位据点标识。 */
+    /** 开局统一入口：重开状态机、清战绩、补 NPC、复位据点标识、全员发装备。 */
     public void beginRound() {
         game.startRound();
         score.reset();
         visualsPlaced = false;
         npc.beginRound(this, BreakfrontServer.server());
+        MinecraftServer server = BreakfrontServer.server();
+        if (server != null) {
+            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                kitPlayer(server, p);
+            }
+        }
+    }
+
+    /** 兵种装备发放（进服/开局/重生共用入口）。 */
+    public void kitPlayer(MinecraftServer server, ServerPlayerEntity player) {
+        try {
+            Kits.giveKit(this, server, player);
+        } catch (Throwable t) {
+            BreakfrontServer.LOGGER.warn("[Breakfront] kit issue for {}: {}",
+                    player.getName().getString(), t.toString());
+        }
     }
 
     public ScoreKeeper score() {
@@ -612,6 +628,10 @@ public final class ServerMatch {
         MatchPhase ph = game.phase();
         if (ph == MatchPhase.BATTLE || ph == MatchPhase.COUNTDOWN) {
             deployPlayer(server, player);
+            kitPlayer(server, player);
+        } else if (ph == MatchPhase.LOBBY) {
+            // 大厅不部署，但补一次主武器便于打靶房/进服即验
+            kitPlayer(server, player);
         }
     }
 

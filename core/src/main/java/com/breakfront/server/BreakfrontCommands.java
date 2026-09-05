@@ -8,6 +8,7 @@ import com.breakfront.game.ZoneState;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.server.command.CommandManager;
@@ -160,7 +161,33 @@ root = root.then(literal("team")
         }
         root = root.then(anchor);
 
+        // M2：重发兵种装备（/bf kit 自己补装；/bf kit <class> 切兵种并立即补装，管理级）
+        root = root.then(literal("kit")
+                .executes(ctx -> kitSelf(ctx.getSource(), null))
+                .then(CommandManager.argument("class", StringArgumentType.word())
+                        .requires(s -> s.hasPermissionLevel(2))
+                        .executes(ctx -> kitSelf(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "class")))));
+
         dispatcher.register(root);
+    }
+
+    private static int kitSelf(ServerCommandSource source, String classId) {
+        if (!(source.getEntity() instanceof ServerPlayerEntity player)) {
+            source.sendError(Text.literal("仅玩家可领装备"));
+            return 0;
+        }
+        var match = BreakfrontServer.match();
+        if (match == null) {
+            source.sendError(Text.literal("对局尚未初始化"));
+            return 0;
+        }
+        if (classId != null) {
+            match.teams().setClass(player.getUuid(), classId);
+        }
+        match.kitPlayer(player.getServer(), player);
+        send(source, "装备已补发（兵种 " + match.teams().classOf(player.getUuid()) + "）");
+        return 1;
     }
 
     private static int joinTeam(ServerCommandSource source, Side side) {

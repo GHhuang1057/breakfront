@@ -425,7 +425,10 @@ public class BreakfrontHud {
         }
     }
 
-    /** 左下血量（紧凑无底板）+ 右下武器（带暗色矩形底衬）。 */
+    /**
+     * 左下血量卡（v5：深底面板 + 1.8x 大数字 + 高亮血条，任何背景/光影下都一眼可读）
+     * + 右下武器（带暗色矩形底衬）。
+     */
     private void renderHealthWeapon(DrawContext ctx, TextRenderer font, int sw, int sh) {
         var player = MinecraftClient.getInstance().player;
         if (player == null) {
@@ -433,25 +436,51 @@ public class BreakfrontHud {
         }
         float hp = player.getHealth();
         float max = Math.max(1f, player.getMaxHealth());
-
-        // —— 左下：大数字 + 细血条（去掉原大块底板，不再挡视野）——
-        String hpText = String.valueOf((int) Math.ceil(hp));
-        int bx = 14;
-        int by = sh - font.fontHeight - 6;
-        ctx.drawText(font, Text.literal(hpText), bx, by, 0xFFFFFFFF, true);
-        String lab = "/ " + (int) max;
-        ctx.drawText(font, Text.literal(lab), bx + font.getWidth(hpText) + 4, by + 2,
-                BfTheme.MUTED, false);
-        // 细血条（紧贴数字行下方）
-        int barX = bx + 2;
-        int barY = by + font.fontHeight + 3;
-        int barW = 96;
-        ctx.fill(barX, barY, barX + barW, barY + 3, 0x300A0D12);
         float ratio = Math.max(0f, Math.min(1f, hp / max));
-        int col = ratio > 0.5f ? 0xFF7EE87E : (ratio > 0.25f ? BfTheme.YELLOW : BfTheme.RED);
+        long now = System.currentTimeMillis();
+
+        // —— 左下：血量卡 ——
+        int cardW = 176;
+        int cardH = 36;
+        int cx = 10;
+        int cy = sh - cardH - 8;
+        ctx.fill(cx, cy, cx + cardW, cy + cardH, 0x9E0B0F15);
+        ctx.fill(cx, cy, cx + cardW, cy + 1, 0x33FFFFFF); // 顶部高光
+        ctx.fill(cx, cy + cardH - 1, cx + cardW, cy + cardH, 0x1C000000);
+        int stateCol = ratio > 0.5f ? 0xFF6FE873
+                : (ratio > 0.25f ? 0xFFF2C94C : 0xFFF0483E);
+        if (ratio <= 0.25f) {
+            // 低血量：红色呼吸（眨眼提醒）
+            stateCol = (now % 900) < 450 ? 0xFFF0483E : 0xFFFFB3AA;
+        }
+        ctx.fill(cx, cy, cx + 2, cy + cardH, stateCol); // 左侧状态色条
+
+        // 1.8x 大数字（血量本体）
+        String hpText = String.valueOf((int) Math.ceil(hp));
+        var ms = ctx.getMatrices();
+        ms.push();
+        ms.translate(cx + 18f, 0f, 0f);
+        float big = 1.8f;
+        ms.scale(big, big, 1f);
+        ctx.drawText(font, Text.literal(hpText), 0, Math.round((cy + 2) / big),
+                0xFFFFFFFF, true);
+        ms.pop();
+        // 最大血值小字（大数字右侧、底线对齐）
+        String maxText = "/" + (int) max;
+        int numW = (int) Math.ceil(font.getWidth(hpText) * big);
+        ctx.drawText(font, Text.literal(maxText), cx + 18 + numW + 7,
+                cy + 15, ratio <= 0.25f ? stateCol : BfTheme.TEXT_DIM, true);
+
+        // 高亮血条（数字下方，状态色填充 + 底深槽 + 白高光顶线）
+        int barX = cx + 8;
+        int barW = cardW - 16;
+        int barY = cy + cardH - 7;
+        int barH = 4;
+        ctx.fill(barX, barY, barX + barW, barY + barH, 0xE0000000);
         int fillW = (int) (barW * ratio);
         if (fillW > 0) {
-            ctx.fill(barX, barY, barX + fillW, barY + 3, col);
+            ctx.fill(barX, barY, barX + fillW, barY + barH, stateCol);
+            ctx.fill(barX, barY, barX + fillW, barY + 1, 0xAAFFFFFF); // 亮部高光
         }
 
         // —— 右下：武器信息 + 矩形底衬 ——

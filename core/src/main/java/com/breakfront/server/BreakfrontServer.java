@@ -3,6 +3,7 @@ package com.breakfront.server;
 import com.breakfront.net.KillFeedPayload;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -61,6 +62,16 @@ public final class BreakfrontServer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             if (match != null) {
                 match.onPlayerLeft(handler.getPlayer().getUuid());
+            }
+        });
+
+        // S2（M2）：玩家重生（死亡后复活）→ 重发兵种装备（死亡默认清包）
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            if (match != null) {
+                MinecraftServer srv = newPlayer.getServer();
+                if (srv != null) {
+                    match.kitPlayer(srv, newPlayer);
+                }
             }
         });
 
