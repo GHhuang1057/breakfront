@@ -20,8 +20,8 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.property('fabric_version')}"
 
     // 情境音乐 mp3 解码（LGPL，仅解码库，打进 mod jar 供运行时）
-    implementation "net.java.dev.jlayer:jlayer:1.0.1"
-    include "net.java.dev.jlayer:jlayer:1.0.1"
+    implementation "com.googlecode.soundlibs:jlayer:1.0.1.4"
+    include "com.googlecode.soundlibs:jlayer:1.0.1.4"
 }
 
 java {
