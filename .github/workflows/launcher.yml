@@ -57,7 +57,7 @@ jobs:
           java-version: '17'
       - name: Install android workload
         run: dotnet workload install android --skip-manifest-update
-      - name: Publish APK (net8.0-android)
+      - name: Publish APK (net8.0-android / arm64)
         env:
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
