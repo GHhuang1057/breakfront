@@ -407,7 +407,11 @@ async fn main() {
         .with_state(state);
 
     let port: u16 = env_or("GEO_PORT", "8787").parse().unwrap_or(8787);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let bind = env_or("GEO_BIND", "127.0.0.1");
+    let addr: SocketAddr = format!("{bind}:{port}").parse().unwrap_or_else(|_| {
+        error!("GEO_BIND/GEO_PORT 解析失败");
+        std::process::exit(1);
+    });
     info!("geekhonize-auth listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     axum::serve(listener, app).await.expect("serve");
