@@ -1,6 +1,7 @@
 package com.breakfront.client.hud;
 
 import com.breakfront.client.bf.BfDraw;
+import com.breakfront.client.bf.BfGlow;
 import com.breakfront.client.bf.BfTheme;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.KillEvent;
@@ -10,7 +11,12 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
 import java.util.List;
 
@@ -32,6 +38,21 @@ public class BreakfrontHud {
 
     private int seenPhase = -1;
     private long phaseEnterMs;
+
+    // 左下竖向堆叠布局常量
+    private static final int LEFT_X = 12;     // 血量卡/小地图统一左缘
+    private static final int BOTTOM = 10;     // 距屏幕底边
+    private static final int GAP = 6;         // 血量卡与下方小地图间隙
+    // TaCZ NBT 读取键（稳健：缺失即降级，绝不抛到渲染外）
+    private static final String NBT_GUN_ID = "GunId";
+    private static final String NBT_AMMO_NOW = "GunCurrentAmmoCount";
+    private static final String TACZ_AMMO_ITEM = "tacz:ammo";
+
+    // 每帧布局/视差状态（渲染线程内写入读取）
+    private int miniSize;
+    private double bobDx, bobDy;
+    private float lastHp = 20f;
+    private long dmgFlashUntil = 0;
 
     public void render(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
@@ -64,11 +85,25 @@ public class BreakfrontHud {
         if (phase != 1 && phase != 2) {
             return;
         }
+        // —— 视野视差（view bob）：仅 hud.bob=true 时启用，乘 0.4 削弱，单轴封顶 ~1.2px ——
+        bobDx = 0;
+        bobDy = 0;
+        if (BfHudPrefs.isBobEnabled() && client.player != null) {
+            var b = BfViewBob.compute(client.player);
+            double k = 0.4 * BfHudPrefs.getShake();
+            bobDx = clampAbs(b.dx() * k, 1.2);
+            bobDy = clampAbs(b.dy() * k, 1.2);
+        }
+
+        miniSize = (int) Math.min(140, sh * 0.22);
+
         renderTopBar(context, font, sw);
-        renderHealthWeapon(context, font, sw, sh);
+        renderHealth(context, font, sw, sh);
+        renderWeapon(context, font, sw, sh);
         renderKillFeed(context, font, sw);
         renderHitMarkers(context, font, sw, sh);
-        BfMinimap.render(context, font, sw, sh);
+        // 小地图：左下角竖向堆叠于血量卡下方（坐标换算沿用现有，叠加视差偏移）
+        BfMinimap.render(context, font, LEFT_X, sh - miniSize - BOTTOM, miniSize, bobDx, bobDy);
         ZoneMarkers.render(context, font, sw, sh);
         ActiveZonePin.render(context, font, sw); // #40：进入领地→顶栏钉卡（平滑转移）
     }
@@ -345,8 +380,8 @@ public class BreakfrontHud {
 
         // 左侧：进攻方剩余部署票（顶栏唯一「进度数字」）
         int leftColW = 118;
-        int lx = x + 14;
-        int ly = y + 5;
+        int lx = x + 14 + (int) Math.round(bobDx);
+        int ly = y + 5 + (int) Math.round(bobDy);
         ctx.drawText(font, Text.literal("ATTACKERS  进攻方"), lx, ly, BfTheme.MUTED, false);
         String tk = String.valueOf(ClientMatchState.attackerTickets());
         ctx.drawText(font, Text.literal(tk), lx, ly + 11, 0xFFFFFFFF, true);
@@ -355,8 +390,8 @@ public class BreakfrontHud {
 
         // 右侧：防守方得分（无票数制，仅显示击杀得分）
         int rightColW = 118;
-        int rr = x + bw - 14;
-        int ry = y + 5;
+        int rr = x + bw - 14 + (int) Math.round(bobDx);
+        int ry = y + 5 + (int) Math.round(bobDy);
         String dl = "DEFENDERS  防守方";
         ctx.drawText(font, Text.literal(dl), rr - font.getWidth(dl), ry, BfTheme.MUTED, false);
         String dk = String.valueOf(ClientMatchState.defenderTeamKills());
@@ -427,10 +462,11 @@ public class BreakfrontHud {
     }
 
     /**
-     * 左下血量卡（v5：深底面板 + 1.8x 大数字 + 高亮血条，任何背景/光影下都一眼可读）
-     * + 右下武器（带暗色矩形底衬）。
+     * 左下血量卡（v6）：深底面板 + 1.8x 大数字 HP/MAX + GREEN 渐变细血条（白刻度）。
+     * 受击红闪保留（血量下降触发边框红闪）；低血量红色呼吸。
+     * 与右下武器文本、下方小地图竖向堆叠（统一左缘 LEFT_X）。
      */
-    private void renderHealthWeapon(DrawContext ctx, TextRenderer font, int sw, int sh) {
+    private void renderHealth(DrawContext ctx, TextRenderer font, int sw, int sh) {
         var player = MinecraftClient.getInstance().player;
         if (player == null) {
             return;
@@ -440,39 +476,50 @@ public class BreakfrontHud {
         float ratio = Math.max(0f, Math.min(1f, hp / max));
         long now = System.currentTimeMillis();
 
-        // —— 左下：血量卡 ——
-        int cardW = 176;
-        int cardH = 36;
-        int cx = 10;
-        int cy = sh - cardH - 8;
-        ctx.fill(cx, cy, cx + cardW, cy + cardH, 0x9E0B0F15);
-        ctx.fill(cx, cy, cx + cardW, cy + 1, 0x33FFFFFF); // 顶部高光
-        ctx.fill(cx, cy + cardH - 1, cx + cardW, cy + cardH, 0x1C000000);
-        int stateCol = ratio > 0.5f ? 0xFF6FE873
-                : (ratio > 0.25f ? 0xFFF2C94C : 0xFFF0483E);
-        if (ratio <= 0.25f) {
-            // 低血量：红色呼吸（眨眼提醒）
-            stateCol = (now % 900) < 450 ? 0xFFF0483E : 0xFFFFB3AA;
+        // 受击红闪：血量下降触发
+        if (hp < lastHp - 0.01f) {
+            dmgFlashUntil = now + 320;
         }
-        ctx.fill(cx, cy, cx + 2, cy + cardH, stateCol); // 左侧状态色条
+        lastHp = hp;
+        boolean flash = now < dmgFlashUntil;
 
-        // 1.8x 大数字（血量本体）
+        int cardW = 196;
+        int cardH = 40;
+        int cx = LEFT_X + (int) Math.round(bobDx);
+        int cy = sh - miniSize - BOTTOM - GAP - cardH + (int) Math.round(bobDy);
+
+        // 面板
+        BfDraw.fill(ctx, cx, cy, cardW, cardH, BfTheme.PANEL);
+        BfDraw.border(ctx, cx, cy, cardW, cardH, flash ? BfTheme.RED : BfTheme.PANEL_LINE);
+        ctx.fill(cx, cy, cx + cardW, cy + 1, 0x33FFFFFF); // 顶部高光
+
+        // 左侧状态色条（低血量红呼吸，攻方占点语义不在此强调）
+        int stateCol;
+        if (ratio <= 0.25f) {
+            stateCol = (now % 900) < 450 ? 0xFFF0483E : 0xFFFFB3AA;
+        } else if (ratio <= 0.5f) {
+            stateCol = 0xFFF2C94C;
+        } else {
+            stateCol = BfTheme.GREEN;
+        }
+        ctx.fill(cx, cy, cx + 2, cy + cardH, stateCol);
+
+        // 1.8x 大数字 HP
         String hpText = String.valueOf((int) Math.ceil(hp));
         var ms = ctx.getMatrices();
         ms.push();
         ms.translate(cx + 18f, 0f, 0f);
         float big = 1.8f;
         ms.scale(big, big, 1f);
-        ctx.drawText(font, Text.literal(hpText), 0, Math.round((cy + 2) / big),
-                0xFFFFFFFF, true);
+        ctx.drawText(font, Text.literal(hpText), 0, Math.round((cy + 2) / big), 0xFFFFFFFF, true);
         ms.pop();
-        // 最大血值小字（大数字右侧、底线对齐）
+        // /MAX 小字
         String maxText = "/" + (int) max;
         int numW = (int) Math.ceil(font.getWidth(hpText) * big);
         ctx.drawText(font, Text.literal(maxText), cx + 18 + numW + 7,
                 cy + 15, ratio <= 0.25f ? stateCol : BfTheme.TEXT_DIM, true);
 
-        // 高亮血条（数字下方，状态色填充 + 底深槽 + 白高光顶线）
+        // GREEN 渐变细血条 + 白刻度（每 25%）
         int barX = cx + 8;
         int barW = cardW - 16;
         int barY = cy + cardH - 7;
@@ -480,24 +527,177 @@ public class BreakfrontHud {
         ctx.fill(barX, barY, barX + barW, barY + barH, 0xE0000000);
         int fillW = (int) (barW * ratio);
         if (fillW > 0) {
-            ctx.fill(barX, barY, barX + fillW, barY + barH, stateCol);
-            ctx.fill(barX, barY, barX + fillW, barY + 1, 0xAAFFFFFF); // 亮部高光
+            BfDraw.gradientV(ctx, barX, barY, fillW, barH, BfTheme.GREEN, BfTheme.GREEN_DIM);
+            ctx.fill(barX, barY, barX + fillW, barY + 1, 0xAAFFFFFF); // 顶高光
+        }
+        for (int t = 1; t <= 3; t++) {
+            int tx = barX + (barW * t / 4);
+            ctx.fill(tx, barY, tx + 1, barY + barH, 0x55FFFFFF); // 白刻度
+        }
+    }
+
+    /**
+     * 右下武器文本块（v6）：纯文字。
+     * L1 武器名（TaCZ GunId 取 ':' 后段大写；非枪显示 FIST）
+     * L2 弹匣 剩余 / 满容（数字 TEAL 高亮；满容拿不到则显示 '?'，非枪显示 '—'）
+     * L3 备弹：背包内全部 tacz:ammo 物品 Count 之和（能匹配该枪 AmmoId 更佳）
+     * 面板 PANEL 半透明 + 左 2px TEAL 强调 + BfGlow 微量。
+     */
+    private void renderWeapon(DrawContext ctx, TextRenderer font, int sw, int sh) {
+        var player = MinecraftClient.getInstance().player;
+        if (player == null) {
+            return;
+        }
+        var stack = player.getMainHandStack();
+        NbtCompound nbt = stack.getNbt();
+
+        String gunId = (nbt != null) ? nbt.getString(NBT_GUN_ID) : "";
+        boolean isGun = !gunId.isEmpty() && !stack.isEmpty();
+        String name;
+        if (isGun) {
+            int c = gunId.indexOf(':');
+            name = (c >= 0 ? gunId.substring(c + 1) : gunId).toUpperCase(java.util.Locale.ROOT);
+        } else {
+            name = "FIST";
         }
 
-        // —— 右下：武器信息 + 矩形底衬 ——
-        var stack = player.getMainHandStack();
-        String wname = stack.isEmpty() ? "徒手  UNARMED" : stack.getName().getString();
-        int pw = 216;
+        int ammoNow = (nbt != null && nbt.contains(NBT_AMMO_NOW)) ? nbt.getInt(NBT_AMMO_NOW) : 0;
+        Integer cap = isGun ? readMagCapacity(stack, gunId) : null;
+        int reserve = readReserveAmmo(player);
+
+        int pw = 210;
         int ph = 46;
-        int px = sw - pw - 12;
-        int py = sh - ph - 8;
-        ctx.fill(px, py, px + pw, py + ph, 0xC010141B);
-        ctx.fill(px, py, px + pw, py + 2, BfTheme.GREEN);
-        ctx.fill(px, py + ph - 1, px + pw, py + ph, 0x24FFFFFF);
-        ctx.drawText(font, Text.literal("当前武器  CURRENT"), px + 12, py + 7, BfTheme.MUTED, false);
-        ctx.drawText(font, Text.literal(wname), px + 12, py + 19, 0xFFFFFFFF, true);
-        String state = "READY  待命";
-        ctx.drawText(font, Text.literal(state), px + 12, py + ph - 14, BfTheme.TEXT_DIM, false);
+        int px = sw - pw - 12 + (int) Math.round(bobDx);
+        int py = sh - ph - 12 + (int) Math.round(bobDy);
+
+        // 面板 + 左强调 + 微量辉光
+        BfDraw.fill(ctx, px, py, pw, ph, BfTheme.PANEL);
+        BfDraw.border(ctx, px, py, pw, ph, BfTheme.PANEL_LINE);
+        ctx.fill(px, py, px + 2, py + ph, BfTheme.TEAL);
+        BfGlow.rect(ctx, px, py, pw, ph, BfTheme.TEAL & 0xFFFFFF, 22, 5);
+
+        ctx.drawText(font, Text.literal(name), px + 12, py + 7, BfTheme.TEXT, true);
+
+        // L2 弹匣 剩余 / 满容
+        String magNum = String.valueOf(ammoNow);
+        String sep = " / ";
+        String capStr = (cap != null) ? String.valueOf(cap) : (isGun ? "?" : "—");
+        int lx2 = px + 12;
+        int ly2 = py + 20;
+        String label = "弹匣 ";
+        ctx.drawText(font, Text.literal(label), lx2, ly2, BfTheme.MUTED, false);
+        int w1 = font.getWidth(label);
+        ctx.drawText(font, Text.literal(magNum), lx2 + w1, ly2, BfTheme.TEAL, true);
+        int w2 = font.getWidth(magNum);
+        ctx.drawText(font, Text.literal(sep), lx2 + w1 + w2, ly2, BfTheme.TEXT_DIM, false);
+        int w3 = font.getWidth(sep);
+        ctx.drawText(font, Text.literal(capStr), lx2 + w1 + w2 + w3, ly2, BfTheme.TEAL, true);
+
+        // L3 备弹
+        ctx.drawText(font, Text.literal("备弹：" + reserve), px + 12, py + 33, BfTheme.TEXT_DIM, false);
+    }
+
+    // ============ TaCZ 只读（反射，缺失即降级，绝不抛到渲染外） ============
+
+    /** 弹匣满容：经 TaCZ GunData 取 magazine.ammoAmount（多方法名兜底）。拿不到返回 null。 */
+    private static Integer readMagCapacity(ItemStack stack, String gunId) {
+        Object gd = getGunData(stack, gunId);
+        if (gd == null) {
+            return null;
+        }
+        Object mag = invoke(gd, "getMagazine");
+        if (mag == null) {
+            mag = invoke(gd, "getAmmoData");
+        }
+        if (mag == null) {
+            return null;
+        }
+        Object amt = invoke(mag, "getAmmoAmount");
+        if (amt == null) {
+            amt = invoke(mag, "getRoundedAmmoAmount");
+        }
+        if (amt instanceof Number n) {
+            return n.intValue();
+        }
+        return null;
+    }
+
+    /** 该枪所需弹药 AmmoId（用于备弹按 AmmoId 匹配）。拿不到返回 null。 */
+    private static String gunAmmoId(ItemStack stack, String gunId) {
+        Object gd = getGunData(stack, gunId);
+        if (gd == null) {
+            return null;
+        }
+        Object id = invoke(gd, "getAmmoId");
+        if (id instanceof String s && !s.isEmpty()) {
+            return s;
+        }
+        return null;
+    }
+
+    /** 取 TaCZ GunData：优先 GunItem.getGunData(stack)，其次 GunData.fromId(gunId)。 */
+    private static Object getGunData(ItemStack stack, String gunId) {
+        try {
+            Class<?> gi = Class.forName("cn.tacz.sp.item.GunItem");
+            try {
+                return gi.getMethod("getGunData", ItemStack.class).invoke(null, stack);
+            } catch (NoSuchMethodException ignored) {
+                // 某些版本用 GunData.fromId
+            }
+            return Class.forName("cn.tacz.sp.data.GunData").getMethod("fromId", String.class).invoke(null, gunId);
+        } catch (Throwable t) {
+            return null; // 类/方法不存在（如未装 TaCZ）→ 静默降级
+        }
+    }
+
+    private static Object invoke(Object target, String name) {
+        try {
+            return target.getClass().getMethod(name).invoke(target);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 背包内 tacz:ammo 物品 Count 之和；若已知该枪 AmmoId 则仅计匹配者。 */
+    private static int readReserveAmmo(PlayerEntity player) {
+        String want = null;
+        var mh = player.getMainHandStack();
+        NbtCompound mn = mh.getNbt();
+        if (mn != null && !mn.getString(NBT_GUN_ID).isEmpty()) {
+            want = gunAmmoId(mh, mn.getString(NBT_GUN_ID));
+        }
+        int total = 0;
+        for (ItemStack s : player.getInventory().main) {
+            total += ammoItemCount(s, want);
+        }
+        for (ItemStack s : player.getInventory().offHand) {
+            total += ammoItemCount(s, want);
+        }
+        return total;
+    }
+
+    private static int ammoItemCount(ItemStack s, String wantAmmoId) {
+        if (s == null || s.isEmpty()) {
+            return 0;
+        }
+        Identifier id = Registries.ITEM.getId(s.getItem());
+        if (!TACZ_AMMO_ITEM.equals(id.toString())) {
+            return 0;
+        }
+        if (wantAmmoId != null) {
+            NbtCompound nbt = s.getNbt();
+            if (nbt != null) {
+                String aid = nbt.getString("AmmoId");
+                if (!aid.isEmpty() && !aid.equals(wantAmmoId)) {
+                    return 0; // 不匹配该枪弹药
+                }
+            }
+        }
+        return s.getCount();
+    }
+
+    private static double clampAbs(double v, double cap) {
+        return Math.max(-cap, Math.min(cap, v));
     }
 
     // ---- 左上：目标胶囊 ----

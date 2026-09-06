@@ -40,6 +40,30 @@ DIRECT = [
 
 UA = {"User-Agent": "breakfront-dev-release-builder/0.1 (self-hosted)"}
 
+# 性能优化模组版本钉（#44 批次），见 mod_pins.json（与本脚本同目录）
+_PERF_PINS_PATH = Path(__file__).resolve().parent / "mod_pins.json"
+
+
+def load_perf_pins() -> list[tuple[str, str | None]]:
+    """读取 mod_pins.json，返回 [(slug, expect), ...]。文件缺失/解析失败则空列表。"""
+    if not _PERF_PINS_PATH.exists():
+        print(f"[warn] {_PERF_PINS_PATH.name} 缺失，跳过性能模组钉")
+        return []
+    try:
+        data = json.loads(_PERF_PINS_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[warn] 解析 {_PERF_PINS_PATH.name} 失败：{e}")
+        return []
+    pins = data.get("pins", [])
+    out = []
+    for p in pins:
+        slug = p.get("slug")
+        if not slug:
+            continue
+        out.append((slug, p.get("expect")))
+    print(f"[pins] 载入性能模组钉 {len(out)} 项：{[s for s, _ in out]}]")
+    return out
+
 
 def http_get(url: str):
     req = urllib.request.Request(url, headers=UA)
@@ -92,7 +116,18 @@ def resolve_mod(slug: str, seen: set, out: list[dict], stage: Path, expect: str 
     seen.add(slug)
     version = pick_version(slug, expect)
     project = api(f"/project/{slug}")
-    env = "both"
+    # env 以 Modrinth 项目 client_side/server_side 为准（而非硬编码 both），
+    # 服务端包据此过滤客户端专属模组（entityculling/immediatelyfast/motionblur 等）
+    cs = project.get("client_side")
+    ss = project.get("server_side")
+    if cs in ("required", "optional") and ss in ("required", "optional"):
+        env = "both"
+    elif ss in ("required", "optional"):
+        env = "server"
+    elif cs in ("required", "optional"):
+        env = "client"
+    else:
+        env = "unsupported"
     f0 = version["files"][0]
     fname = sanitize(f0["filename"])
     dest = stage / "mods" / fname
@@ -175,6 +210,11 @@ def main() -> None:
 
         # 第三方固定版本
         for slug, expect in DIRECT:
+            resolve_mod(slug, seen, files, stage, expect)
+
+        # 性能优化模组（#44 批次，版本钉见 mod_pins.json；复用同一下载/依赖解析 helper）
+        # 注意：sodium/iris/tacz 既在 DIRECT 外，也不在此列，保持原样不被改动。
+        for slug, expect in load_perf_pins():
             resolve_mod(slug, seen, files, stage, expect)
 
         manifest["files"] = files

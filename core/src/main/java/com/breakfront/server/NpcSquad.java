@@ -5,6 +5,7 @@ import com.breakfront.game.MatchPhase;
 import com.breakfront.game.Side;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.item.SwordItem;
 import net.minecraft.registry.Registries;
@@ -29,8 +30,9 @@ import java.util.UUID;
  * - 进服补位：缺人一方按目标人数自动补 bot（多人人数不够时自动加 bot）
  * - 推进：攻方 bot 前往当前扇区首个目标点站圈（提供占点人数）；守方 bot 分散守当前扇区各点（争夺）
  * - 每局重开时清场重部署到己方出生区
- * 说明：v0.5 实现 移动/占点/可击杀；找掩体/射击等战术 AI 另立项。
- * 实体复用 zombie（NoAI + 锁重力），由本类以命令驱动位移，避免误伤与乱跑。
+ * 说明：v0.7 起 移动改走原版实体导航 AI（PathAwareEntity / MobEntity.getNavigation），
+ * 由本类每 ~5 tick 决策「走哪」，仅射击/换目标/近战由本模块直接驱动；/tp 仅保留
+ * 在 出生部署 / 救援 / 卡死兜底，消除原先 per-step /tp 造成的瞬移与视觉碎裂。
  */
 public final class NpcSquad {
 
@@ -57,7 +59,13 @@ public final class NpcSquad {
         UUID foeId;         // 当前敌人（null=无）
         boolean foeIsNpc;   // 敌人是 NPC（true）还是真人玩家（false）
         long atkAtMs;       // 下次可攻击时间
-        long faceAtMs;      // 站桩转向节流（上次 tp 更新时间）
+        // 导航 / 卡死兜底（2026-09-06 v0.7：原版导航 AI 取代 /tp 推进）
+        double goalX;       // 当前导航目标 x
+        double goalY;       // 当前导航目标 y
+        double goalZ;       // 当前导航目标 z
+        long stuckSinceMs;  // 卡死监测窗口起点（0=未开始计时）
+        double prevMoveX;   // 上一决策帧水平位置（卡死位移判定）
+        double prevMoveZ;
     }
 
     // ---------- 配置 ----------
@@ -238,8 +246,8 @@ public final class NpcSquad {
         e.setCustomName(Text.literal("[" + label + "] AI-" + sid));
         // 名字牌不显示：头顶阵营标记由客户端 FriendlyHostileMarks 接管（蓝=友/红=敌，穿墙语义不同）
         e.setCustomNameVisible(false);
-        e.setAiDisabled(true);      // 关闭原版 AI：不会乱咬人
-        e.setNoGravity(true);       // 位移由命令驱动，防掉落/卡角
+        e.setAiDisabled(false);     // v0.7：启用原版导航 AI，移动交给 getNavigation()
+        e.setNoGravity(false);      // 让导航按地形行走（落体/爬台阶正常）
         e.setSilent(true);          // 不出僵尸声（配合客户端去原版音效）
         e.addCommandTag("breakfront.npc");
         e.addCommandTag("bf.side." + (side == Side.ATTACKER ? "att" : "def"));
@@ -303,13 +311,26 @@ public final class NpcSquad {
     private static final double MELEE_RANGE = 3.4;
     private static final double GUN_RANGE = 30.0;
     private static final double SCAN_RANGE = 34.0;
+    /** 进入交战（停下导航、原地开火）的触发距离：持械约 24m、空手约 3m。 */
+    private static final double GUN_ENGAGE = 24.0;
+    private static final double MELEE_ENGAGE = 3.0;
+    /** 导航移动速度（传给 startMovingTo 的速度系数，约 0.9-1.1）。 */
+    private static final double MOVE_SPEED = 1.0;
+    /** 占点到达判定（水平 ≤1.5m 即停导航）。 */
+    private static final double ARRIVE_RADIUS = 1.5;
+    /** 卡死兜底：水平位移窗口 4s 内 <0.5m 且距目标 >8m → 一次 /tp。 */
+    private static final long STUCK_MS = 4000;
+    private static final double STUCK_MOVE = 0.5;
+    private static final double STUCK_GOAL = 8.0;
     /** 目标重扫间隔 / 攻击间隔（ms）。 */
     private static final long SCAN_MS = 900;
     private static final long MELEE_ATK_MS = 700;
     private static final long GUN_ATK_MS = 900;
 
     public void tick(ServerMatch match, MinecraftServer server) {
+        // 非战斗阶段：bot 原地待命（清目标 + 停导航 + 站桩），不跑攻击/移动策略
         if (match.game().phase() != MatchPhase.BATTLE) {
+            idleAll(server);
             return;
         }
         stepCounter++;
@@ -322,16 +343,32 @@ public final class NpcSquad {
         if (units.isEmpty()) {
             return;
         }
-        if (stepCounter % 3 != 0) { // 每 3 tick（0.15s）决策一步，兼顾平顺与开销
+        if (stepCounter % 5 != 0) { // v0.7：每 5 tick（0.25s）决策一步，导航自带平顺插值与朝向
             return;
         }
         long now = System.currentTimeMillis();
         for (Npc n : units.values()) {
+            // 取真实实体并同步记录坐标（导航下位置由引擎推进，不再由我们 /tp 维护）
+            var e = server.getOverworld().getEntity(n.id);
+            if (!(e instanceof LivingEntity le)) {
+                continue;
+            }
+            n.lastX = le.getX();
+            n.lastY = le.getY();
+            n.lastZ = le.getZ();
+            // 抑制原版僵尸自带的追击/挥击（保持只走我们的策略）：清掉它的目标选择器结果
+            if (e instanceof MobEntity mob) {
+                mob.setTarget(null);
+            }
             LivingEntity foe = resolveFoe(match, server, n, now);
             if (foe != null) {
-                engage(match, server, n, foe, now);
+                engage(match, server, n, (MobEntity) e, foe, now);
             } else {
-                moveToObjective(match, server, n);
+                moveToObjective(match, server, n, (MobEntity) e);
+            }
+            // 卡死兜底（水平位移过久且离目标远 → 一次 /tp 到目标附近安全点）
+            if (e instanceof MobEntity mob) {
+                stuckCheck(server, n, mob, now);
             }
         }
     }
@@ -423,34 +460,22 @@ public final class NpcSquad {
         return best;
     }
 
-    /** 交战：朝敌人移动/驻留 + 按节奏攻击（空手近战 / 持械远程）。 */
-    private void engage(ServerMatch match, MinecraftServer server, Npc n, LivingEntity foe, long now) {
-        double dx = foe.getX() - n.lastX;
-        double dz = foe.getZ() - n.lastZ;
+    /** 交战：导航追敌 → 进入交战距离则停导航原地开火（空手近战 / 持械远程）。
+     *  仅攻击与换目标由本模块决策，位移完全交给原版导航 AI。 */
+    private void engage(ServerMatch match, MinecraftServer server, Npc n, MobEntity mob, LivingEntity foe, long now) {
+        double dx = foe.getX() - mob.getX();
+        double dz = foe.getZ() - mob.getZ();
         double dist = Math.hypot(dx, dz);
         boolean hasGun = hasWeapon(server, n);
-        // 朝向敌人（yaw 每决策帧跟随）
-        double yaw = Math.toDegrees(Math.atan2(dx, dz));
-        if (dist > (hasGun ? 20.0 : MELEE_RANGE - 0.6)) {
-            // 追近（受限于交战距离内），保留轴分离避障
-            if (dist > 0.6) {
-                double ux = dx / dist;
-                double uz = dz / dist;
-                double[] step = chooseStep(server, n.lastX, n.lastZ, ux, uz);
-                if (step != null) {
-                    n.lastX = step[0];
-                    n.lastZ = step[1];
-                    n.lastY = groundY(server, n.lastX, n.lastZ) + 0.1;
-                    exec(server, tpCmd(n, step[0], n.lastY, step[1], yaw));
-                }
-            }
+        double engage = hasGun ? GUN_ENGAGE : MELEE_ENGAGE;
+        if (dist > engage) {
+            // 超出交战距离 → 导航追敌（导航自带避障与地形跟随）
+            startMove(server, n, mob, foe.getX(), foe.getY(), foe.getZ(), MOVE_SPEED);
             return;
         }
-        // 已在攻击范围内：站桩攻击；转向节流（每 ~0.7s 一次 tp 保持朝敌，不逐帧刷 tp）
-        if (now - n.faceAtMs >= 700) {
-            n.faceAtMs = now;
-            exec(server, tpCmd(n, n.lastX, n.lastY, n.lastZ, yaw));
-        }
+        // 进入交战距离：停下导航，原地站桩开火（保持每 interval 造成伤害与挥臂）
+        mob.getNavigation().stop();
+        faceTarget(mob, dx, dz);
         if (now < n.atkAtMs) {
             return;
         }
@@ -463,6 +488,14 @@ public final class NpcSquad {
             n.atkAtMs = now + MELEE_ATK_MS;
             strikeFoe(server, n, foe, 3.0, true); // 空手近战挥击
         }
+    }
+
+    /** 转向目标（导航期间随移动自动转向；此处仅用于站桩开火时手动对敌）。 */
+    private void faceTarget(MobEntity mob, double dx, double dz) {
+        float yaw = (float) Math.toDegrees(Math.atan2(dx, dz));
+        mob.setYaw(yaw);
+        mob.setBodyYaw(yaw);
+        mob.setHeadYaw(yaw);
     }
 
     /** 主手是否持有武器（模组物品一律视为武器；原版剑也算近战武器）。 */
@@ -497,6 +530,56 @@ public final class NpcSquad {
         foe.damage(src, (float) amount);
     }
 
+    /** 非战斗阶段：清目标 + 停导航 + 清零速度，使 bot 原地站立待命。 */
+    private void idleAll(MinecraftServer server) {
+        if (units.isEmpty()) {
+            return;
+        }
+        var w = server.getOverworld();
+        for (Npc n : units.values()) {
+            var e = w.getEntity(n.id);
+            if (!(e instanceof MobEntity mob)) {
+                continue;
+            }
+            mob.getNavigation().stop();
+            mob.setTarget(null);
+            mob.setVelocity(0.0, 0.0, 0.0);
+            n.stuckSinceMs = 0; // 重新进入战斗后重新计卡死窗口
+        }
+    }
+
+    /** 卡死兜底：每决策帧比对水平位移；4s 内位移 <0.5m 且距当前导航目标 >8m，
+     *  视为卡墙，一次 /tp 到目标附近安全地面点并重置计时（不逐帧 tp，避免回到老问题）。 */
+    private void stuckCheck(MinecraftServer server, Npc n, MobEntity mob, long now) {
+        // 仅当导航正在执行（有路径、未在站桩）时才计卡死；否则跳过并复位
+        if (mob.getNavigation().isIdle()) {
+            n.stuckSinceMs = 0;
+            n.prevMoveX = mob.getX();
+            n.prevMoveZ = mob.getZ();
+            return;
+        }
+        double move = Math.hypot(mob.getX() - n.prevMoveX, mob.getZ() - n.prevMoveZ);
+        double goalDist = Math.hypot(n.goalX - mob.getX(), n.goalZ - mob.getZ());
+        if (n.stuckSinceMs == 0) {
+            n.stuckSinceMs = now;
+        }
+        if (now - n.stuckSinceMs >= STUCK_MS) {
+            if (move < STUCK_MOVE && goalDist > STUCK_GOAL) {
+                double sx = n.goalX;
+                double sz = n.goalZ;
+                double sy = groundY(server, sx, sz) + 1.0;
+                mob.refreshPositionAndAngles(sx, sy, sz, mob.getYaw(), 0.0f);
+                exec(server, tpCmd(n, sx, sy, sz, mob.getYaw()));
+                n.stuckSinceMs = now; // 重置窗口，给导航一次重新寻路的机会
+            } else {
+                n.stuckSinceMs = now; // 位移正常，滑动窗口
+            }
+        }
+        n.prevMoveX = mob.getX();
+        n.prevMoveZ = mob.getZ();
+    }
+
+
     /** 视线：npc 眼部到敌人眼部是否被实心方块阻挡。 */
     private boolean lineOfSight(MinecraftServer server, Npc n, LivingEntity foe, double dist) {
         var w = server.getOverworld();
@@ -522,52 +605,57 @@ public final class NpcSquad {
         return dx * dx + dz * dz;
     }
 
-    /** 无敌人：继续前往目标点（攻方首个点/守方分散占点）。 */
-    private void moveToObjective(ServerMatch match, MinecraftServer server, Npc n) {
+    /** 无敌人：导航前往占点目标（攻方首个点 / 守方分散占点）。到达(≤1.5m)即停导航驻守。 */
+    private void moveToObjective(ServerMatch match, MinecraftServer server, Npc n, MobEntity mob) {
         Vec3d target = targetFor(match, server, n);
         if (target == null) {
             return;
         }
-        double dx = target.x - n.lastX;
-        double dz = target.z - n.lastZ;
-        double dist = Math.hypot(dx, dz);
-        if (dist < 1.2) {
-            return; // 已在点内驻守
-        }
-        double ux = dx / dist;
-        double uz = dz / dist;
-        // 地形跟随 + 轴分离避障：直行不可行则分别试 x/z 单轴，均不可行则原地驻守
-        double[] step = chooseStep(server, n.lastX, n.lastZ, ux, uz);
-        if (step == null) {
+        double dist = Math.hypot(target.x - mob.getX(), target.z - mob.getZ());
+        if (dist <= ARRIVE_RADIUS) {
+            mob.getNavigation().stop(); // 已在点内：停导航，原地驻守
             return;
         }
-        double yaw = Math.toDegrees(Math.atan2(step[0] - n.lastX, step[1] - n.lastZ));
-        n.lastX = step[0];
-        n.lastZ = step[1];
-        n.lastY = groundY(server, n.lastX, n.lastZ) + 0.1;
-        exec(server, tpCmd(n, step[0], n.lastY, step[1], yaw));
+        startMove(server, n, mob, target.x, target.y, target.z, MOVE_SPEED);
     }
 
-    /** 返回下一位置 {x,z}：直行→x 轴→z 轴；条件=目标点地表与当前高度差 ≤3.5。 */
-    private double[] chooseStep(MinecraftServer server, double x, double z, double ux, double uz) {
-        double g0 = groundY(server, x, z);
-        double nx = x + ux * 0.6;
-        double nz = z + uz * 0.6;
-        if (walkable(server, nx, nz, g0)) {
-            return new double[]{nx, nz};
+    /**
+     * 用原版导航走向目标点；不可达时左右偏航 45° 各重试一次；仍不可达则原地驻守并朝向目标。
+     * 返回 true=已下发导航路径。
+     */
+    private boolean startMove(MinecraftServer server, Npc n, MobEntity mob,
+                              double x, double y, double z, double speed) {
+        n.goalX = x;
+        n.goalY = y;
+        n.goalZ = z;
+        n.stuckSinceMs = (n.stuckSinceMs == 0) ? System.currentTimeMillis() : n.stuckSinceMs;
+        if (mob.getNavigation().startMovingTo(x, y, z, speed)) {
+            return true;
         }
-        if (walkable(server, nx, z, g0)) {
-            return new double[]{nx, z};
+        // 不可达：以当前→目标方向为基准，左右各偏 45° 试一个偏移点
+        double ang = Math.atan2(z - mob.getZ(), x - mob.getX());
+        final double off = 6.0;
+        for (double s : new double[]{-1.0, 1.0}) {
+            double a = ang + s * Math.PI / 4.0;
+            double nx = mob.getX() + Math.cos(a) * off;
+            double nz = mob.getZ() + Math.sin(a) * off;
+            double ny = groundY(server, nx, nz) + 1.0;
+            if (mob.getNavigation().startMovingTo(nx, ny, nz, speed)) {
+                n.goalX = nx;
+                n.goalY = ny;
+                n.goalZ = nz;
+                return true;
+            }
         }
-        if (walkable(server, x, nz, g0)) {
-            return new double[]{x, nz};
+        // 仍不可达：停导航、原地驻守、转向目标（并尝试跳跃越障）
+        mob.getNavigation().stop();
+        mob.getJumpControl().setActive();
+        double dx = x - mob.getX();
+        double dz = z - mob.getZ();
+        if (dx != 0 || dz != 0) {
+            faceTarget(mob, dx, dz);
         }
-        return null;
-    }
-
-    private boolean walkable(MinecraftServer server, double x, double z, double fromGround) {
-        double g = groundY(server, x, z);
-        return Math.abs(g - fromGround) <= 3.5;
+        return false;
     }
 
     /** 攻方：当前扇区首个点；守方：按单位 id 分散到当前扇区各点。

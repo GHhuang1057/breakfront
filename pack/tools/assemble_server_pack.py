@@ -12,6 +12,7 @@ import argparse
 import zipfile
 import shutil
 import pathlib
+import json
 
 
 def main():
@@ -26,16 +27,38 @@ def main():
     dist = pathlib.Path(args.out)
     dist.mkdir(parents=True, exist_ok=True)
 
-    # 1. mods：从客户端包提取全部 jar（第三方 + 自研，与客户端严格一致）
+    # 1. mods：从客户端包提取 jar，但只放「双端可运行」(env==both) 的模组。
+    #    客户端专属模组（entityculling / immediatelyfast / natural-motion-blur 及其
+    #    cloth-config / satin 依赖、breakfront-client、sodium / iris / tacz）不进服务端，
+    #    避免服务端误加载客户端渲染模组。env 取自客户端包内的 manifest.json。
     mods_dir = stage / "mods"
     mods_dir.mkdir(exist_ok=True)
-    n = 0
+    server_ok = set()
     with zipfile.ZipFile(args.client_zip) as z:
+        names = set(z.namelist())
+        if "manifest.json" in names:
+            try:
+                manifest = json.loads(z.read("manifest.json"))
+                for entry in manifest.get("files", []):
+                    if entry.get("env") == "both":
+                        server_ok.add(entry.get("file"))
+            except Exception as e:
+                print(f"[warn] 解析 manifest.json 失败，回退为全量复制：{e}")
+                server_ok = None
+        else:
+            print("[warn] 客户端包无 manifest.json，回退为全量复制")
+            server_ok = None
+        n = 0
+        skipped = 0
         for name in z.namelist():
-            if name.startswith("mods/") and name.endswith(".jar"):
-                (mods_dir / pathlib.Path(name).name).write_bytes(z.read(name))
-                n += 1
-    print(f"mods copied: {n}")
+            if not (name.startswith("mods/") and name.endswith(".jar")):
+                continue
+            if server_ok is not None and name not in server_ok:
+                skipped += 1
+                continue
+            (mods_dir / pathlib.Path(name).name).write_bytes(z.read(name))
+            n += 1
+    print(f"mods copied: {n} (服务端双端模组); skipped client-only: {skipped}")
 
     # 2. 模板配置
     (stage / "eula.txt").write_text("eula=true\n", encoding="utf8")

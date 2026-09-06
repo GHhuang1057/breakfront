@@ -1,6 +1,7 @@
 package com.breakfront.client.hud;
 
 import com.breakfront.client.bf.BfDraw;
+import com.breakfront.client.bf.BfGlow;
 import com.breakfront.client.bf.BfTheme;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.FriendDot;
@@ -14,35 +15,49 @@ import net.minecraft.text.Text;
 import java.util.List;
 
 /**
- * BF 式雷达（矢量，右上角）：
- * - 自机箭头固定指上（画面随朝向旋转）
- * - 据点：按扇区字母的菱形/圆点 + 争夺白闪
- * - 友军：同阵营点（攻方黄 / 守方蓝），阵亡灰显
- * - 世界范围 RANGE=90 米，屏幕半径 46px
+ * BF 式小地图（矢量，方形，左下角竖向堆叠于血量卡下方）：
+ * - 自机三角箭头固定指上（画面随朝向旋转）
+ * - 据点：菱形（owner 色：攻 GREEN / 守 BLUE / 争夺 CYAN 白闪）
+ * - 友军：同阵营青色菱形，阵亡灰显
+ * - 世界范围 RANGE=90 米，映射到边长 size 的方形（N 在上）
  * 渲染纪律：几何 + 文字，无贴图。
  */
 public final class BfMinimap {
 
     private static final double RANGE = 90.0;
-    private static final int RADIUS = 46;
 
     private BfMinimap() {
     }
 
-    public static void render(DrawContext ctx, TextRenderer font, int sw, int sh) {
+    /**
+     * @param x     左上角 x（已含视差偏移由调用方决定）
+     * @param y     左上角 y
+     * @param size  方形边长
+     * @param bobDx 视差横向（px，叠加到 x）
+     * @param bobDy 视差纵向（px，叠加到 y）
+     */
+    public static void render(DrawContext ctx, TextRenderer font, int x, int y, int size,
+                              double bobDx, double bobDy) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) {
             return;
         }
-        int cx = sw - RADIUS - 14;
-        int cy = 12 + RADIUS;
+        int bx = x + (int) Math.round(bobDx);
+        int by = y + (int) Math.round(bobDy);
+        int half = size / 2;
+        int cx = bx + half;
+        int cy = by + half;
+        int pad = Math.max(4, size / 28);
 
-        // 底盘：外圈描边 + 深色盘面
-        disc(ctx, cx, cy, RADIUS, 0xFF1E2733);
-        disc(ctx, cx, cy, RADIUS - 2, 0xE610141B);
-        // 水平/垂直参考线（暗）
-        ctx.fill(cx - RADIUS + 2, cy - 1, cx + RADIUS - 2, cy + 1, 0x18FFFFFF);
-        ctx.fill(cx - 1, cy - RADIUS + 2, cx + 1, cy + RADIUS - 2, 0x18FFFFFF);
+        // 底盘：PANEL 方形 + 青色线框 + 内描边 + 微量辉光
+        BfDraw.fill(ctx, bx, by, size, size, BfTheme.PANEL);
+        BfDraw.border(ctx, bx, by, size, size, BfTheme.CYAN_DIM);
+        BfDraw.fill(ctx, bx + 1, by + 1, size - 2, 1, BfTheme.PANEL_LINE);
+        BfGlow.rect(ctx, bx, by, size, size, BfTheme.TEAL & 0xFFFFFF, 18, 4);
+
+        // 网格参考线（暗）
+        ctx.fill(cx - 1, by + pad, cx + 1, by + size - pad, 0x16FFFFFF);
+        ctx.fill(bx + pad, cy - 1, bx + size - pad, cy + 1, 0x16FFFFFF);
 
         double px = client.player.getX();
         double pz = client.player.getZ();
@@ -50,9 +65,9 @@ public final class BfMinimap {
         double rad = Math.toRadians(yaw);
         double cos = Math.cos(rad);
         double sin = Math.sin(rad);
-        double scale = (double) (RADIUS - 6) / RANGE;
+        double scale = (double) (half - pad) / RANGE;
 
-        // 我方阵营：从位置帧里找到自己
+        // 我方阵营
         String me = client.player.getName().getString();
         int mySide = -1;
         for (FriendDot f : ClientMatchState.friends()) {
@@ -62,7 +77,6 @@ public final class BfMinimap {
             }
         }
 
-        // 据点（全部阵营可见——BF 里目标是公共情报）
         long now = System.currentTimeMillis();
         List<ZoneView> zones = ClientMatchState.zones();
         for (ZoneView z : zones) {
@@ -79,20 +93,19 @@ public final class BfMinimap {
             int edge = contested
                     ? ((now % 600) < 300 ? 0xFFEFFFFF : BfTheme.CYAN)
                     : (owner == Side.ATTACKER ? BfTheme.GREEN : BfTheme.BLUE);
-            int r = Math.max(4, (int) Math.round(Math.max(2.0, z.radius() * 0.35)));
-            disc(ctx, (int) sx, (int) sy, r, 0x40000000);
-            disc(ctx, (int) sx, (int) sy, Math.max(2, r - 1), edge);
-            // 字母（黑色描底保证可读）
+            double r = Math.max(3.0, Math.min(half - 4, z.radius() * 0.35 * scale + 3));
+            BfDraw.diamond(ctx, sx, sy, r, edge);
+            // 字母（深色描底保证可读）
             String letter = z.letter();
             int lw = font.getWidth(letter);
-            ctx.drawText(font, Text.literal(letter), (int) sx - lw / 2, (int) sy - 4,
+            ctx.drawText(font, Text.literal(letter), (int) sx - lw / 2, (int) sy - font.fontHeight / 2,
                     0xFF0A0D12, false);
-            ctx.drawText(font, Text.literal(letter), (int) sx - lw / 2 - 1, (int) sy - 5,
-                    0xFFFFFFFF, false);
+            ctx.drawText(font, Text.literal(letter), (int) sx - lw / 2 - 1, (int) sy - font.fontHeight / 2 - 1,
+                    BfTheme.TEXT, false);
         }
 
-        // 友军点
-        int ally = BfTheme.CYAN; // 友方统一青色点（蓝绿主题）
+        // 友军点（青色菱形，阵亡灰）
+        int ally = BfTheme.CYAN;
         for (FriendDot f : ClientMatchState.friends()) {
             if (f.sideOrdinal() != mySide || f.sideOrdinal() < 0) {
                 continue;
@@ -106,27 +119,23 @@ public final class BfMinimap {
             double sx = cx + (ox * cos + oz * sin) * scale;
             double sy = cy + (ox * sin - oz * cos) * scale;
             int col = f.alive() ? ally : 0xFF6B7280;
-            BfDraw.diamond(ctx, sx, sy, 3.2, col);
+            BfDraw.diamond(ctx, sx, sy, 3.0, col);
         }
 
-        // 自机箭头（固定朝上）
+        // 自机三角箭头（固定朝上，白/青）
         int[] ax = {cx, cx - 5, cx + 5};
-        int[] ay = {cy - 9, cy + 5, cy + 5};
-        BfDraw.fill(ctx, cx - 1, cy - 8, cx + 1, cy + 5, 0xFF0A0D12);
+        int[] ay = {cy - 8, cy + 5, cy + 5};
+        BfDraw.fill(ctx, cx - 1, cy - 7, cx + 1, cy + 5, 0xFF0A0D12);
         tri(ctx, ax, ay, 0xFFFFFFFF);
+
+        // N 指示（屏幕上方 = 北）
+        String n = "N";
+        int nw = font.getWidth(n);
+        ctx.drawText(font, Text.literal(n), cx - nw / 2, by + 2, BfTheme.CYAN, true);
     }
 
-    /** 简易填充圆（水平扫描行画线）。 */
-    private static void disc(DrawContext ctx, int cx, int cy, int radius, int color) {
-        int r2 = radius * radius;
-        for (int dy = -radius; dy <= radius; dy++) {
-            int half = (int) Math.sqrt(Math.max(0, r2 - dy * dy));
-            ctx.fill(cx - half, cy + dy, cx + half + 1, cy + dy + 1, color);
-        }
-    }
-
+    /** 扫描线三角形填充（上顶点）。 */
     private static void tri(DrawContext ctx, int[] xs, int[] ys, int color) {
-        // 扫描线三角形填充（上顶点)
         for (int i = 0; i < 3; i++) {
             int j = (i + 1) % 3;
             line(ctx, xs[i], ys[i], xs[j], ys[j], color);

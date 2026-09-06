@@ -5,22 +5,26 @@
 
 ## 已实装（现网客户端必备）
 
-| 模组 | 版本钉 | 作用 | 备注 |
-|---|---|---|---|
-| Sodium | **0.6.13** | 区块渲染重写（帧率核心） | 必须 0.6.x；0.8.x `breaks iris <1.8.13` |
-| Iris | **1.8.8** | 光影加载（ComplementaryReimagined r5.9） | 1.21.1 分支唯一 release；`depends sodium 0.6.x` |
-| ComplementaryReimagined | r5.9 | 光影包（唯一渲染方案） | VulkanMod 已弃（与 TaCZ stencil FBO 不兼容） |
-| Fabric API | 0.116.17+1.21.1 | 前置 | — |
+| 模组 | 版本钉 | 环境 | 作用 | 备注 |
+|---|---|---|---|---|
+| Sodium | **0.6.13** | client | 区块渲染重写（帧率核心） | 必须 0.6.x；0.8.x `breaks iris <1.8.13` |
+| Iris | **1.8.8** | client | 光影加载（ComplementaryReimagined r5.9） | 1.21.1 分支唯一 release；`depends sodium 0.6.x` |
+| ComplementaryReimagined | r5.9 | client | 光影包（唯一渲染方案） | VulkanMod 已弃（与 TaCZ stencil FBO 不兼容） |
+| Fabric API | 0.116.17+1.21.1 | both | 前置 | — |
+| **Lithium** | **mc1.21.1-0.15.4-fabric** | both | 服务端/客户端通用逻辑优化（实体/寻路/碰撞） | `depends fabricloader>=0.15.1`；`breaks optifabric`（与 Sodium 同作者，兼容良好） |
+| **FerriteCore** | **7.0.3-fabric** | both | 内存占用下降（区块状态/资源） | `depends fabricloader>=0.14.21`；`breaks hydrogen`；32 人服客户端/服务端均友好 |
+| **ModernFix** | **5.25.1+mc1.21.1** | both | 启动/内存/运行时综合优化 | `depends fabricloader>=0.16.10`；`breaks dashloader<5.0.0-beta.1`；其 `Dynamic Resources` 与部分模组冲突面，需 PCL 实测 |
+| **EntityCulling** | **1.10.5** | client | 屏幕外实体/方块实体跳过渲染 | `depends fabric-api`；`breaks tlskincape`；对本项目大量 NPC 有利 |
+| **ImmediatelyFast** | **1.6.13+1.21.1-fabric** | client | 立即模式渲染批处理（HUD/方块实体） | `depends java>=21, fabricloader>=0.16.0`；`breaks vulkanmod` |
+| **Natural Motion Blur** | **1.3.0** | client | 动态模糊（motion blur，1.21.1 下载量最高者） | `depends cloth-config + satin`（由 assemble 脚本递归拉取）；`breaks` 无 |
 
-## 待装候选（#44 批次推荐，逐个核验后进包）
+> 版本钉来源：Modrinth API 于 1.21.1 + fabric 过滤下取 release 最新版，见 `pack/tools/mod_pins.json`。
+> 客户端包 = 上述全部；**服务端包仅放 env=both 项**（Lithium / FerriteCore / ModernFix + 自研 breakfront core），
+> EntityCulling / ImmediatelyFast / Natural Motion Blur 及其 cloth-config / satin 依赖不进服务端。
 
-| 模组 | 作用 | 1.21.1 注意 |
-|---|---|---|
-| **Lithium** | 服务端/客户端通用逻辑优化（实体/寻路/碰撞） | 与 Sodium 同作者，兼容良好 |
-| **ImmediatelyFast** | 立即模式渲染批处理（HUD/方块实体） | 与 Iris 有版本耦合，需核验 beta 匹配 |
-| **EntityCulling** | 屏幕外实体/方块实体跳过渲染 | 对我们的自定义 HUD 无影响；对本项目大量 NPC 有利 |
-| **FerriteCore** | 内存占用下降（区块状态/资源） | 32 人服客户端内存友好 |
-| **ModernFix** | 启动/内存/运行时综合优化 | 注意其 `Dynamic Resources` 与部分模组冲突面 |
+## 待装候选（已核验、暂未实装）
+
+_（#44 批次五项性能模组 + 动态模糊已全数实装并钉版本，无剩余候选。）_
 
 > ⚠️ 落地规则：每装一个都要过一遍其 jar `fabric.mod.json` 的 `depends`/`breaks`
 > 再锁版本钉写入 gradle.properties / 发布清单；**宁缺毋滥**，性能模组不参与 core 规则层。
