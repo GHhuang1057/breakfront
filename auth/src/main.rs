@@ -248,6 +248,22 @@ async fn health() -> Json<ApiOk<serde_json::Value>> {
     })
 }
 
+async fn root() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "service": "geekhonize-auth",
+        "version": "0.1.0",
+        "message": "Geekhonize 通用账号认证服务",
+        "endpoints": [
+            "GET  /healthz",
+            "POST /api/v1/auth/register",
+            "POST /api/v1/auth/login",
+            "GET  /api/v1/auth/me",
+            "POST /api/v1/auth/logout"
+        ],
+        "apps": ["breakfront", "geekhonize-portal", "sxsm"]
+    }))
+}
+
 async fn register(State(st): State<AppState>, Json(req): Json<RegisterReq>) -> Result<Response, AppErr> {
     let app = req.app.trim().to_lowercase();
     if !st.cfg.apps.contains(&app) {
@@ -398,6 +414,7 @@ async fn main() {
     let state = AppState { cfg, pool };
     let cors = CorsLayer::very_permissive();
     let app = Router::new()
+        .route("/", get(root))
         .route("/healthz", get(health))
         .route("/api/v1/auth/register", axum::routing::post(register))
         .route("/api/v1/auth/login", axum::routing::post(login))
