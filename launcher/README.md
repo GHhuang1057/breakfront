@@ -27,3 +27,4 @@ dotnet publish launcher/Geekhonize.App/Geekhonize.App.csproj -c Release -r win-x
 实例/Java 自动寻址、Fabric 1.21.1 整合包下载与装配、自更新、直接启动按钮、Android APK。
 
 - Launcher release assets（launcher-dev-<sha>）由 launcher.yml 发布，官网 /download 镜像同源。
+- B2 引擎已并入 Shared（LaunchKit：Mojang+Fabric 装配/Java 探测/启动），Desktop 登录窗含「装配并启动」。
