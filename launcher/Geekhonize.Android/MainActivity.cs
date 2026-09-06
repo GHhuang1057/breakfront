@@ -1,16 +1,9 @@
-using Android.App;
-using Android.Content.PM;
 using Avalonia;
 using Avalonia.Android;
 
 namespace Geekhonize.Android;
 
-[Activity(
-    Label = "BREAKFRONT 启动器",
-    MainLauncher = true,
-    LaunchMode = LaunchMode.SingleTop,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize
-        | ConfigChanges.ScreenLayout | ConfigChanges.KeyboardHidden | ConfigChanges.UiMode)]
+/// <summary>入口 Activity（manifest 已声明 Main/Launcher）。</summary>
 public class MainActivity : AvaloniaMainActivity<Geekhonize.App.App>
 {
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
