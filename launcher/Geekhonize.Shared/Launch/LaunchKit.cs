@@ -141,7 +141,7 @@ public sealed class LaunchKit
         var idxFile = Path.Combine(RootDir, "assets", "indexes", $"{_assetIndex}.json");
         if (!File.Exists(idxFile))
         {
-            Say("下载资源索引 " + idxId + "…");
+            Say("下载资源索引 " + _assetIndex + "…");
             await DownloadToAsync(ai.GetProperty("url").GetString()!, idxFile, progress);
         }
 
