@@ -166,28 +166,28 @@ public class BreakfrontClient implements ClientModInitializer {
                         net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("geo")
                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("login")
                                         .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
-                                                .argument("username", net.minecraft.command.argument.StringArgumentType.word())
+                                                .argument("username", com.mojang.brigadier.arguments.StringArgumentType.word())
                                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
-                                                        .argument("password", net.minecraft.command.argument.StringArgumentType.greedyString())
+                                                        .argument("password", com.mojang.brigadier.arguments.StringArgumentType.greedyString())
                                                         .executes(ctx -> {
                                                             geoDo(false,
-                                                                    net.minecraft.command.argument.StringArgumentType
+                                                                    com.mojang.brigadier.arguments.StringArgumentType
                                                                             .getString(ctx, "username"),
-                                                                    net.minecraft.command.argument.StringArgumentType
+                                                                    com.mojang.brigadier.arguments.StringArgumentType
                                                                             .getString(ctx, "password"),
                                                                     MinecraftClient.getInstance());
                                                             return 1;
                                                         }))))
                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("register")
                                         .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
-                                                .argument("username", net.minecraft.command.argument.StringArgumentType.word())
+                                                .argument("username", com.mojang.brigadier.arguments.StringArgumentType.word())
                                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
-                                                        .argument("password", net.minecraft.command.argument.StringArgumentType.greedyString())
+                                                        .argument("password", com.mojang.brigadier.arguments.StringArgumentType.greedyString())
                                                         .executes(ctx -> {
                                                             geoDo(true,
-                                                                    net.minecraft.command.argument.StringArgumentType
+                                                                    com.mojang.brigadier.arguments.StringArgumentType
                                                                             .getString(ctx, "username"),
-                                                                    net.minecraft.command.argument.StringArgumentType
+                                                                    com.mojang.brigadier.arguments.StringArgumentType
                                                                             .getString(ctx, "password"),
                                                                     MinecraftClient.getInstance());
                                                             return 1;
