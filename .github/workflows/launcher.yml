@@ -45,3 +45,35 @@ jobs:
 
   # Android（net8.0-android / Avalonia.Android）：workload 体积大且需 Android SDK，
   # 待 B1.5 将 UI 工程多目标化后在 Linux runner 上产出 APK（当前骨架以 Win/Linux 桌面为绿线）。
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: geekhonize-launcher-win-x64
+          path: art/win
+      - uses: actions/download-artifact@v4
+        with:
+          name: geekhonize-launcher-linux-x64
+          path: art/linux
+      - name: Package zips
+        run: |
+          cd art/win  && zip -qr ../../geekhonize-launcher-win-x64.zip   . && cd ../..
+          cd art/linux && zip -qr ../../geekhonize-launcher-linux-x64.zip . && cd ../..
+          ls -la geekhonize-launcher-*.zip
+      - name: Publish prerelease (launcher-dev-<sha>)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${GITHUB_SHA::7}"
+          TAG="launcher-dev-${SHA}"
+          gh release delete "${TAG}" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "${TAG}" \
+            geekhonize-launcher-win-x64.zip geekhonize-launcher-linux-x64.zip \
+            --prerelease \
+            --title "BREAKFRONT Launcher dev build (${SHA})" \
+            --notes ".NET/Avalonia 专属启动器（Geekhonize 登录→写入会话→启动游戏）。Win/Linux x64 自包含。"
