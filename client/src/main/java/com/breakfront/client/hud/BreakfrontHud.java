@@ -14,6 +14,8 @@ import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -549,7 +551,7 @@ public class BreakfrontHud {
             return;
         }
         var stack = player.getMainHandStack();
-        NbtCompound nbt = stack.getNbt();
+        NbtCompound nbt = customNbt(stack);
 
         String gunId = (nbt != null) ? nbt.getString(NBT_GUN_ID) : "";
         boolean isGun = !gunId.isEmpty() && !stack.isEmpty();
@@ -662,7 +664,7 @@ public class BreakfrontHud {
     private static int readReserveAmmo(PlayerEntity player) {
         String want = null;
         var mh = player.getMainHandStack();
-        NbtCompound mn = mh.getNbt();
+        NbtCompound mn = customNbt(mh);
         if (mn != null && !mn.getString(NBT_GUN_ID).isEmpty()) {
             want = gunAmmoId(mh, mn.getString(NBT_GUN_ID));
         }
@@ -685,7 +687,7 @@ public class BreakfrontHud {
             return 0;
         }
         if (wantAmmoId != null) {
-            NbtCompound nbt = s.getNbt();
+            NbtCompound nbt = customNbt(s);
             if (nbt != null) {
                 String aid = nbt.getString("AmmoId");
                 if (!aid.isEmpty() && !aid.equals(wantAmmoId)) {
@@ -858,5 +860,33 @@ public class BreakfrontHud {
     private static String formatClock(float seconds) {
         int total = (int) Math.max(0, Math.ceil(seconds));
         return String.format("%02d:%02d", total / 60, total % 60);
+    }
+
+    /** 1.21.1 数据组件化读取物品自定义 NBT（TaCZ GunId/AmmoId 等经指令写入 custom_data）。
+     *  兼容 TaCZ 旧直存与组件容器两种形态，读不到返回 null。 */
+    private static NbtCompound customNbt(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return null;
+        }
+        try {
+            if (stack.contains(DataComponentTypes.CUSTOM_DATA)) {
+                NbtCompound n = stack.get(DataComponentTypes.CUSTOM_DATA).copyNbt();
+                if (n != null && !n.isEmpty()) {
+                    return n;
+                }
+            }
+            // 备用：直接找组件内的 NbtComponent（某些模组用其它键承载）
+            for (var entry : stack.getComponents().stream().toList()) {
+                if (entry.value() instanceof NbtComponent nc) {
+                    NbtCompound c = nc.copyNbt();
+                    if (c != null && !c.isEmpty()) {
+                        return c;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // 反射/组件异常静默降级
+        }
+        return null;
     }
 }
