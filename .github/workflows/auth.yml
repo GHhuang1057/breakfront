@@ -1,0 +1,58 @@
+name: auth
+
+on:
+  push:
+    paths:
+      - 'auth/**'
+      - '.github/workflows/auth.yml'
+
+jobs:
+  test-build-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: auth
+
+      - name: Format check
+        working-directory: auth
+        run: cargo fmt -- --check || echo "fmt diff (non-blocking)"
+
+      - name: Unit tests
+        working-directory: auth
+        run: cargo test
+
+      - name: Build release (linux x86_64)
+        working-directory: auth
+        run: cargo build --release
+
+      - name: Package asset
+        working-directory: auth
+        run: |
+          mkdir -p dist
+          cp target/release/geekhonize-auth dist/
+          cp .env.example dist/.env.example
+          cp deploy/geekhonize-auth.service dist/ 2>/dev/null || true
+          cd dist && zip -q ../geekhonize-auth-linux-x86_64.zip geekhonize-auth .env.example
+          ls -la ../geekhonize-auth-linux-x86_64.zip
+
+      - name: Publish prerelease (auth-dev-<sha>)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: auth
+        run: |
+          SHA="${GITHUB_SHA::7}"
+          TAG="auth-dev-${SHA}"
+          gh release delete "${TAG}" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "${TAG}" \
+            geekhonize-auth-linux-x86_64.zip \
+            --prerelease \
+            --title "Geekhonize Auth dev build (${SHA})" \
+            --notes "Rust Geekhonize 通用账号认证服务。CI: cargo test + release 构建自动发布。" || true

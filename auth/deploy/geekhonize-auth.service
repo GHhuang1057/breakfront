@@ -1,0 +1,23 @@
+[Unit]
+Description=Geekhonize Auth (Rust)
+After=network.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/geekhonize-auth
+EnvironmentFile=/opt/geekhonize-auth/.env
+ExecStart=/opt/geekhonize-auth/geekhonize-auth
+Restart=always
+RestartSec=3
+User=geekhonize
+Group=geekhonize
+# 硬性安全项
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/geekhonize-auth
+
+[Install]
+WantedBy=multi-user.target

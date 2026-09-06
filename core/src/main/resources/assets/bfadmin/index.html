@@ -213,8 +213,8 @@ function expireAuth(){
 function authOk(){ _authPrompted=false; }
 
 async function api(path, opts){
-  // token 统一拼 URL query（GET/POST 皆可被服务端 auth 识别；避免 body-only 造成的 401）
-  if(TOKEN && path.indexOf('/bfadmin/api/') === 0 && path.indexOf('?') < 0){
+  // token 统一拼 URL query（无论 path 是否已带参数，都要追加/补全 token → 服务端 auth 才能识别）
+  if(TOKEN && path.indexOf('/bfadmin/api/') === 0){
     path += (path.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(TOKEN);
   }
   const r = await fetch(path, opts);
