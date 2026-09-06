@@ -36,6 +36,10 @@ _（#44 批次五项性能模组 + 动态模糊已全数实装并钉版本，无
 
 ## 落地后续动作
 
-1. 本机 PCL 客户端逐个手动加装（Li/IF/EC/FC/ModernFix 任一组合）跑一轮帧率基线；
-2. 确认无崩溃、光影正常后再纳入 dev 客户端包发布；
-3. 服务器端优化：view-distance/模拟距离按 32v32 目标回调，列入调参表。
+1. ⚠️ **Natural Motion Blur 已移除（2026-09-06）**：其 post shader 找不到 uniform
+   （projection/InSize/view_pixel_size，见客户端日志 `No uniform found with name … in shader naturalmotionblur:shaders/post/motion_blur.json`），
+   与 Iris 1.8.8 + Complementary 光影后处理链冲突 → 光影下画面异常。动态模糊改用光影自身选项
+   （Complementary 设置内 Motion Blur / TAA）或不开；如后续要动糊须改用与 Iris 兼容的实现。
+2. 本机 PCL 客户端逐个手动加装（Li/IF/EC/FC/ModernFix 任一组合）跑一轮帧率基线；
+3. 确认无崩溃、光影正常后再纳入 dev 客户端包发布；
+4. 服务器端优化：view-distance/模拟距离按 32v32 目标回调，列入调参表。

@@ -5,7 +5,8 @@
   "client": [
     "InGameHudMixin",
     "SoundManagerMixin",
-    "DebugHudOverlayMixin"
+    "DebugHudOverlayMixin",
+    "ScreenBackgroundMixin"
   ],
   "injectors": {
     "defaultRequire": 1
