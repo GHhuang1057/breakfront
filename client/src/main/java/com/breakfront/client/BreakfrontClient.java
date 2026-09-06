@@ -139,5 +139,9 @@ public class BreakfrontClient implements ClientModInitializer {
         // AI 增援：僵尸实体 → 史蒂夫士兵渲染（玩家模型+默认皮肤+持枪装备）
         net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
                 net.minecraft.entity.EntityType.ZOMBIE, com.breakfront.client.render.BotSoldierRenderer::new);
+
+        // 情境音乐播放器：低频评估场景（大厅/战斗/胜负），后台解码 mp3 + OpenAL 循环
+        ClientTickEvents.END_CLIENT_TICK.register(
+                com.breakfront.client.audio.BfMusicPlayer::tick);
     }
 }

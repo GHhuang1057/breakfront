@@ -48,10 +48,14 @@ public final class ClientMatchState {
     // 位置帧（雷达友军点，PlayerPosPayload 0.25s 一帧）
     private static final List<FriendDot> friends = new ArrayList<>();
 
+    // 最近收到状态帧时间（判断是否连在 BF 服务器上，音乐播放器用）
+    private static volatile long lastMatchAtMs;
+
     private ClientMatchState() {
     }
 
     public static void applyMatch(MatchStatePayload payload) {
+        lastMatchAtMs = System.currentTimeMillis();
         if (payload.phaseOrdinal() != phaseOrdinal) {
             phaseChangeCount++;
         }
@@ -98,6 +102,11 @@ public final class ClientMatchState {
 
     public static int phaseOrdinal() {
         return phaseOrdinal;
+    }
+
+    /** 近 5s 内是否收到过状态帧（=连在 BF 服务器上）。 */
+    public static boolean hasLiveMatch() {
+        return System.currentTimeMillis() - lastMatchAtMs < 5000;
     }
 
     public static int phaseChangeCount() {

@@ -18,6 +18,10 @@ dependencies {
     mappings "net.fabricmc:yarn:${rootProject.property('yarn_mappings')}:v2"
     modImplementation "net.fabricmc:fabric-loader:${rootProject.property('loader_version')}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${rootProject.property('fabric_version')}"
+
+    // 情境音乐 mp3 解码（LGPL，仅解码库，打进 mod jar 供运行时）
+    implementation "net.java.dev.jlayer:jlayer:1.0.1"
+    include "net.java.dev.jlayer:jlayer:1.0.1"
 }
 
 java {
