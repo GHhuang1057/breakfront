@@ -48,6 +48,12 @@ public class BreakfrontClient implements ClientModInitializer {
     public void onInitializeClient() {
         LOGGER.info("[Breakfront] client initialized (BF2042 UI)");
 
+        // GeoAuth payload 类型注册（playC2S/playS2C，与服务端 Net.java 同步）
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S()
+                .register(com.breakfront.net.AuthLoginPayload.ID, com.breakfront.net.AuthLoginPayload.CODEC);
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playS2C()
+                .register(com.breakfront.net.AuthResultPayload.ID, com.breakfront.net.AuthResultPayload.CODEC);
+
         BfServerConfig.load();
 
         // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）+ 死亡替换为部署重生页

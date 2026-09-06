@@ -22,8 +22,10 @@ public final class Net {
         PayloadTypeRegistry.playS2C().register(SectorEditPayload.ID, SectorEditPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(PlayerPosPayload.ID, PlayerPosPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(AdminLoginResultPayload.ID, AdminLoginResultPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(AuthResultPayload.ID, AuthResultPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SetClassPayload.ID, SetClassPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(AdminLoginPayload.ID, AdminLoginPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(AuthLoginPayload.ID, AuthLoginPayload.CODEC);
         LOGGER.info("[Breakfront] networking payloads registered");
     }
 }
