@@ -86,7 +86,8 @@ public final class ModUpdateServer {
                 exchange.getResponseBody().write(data);
                 exchange.close();
             });
-            // 独立管理控制台（/bfadmin/*）：浏览器管理，不进入游戏
+            // 独立管理控制台（/bfadmin/*）：浏览器管理，不进入游戏；token 持久化防重启掉会话
+            WebAdminConsole.attachTokenFile(runDir.resolve("breakfront/webtokens.txt"));
             mu.server.createContext("/bfadmin/", WebAdminConsole::handle);
 
             // 音乐库分发（/breakfront/music/*）——客户端启动预检时同步

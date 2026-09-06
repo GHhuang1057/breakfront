@@ -391,10 +391,7 @@ public final class ServerMatch {
 
     /** 据点地表高度（信标底座所在 Y = 最高固体上方一格）。 */
     private double anchorGroundY(ServerWorld world, ZoneAnchor anchor) {
-        int cx = (int) anchor.x();
-        int cz = (int) anchor.z();
-        int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx, cz);
-        return topY <= world.getBottomY() ? 64.0 : topY + 1.0;
+        return groundY(world, anchor.x(), anchor.z());
     }
 
     /** 据点锚点坐标摘要（供 /bf status 展示，方便传送验证）。 */
@@ -917,8 +914,27 @@ public final class ServerMatch {
     }
 
     private double groundY(ServerWorld world, double x, double z) {
-        int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, (int) x, (int) z);
-        return topY <= world.getBottomY() ? 64.0 : topY + 1.0;
+        int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, (int) Math.floor(x), (int) Math.floor(z));
+        if (topY > world.getBottomY()) {
+            return topY + 1.0;
+        }
+        // 该列无方块（低海拔/虚空区）：在 ±6 邻域找最近真实站面，避免回退 64 高空假高度
+        double nt = neighborTopY(world, x, z);
+        return Double.isNaN(nt) ? world.getBottomY() + 3.0 : nt + 1.0;
+    }
+
+    /** 在 (x,z) ±6 邻域内找最高「真实 MOTION_BLOCKING 方块顶」；全空返回 NaN。 */
+    private static double neighborTopY(ServerWorld world, double x, double z) {
+        double best = Double.NaN;
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                double t = columnTopY(world, x + dx, z + dz);
+                if (!Double.isNaN(t) && (Double.isNaN(best) || t > best)) {
+                    best = t;
+                }
+            }
+        }
+        return best;
     }
 
     private static void exec(MinecraftServer server, String cmd) {
@@ -1353,8 +1369,8 @@ public final class ServerMatch {
                 int cx = (int) z.x();
                 int cz = (int) z.z();
                 int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx, cz);
-                double groundY = topY <= world.getBottomY() ? 64.0 : topY + 1.0;
-                zones.add(new SectorEditPayload.ZoneView(z.id(), si, z.x(), groundY, z.z(), z.radius()));
+                double gy = groundY(world, z.x(), z.z());
+                zones.add(new SectorEditPayload.ZoneView(z.id(), si, z.x(), gy, z.z(), z.radius()));
             }
         }
         SectorEditPayload payload = new SectorEditPayload(true,

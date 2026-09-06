@@ -33,10 +33,65 @@ public final class WebAdminConsole {
     private static final SecureRandom RNG = new SecureRandom();
     /** token -> 最近活跃时间戳（30 分钟滑动过期）。 */
     private static final Map<String, Long> TOKENS = new ConcurrentHashMap<>();
-    private static final long TTL_MS = 30L * 60 * 1000;
+    private static final long TTL_MS = 12L * 60 * 60 * 1000; // 12h：热更/重启不打断浏览器会话
+    /** 会话持久化文件（runDir/breakfront/webtokens.txt）：重启/热更后恢复，浏览器不再 401。 */
+    private static volatile java.nio.file.Path tokenFile;
     private static volatile String lastCmdResult = "";
 
     private WebAdminConsole() {
+    }
+
+    /** 由 ModUpdateServer 启动时挂接持久化路径（runDir 下）。 */
+    public static void attachTokenFile(java.nio.file.Path f) {
+        tokenFile = f;
+        loadTokens();
+    }
+
+    private static void loadTokens() {
+        if (tokenFile == null || !java.nio.file.Files.isRegularFile(tokenFile)) {
+            return;
+        }
+        try {
+            long now = System.currentTimeMillis();
+            for (String line : java.nio.file.Files.readAllLines(tokenFile)) {
+                int tab = line.indexOf('\t');
+                if (tab <= 0) {
+                    continue;
+                }
+                String tok = line.substring(0, tab);
+                try {
+                    long at = Long.parseLong(line.substring(tab + 1));
+                    if (now - at <= TTL_MS) {
+                        TOKENS.put(tok, at);
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            Breakfront.LOGGER.info("[BF-Admin] restored {} admin tokens", TOKENS.size());
+        } catch (Exception e) {
+            Breakfront.LOGGER.warn("[BF-Admin] token load failed: {}", e.toString());
+        }
+    }
+
+    private static void saveTokens() {
+        if (tokenFile == null || TOKENS.isEmpty()) {
+            return;
+        }
+        try {
+            StringBuilder sb = new StringBuilder();
+            long now = System.currentTimeMillis();
+            for (var e : TOKENS.entrySet()) {
+                if (now - e.getValue() <= TTL_MS) {
+                    sb.append(e.getKey()).append('\t').append(e.getValue()).append('\n');
+                }
+            }
+            if (tokenFile.getParent() != null) {
+                java.nio.file.Files.createDirectories(tokenFile.getParent());
+            }
+            java.nio.file.Files.writeString(tokenFile, sb.toString());
+        } catch (Exception e) {
+            Breakfront.LOGGER.warn("[BF-Admin] token save failed: {}", e.toString());
+        }
     }
 
     /** ModUpdateServer 的 /bfadmin/* context 入口。 */
@@ -78,6 +133,7 @@ public final class WebAdminConsole {
         if (ok) {
             token = randomToken();
             TOKENS.put(token, System.currentTimeMillis());
+            saveTokens();
         }
         json(ex, 200, "{\"ok\":" + ok + ",\"token\":\"" + (token == null ? "" : token)
                 + "\",\"msg\":\"" + (ok ? "登录成功" : "密码错误") + "\"}");

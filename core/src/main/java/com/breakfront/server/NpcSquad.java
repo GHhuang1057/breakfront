@@ -393,6 +393,11 @@ public final class NpcSquad {
                 n.armTries++;
                 n.lastArmAtMs = now;
             }
+            // 僵尸为不死族：白天露天会被日光点燃 → 着火掉血 → 死 → 补员，观感"忽现忽隐"。
+            // 每决策帧强制熄灭，消除自燃（bot 战斗不应被环境点燃干扰）。
+            if (le.isOnFire()) {
+                le.setFireTicks(0);
+            }
             LivingEntity foe = resolveFoe(match, server, n, now);
             if (foe != null) {
                 engage(match, server, n, (MobEntity) e, foe, now);
@@ -720,7 +725,21 @@ public final class NpcSquad {
     private double groundY(MinecraftServer server, double x, double z) {
         ServerWorld w = server.getOverworld();
         int y = w.getTopY(Heightmap.Type.WORLD_SURFACE, (int) Math.floor(x), (int) Math.floor(z));
-        return y <= w.getBottomY() ? 64 : y + 1;
+        if (y > w.getBottomY()) {
+            return y + 1;
+        }
+        // 该列无方块：±6 邻域找真实站面（Metro 虚空/低海拔区不再回退 64 高空 → bot 悬空根因）
+        double best = Double.NaN;
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                int t = w.getTopY(Heightmap.Type.WORLD_SURFACE,
+                        (int) Math.floor(x + dx), (int) Math.floor(z + dz));
+                if (t > w.getBottomY() && (Double.isNaN(best) || t > best)) {
+                    best = t;
+                }
+            }
+        }
+        return Double.isNaN(best) ? w.getBottomY() + 3 : best + 1;
     }
 
     private static String tpCmd(Npc n, double x, double y, double z, double yaw) {
