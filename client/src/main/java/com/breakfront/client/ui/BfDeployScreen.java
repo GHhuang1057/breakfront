@@ -301,17 +301,17 @@ public class BfDeployScreen extends Screen {
             } else if (!t.valid()) {
                 // 不可部署：红叉（两条对角细带）
                 int d = half - 6;
-                int t = 2; // 半厚
+                int tt = 2; // 半厚
                 BfDraw.quad(ctx,
-                        sx - d - t, sy - d + t,
-                        sx - d + t, sy - d - t,
-                        sx + d + t, sy + d - t,
-                        sx + d - t, sy + d + t, argb(BfTheme.RED, a));
+                        sx - d - tt, sy - d + tt,
+                        sx - d + tt, sy - d - tt,
+                        sx + d + tt, sy + d - tt,
+                        sx + d - tt, sy + d + tt, argb(BfTheme.RED, a));
                 BfDraw.quad(ctx,
-                        sx + d - t, sy - d - t,
-                        sx + d + t, sy - d + t,
-                        sx - d + t, sy + d + t,
-                        sx - d - t, sy + d - t, argb(BfTheme.RED, a));
+                        sx + d - tt, sy - d - tt,
+                        sx + d + tt, sy - d + tt,
+                        sx - d + tt, sy + d + tt,
+                        sx - d - tt, sy + d - tt, argb(BfTheme.RED, a));
             } else {
                 ctx.drawText(this.textRenderer, Text.literal(t.label().substring(0, 1)),
                         sx - 4, sy - 8, argb(BfTheme.TEXT, a), false);
