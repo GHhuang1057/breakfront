@@ -4,11 +4,13 @@ import com.breakfront.client.bf.BfDraw;
 import com.breakfront.client.bf.BfEasing;
 import com.breakfront.client.bf.BfGlow;
 import com.breakfront.client.bf.BfTheme;
+import com.breakfront.client.hud.TerrainOverview;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.ZoneView;
 import com.breakfront.game.Side;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
@@ -60,6 +62,18 @@ public class BfDeployScreen extends Screen {
     // 渲染期缓存（供鼠标命中检测）
     private int mapX, mapY, mapW, mapH;
     private double mapScale, mapOffX, mapOffY;
+
+    // 地图视口：基础 fit（基于据点包围盒自算）+ 用户平移/缩放
+    private double baseScale, baseOffX, baseOffY; // fit 基线（无平移/缩放）
+    private double panX, panY;                     // 拖拽平移（px）
+    private double zoom = 1.0;                      // 滚轮缩放倍率
+    private int fitBx, fitBy, fitBw, fitBh;         // 复位(FIT)按钮屏幕矩形
+
+    // 拖拽状态
+    private boolean dragging = false;
+    private boolean dragMoved = false;
+    private double dragStartX, dragStartY;
+
     private final List<int[]> targetScreen = new ArrayList<>(); // {sx, sy, half, index}
     private final List<DeployTarget> targets = new ArrayList<>();
     private int deployBx, deployBy, deployBw, deployBh;
@@ -192,7 +206,7 @@ public class BfDeployScreen extends Screen {
                     valid, owner.ordinal(), defContested));
         }
 
-        // 计算世界坐标范围并 fit 到面板
+        // 计算世界坐标范围并 fit 到面板（基线，不含平移/缩放）
         double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE;
         double minZ = Double.MAX_VALUE, maxZ = -Double.MAX_VALUE;
         for (DeployTarget t : targets) {
@@ -207,11 +221,24 @@ public class BfDeployScreen extends Screen {
         int availH = h - margin * 2 - 10;
         double scale = Math.min(availW / spanX, availH / spanZ);
         double drawW = spanX * scale, drawH = spanZ * scale;
-        this.mapScale = scale;
-        this.mapOffX = x + (w - drawW) / 2 - minX * scale;
-        this.mapOffY = y + 24 + (availH - drawH) / 2 - minZ * scale;
+        this.baseScale = scale;
+        this.baseOffX = x + (w - drawW) / 2 - minX * scale;
+        this.baseOffY = y + 24 + (availH - drawH) / 2 - minZ * scale;
 
-        // 网格
+        // 合成用户平移/缩放 → 有效变换（与 TerrainOverview 共用同一映射）
+        double effScale = baseScale * zoom;
+        double effOffX = baseOffX + panX;
+        double effOffY = baseOffY + panY;
+        this.mapScale = effScale;
+        this.mapOffX = effOffX;
+        this.mapOffY = effOffY;
+
+        // 地形俯瞰底图（先画真实地形，再叠拓扑）
+        ClientWorld world = this.client != null ? this.client.world : null;
+        TerrainOverview.draw(ctx, world, x, y + 24, w, h - 34,
+                effOffX, effOffY, effScale, TerrainOverview.DEFAULT_MAX_CELLS);
+
+        // 网格（覆盖于地形之上，战术感）
         int gridN = 8;
         for (int i = 0; i <= gridN; i++) {
             int gx = (int) (x + margin + (w - margin * 2) * i / gridN);
@@ -220,11 +247,20 @@ public class BfDeployScreen extends Screen {
             ctx.fill(x + margin, gy, x + w - margin, gy + 1, 0x14FFFFFF);
         }
 
-        // 目标方块
+        // 复位(FIT)按钮：回到初始 fit
+        fitBw = 52; fitBh = 20;
+        fitBx = x + w - fitBw - 10; fitBy = y + 8;
+        boolean fitHov = mouseIn(fitBx, fitBy, fitBw, fitBh);
+        BfDraw.fill(ctx, fitBx, fitBy, fitBw, fitBh, argb(fitHov ? 0xE6303E50 : BfTheme.PANEL, a));
+        BfDraw.border(ctx, fitBx, fitBy, fitBw, fitBh, argb(fitHov ? BfTheme.TEAL : BfTheme.PANEL_LINE, a));
+        ctx.drawText(this.textRenderer, Text.literal("FIT"), fitBx + 14, fitBy + 5,
+                argb(fitHov ? BfTheme.TEAL : BfTheme.TEXT_DIM, a), false);
+
+        // 目标方块（坐标换算统一走 TerrainOverview.worldToScreen，与地形底图严格对齐）
         for (int i = 0; i < targets.size(); i++) {
             DeployTarget t = targets.get(i);
-            int sx = (int) (mapOffX + t.wx() * scale);
-            int sy = (int) (mapOffY + t.wz() * scale);
+            int sx = TerrainOverview.worldToScreenX(effOffX, effScale, t.wx());
+            int sy = TerrainOverview.worldToScreenZ(effOffY, effScale, t.wz());
             boolean sel = i == selectedDeployIndex && respawnMode;
             int size;
             int col;
@@ -239,12 +275,20 @@ public class BfDeployScreen extends Screen {
                 } else {
                     col = BfTheme.BLUE;  // 守方/防守
                 }
-                size = (int) Math.max(24, Math.min(90, 26 * scale * 2));
+                size = (int) Math.max(24, Math.min(90, 26 * effScale * 2));
             }
             int half = size / 2;
+            // 可部署点高亮：合法=青白描边 + 辉光；非法（争夺/敌方）=红叉或灰
+            if (t.valid()) {
+                BfGlow.rect(ctx, sx - half - 2, sy - half - 2, size + 4, size + 4,
+                        BfTheme.TEAL & 0xFFFFFF, 70, 6);
+                BfDraw.border(ctx, sx - half - 2, sy - half - 2, size + 4, size + 4,
+                        argb(BfTheme.TEAL, a));
+            }
             // 底色（半透明）
-            BfDraw.fill(ctx, sx - half, sy - half, size, size, argb(col, t.valid() || t.kind() == 0 ? 60 : 26));
-            // 高亮 / 选中辉光
+            BfDraw.fill(ctx, sx - half, sy - half, size, size,
+                    argb(col, t.valid() || t.kind() == 0 ? 60 : 26));
+            // 选中辉光
             if (sel) {
                 BfGlow.rect(ctx, sx - half, sy - half, size, size, col & 0xFFFFFF, 110, 8);
             }
@@ -254,6 +298,20 @@ public class BfDeployScreen extends Screen {
             if (t.kind() == 0) {
                 // 出生区画菱形标记
                 BfDraw.diamond(ctx, sx, sy, half - 4, argb(BfTheme.TEAL, a));
+            } else if (!t.valid()) {
+                // 不可部署：红叉（两条对角细带）
+                int d = half - 6;
+                int t = 2; // 半厚
+                BfDraw.quad(ctx,
+                        sx - d - t, sy - d + t,
+                        sx - d + t, sy - d - t,
+                        sx + d + t, sy + d - t,
+                        sx + d - t, sy + d + t, argb(BfTheme.RED, a));
+                BfDraw.quad(ctx,
+                        sx + d - t, sy - d - t,
+                        sx + d + t, sy - d + t,
+                        sx - d + t, sy + d + t,
+                        sx - d - t, sy + d - t, argb(BfTheme.RED, a));
             } else {
                 ctx.drawText(this.textRenderer, Text.literal(t.label().substring(0, 1)),
                         sx - 4, sy - 8, argb(BfTheme.TEXT, a), false);
@@ -269,7 +327,11 @@ public class BfDeployScreen extends Screen {
             targetScreen.add(new int[]{sx, sy, half, i});
         }
 
-        // 玩家坐标
+        // 玩家坐标菱形 + 文本（世界实时坐标，随平移/缩放移动）
+        int px = TerrainOverview.worldToScreenX(effOffX, effScale, playerX());
+        int pz = TerrainOverview.worldToScreenZ(effOffY, effScale, playerZ());
+        BfGlow.rect(ctx, px - 5, pz - 5, 10, 10, BfTheme.TEAL & 0xFFFFFF, 60, 5);
+        BfDraw.diamond(ctx, px, pz, 5, argb(BfTheme.TEAL, a));
         String me = String.format("你 (%.0f, %.0f)", playerX(), playerZ());
         ctx.drawText(this.textRenderer, Text.literal(me), x + 14, y + h - 18,
                 argb(BfTheme.TEXT_DIM, a), false);
@@ -414,18 +476,21 @@ public class BfDeployScreen extends Screen {
                 doObserve();
                 return true;
             }
-            // 俯瞰图目标命中
-            for (int[] hit : targetScreen) {
-                int sx = hit[0], sy = hit[1], half = hit[2], idx = hit[3];
-                if (mx >= sx - half && mx <= sx + half && my >= sy - half && my <= sy + half) {
-                    if (idx < targets.size() && targets.get(idx).valid()) {
-                        selectedDeployIndex = idx;
-                    }
-                    return true;
-                }
-            }
-        } else {
-            // COUNTDOWN 不处理俯瞰图点击
+        }
+
+        // FIT 复位按钮
+        if (mouseIn(fitBx, fitBy, fitBw, fitBh, mx, my)) {
+            resetView();
+            return true;
+        }
+
+        // 地图面板：按下即进入拖拽（拖拽=平移，松开未移动=选中目标）
+        if (inMapPanel(mx, my)) {
+            dragging = true;
+            dragMoved = false;
+            dragStartX = mouseX;
+            dragStartY = mouseY;
+            return true;
         }
 
         // 兵种卡
@@ -438,6 +503,81 @@ public class BfDeployScreen extends Screen {
         if (mouseIn(wpNextX, wpNextY, wpBtnH, wpBtnH, mx, my)) { cycleWeapon(1); return true; }
 
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (dragging) {
+            dragging = false;
+            if (!dragMoved && respawnMode) {
+                // 未拖动 → 视为点击：选中命中可部署目标
+                int mx = (int) mouseX, my = (int) mouseY;
+                for (int[] hit : targetScreen) {
+                    int sx = hit[0], sy = hit[1], half = hit[2], idx = hit[3];
+                    if (mx >= sx - half && mx <= sx + half && my >= sy - half && my <= sy + half) {
+                        if (idx < targets.size() && targets.get(idx).valid()) {
+                            selectedDeployIndex = idx;
+                        }
+                        return true;
+                    }
+                }
+            }
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button,
+                                double deltaX, double deltaY) {
+        if (!dragging) {
+            return false;
+        }
+        panX += deltaX;
+        panY += deltaY;
+        if (Math.abs(mouseX - dragStartX) + Math.abs(mouseY - dragStartY) > 3) {
+            dragMoved = true;
+        }
+        clampPan();
+        return true;
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY,
+                                 double horizontalAmount, double verticalAmount) {
+        int mx = (int) mouseX, my = (int) mouseY;
+        if (!inMapPanel(mx, my)) {
+            return false;
+        }
+        // 以光标为锚缩放：保持光标下世界点不动
+        double wx = TerrainOverview.screenToWorldX(mapOffX, mapScale, mx);
+        double wz = TerrainOverview.screenToWorldZ(mapOffY, mapScale, my);
+        zoom *= (verticalAmount > 0 ? 1.1 : 0.9);
+        zoom = clamp(zoom, 0.35, 3.5);
+        double newScale = baseScale * zoom;
+        panX = (mx - wx * newScale) - baseOffX;
+        panY = (my - wz * newScale) - baseOffY;
+        clampPan();
+        return true;
+    }
+
+    /** 回到初始 fit（去掉平移/缩放）。 */
+    private void resetView() {
+        panX = 0;
+        panY = 0;
+        zoom = 1.0;
+    }
+
+    /** 约束平移，避免地图整体移出面板（至少保留约 10% 可见）。 */
+    private void clampPan() {
+        double limX = mapW * 0.9;
+        double limY = mapH * 0.9;
+        panX = clamp(panX, -limX, limX);
+        panY = clamp(panY, -limY, limY);
+    }
+
+    private boolean inMapPanel(int mx, int my) {
+        return mx >= mapX && mx <= mapX + mapW && my >= mapY && my <= mapY + mapH;
     }
 
     @Override
@@ -602,6 +742,17 @@ public class BfDeployScreen extends Screen {
 
     private boolean mouseIn(int x, int y, int w, int h) {
         return mouseIn(x, y, w, h, lastMx, lastMy);
+    }
+
+    private static double clamp(double v, double lo, double hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    @Override
+    public void removed() {
+        // 切屏（LOBBY / 死亡 / 部署完成）：释放地形采样缓存，避免跨局泄漏
+        TerrainOverview.release();
+        super.removed();
     }
 
     private int myKills() {

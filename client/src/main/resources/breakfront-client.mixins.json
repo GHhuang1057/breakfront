@@ -4,7 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "InGameHudMixin",
-    "SoundManagerMixin"
+    "SoundManagerMixin",
+    "DebugHudOverlayMixin"
   ],
   "injectors": {
     "defaultRequire": 1
