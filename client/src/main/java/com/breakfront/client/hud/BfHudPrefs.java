@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * 客户端 HUD 偏好（静态、只读 config）：
  * 读取 {gameDir}/config/breakfront-client.properties，键：
- *   hud.bob   = true|false   视野视差（默认 true）
+ *   hud.bob   = true|false   视野视差（默认 false，防晕可选开）
  *   hud.shake = true|false|0..2  落地/走路抖动强度（默认 true=1.0；false/0=关闭）
  * 与 BfServerConfig 共用同一 properties 文件；带 ~5s 缓存刷新（渲染线程内读取，单线程安全）。
  */
@@ -53,7 +53,7 @@ public final class BfHudPrefs {
         } catch (IOException | RuntimeException e) {
             // 读不到：保留默认
         }
-        bobEnabled = parseBool(kv.get("hud.bob"), true);
+        bobEnabled = parseBool(kv.get("hud.bob"), false); // 默认关：晃动易晕，需在配置显式开启
         String sh = kv.get("hud.shake");
         if (sh == null) {
             shakeEnabled = true;

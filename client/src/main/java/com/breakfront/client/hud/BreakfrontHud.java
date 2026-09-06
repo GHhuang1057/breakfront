@@ -87,14 +87,14 @@ public class BreakfrontHud {
         if (phase != 1 && phase != 2) {
             return;
         }
-        // —— 视野视差（view bob）：仅 hud.bob=true 时启用，乘 0.4 削弱，单轴封顶 ~1.2px ——
+        // —— 视野视差（view bob）：仅 hud.bob=true 时启用；柔和化（乘 0.22、单轴 ≤0.7px）——
         bobDx = 0;
         bobDy = 0;
         if (BfHudPrefs.isBobEnabled() && client.player != null) {
             var b = BfViewBob.compute(client.player);
-            double k = 0.4 * BfHudPrefs.getShake();
-            bobDx = clampAbs(b.dx() * k, 1.2);
-            bobDy = clampAbs(b.dy() * k, 1.2);
+            double k = 0.22 * BfHudPrefs.getShake();
+            bobDx = clampAbs(b.dx() * k, 0.7);
+            bobDy = clampAbs(b.dy() * k, 0.7);
         }
 
         miniSize = (int) Math.min(140, sh * 0.22);

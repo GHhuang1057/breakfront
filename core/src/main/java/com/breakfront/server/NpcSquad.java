@@ -59,6 +59,8 @@ public final class NpcSquad {
         UUID foeId;         // 当前敌人（null=无）
         boolean foeIsNpc;   // 敌人是 NPC（true）还是真人玩家（false）
         long atkAtMs;       // 下次可攻击时间
+        int armTries;       // 挂枪尝试计数（selector 未命中重试上限）
+        long lastArmAtMs;   // 上次挂枪尝试时间
         // 导航 / 卡死兜底（2026-09-06 v0.7：原版导航 AI 取代 /tp 推进）
         double goalX;       // 当前导航目标 x
         double goalY;       // 当前导航目标 y
@@ -262,15 +264,11 @@ public final class NpcSquad {
         e.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
                 net.minecraft.entity.effect.StatusEffects.REGENERATION, 240000, 1, false, false));
         // 兵种主武器挂主手（客户端 BotSoldierRenderer 会画在史蒂夫士兵手上）。
-        // 用指令 NBT 语法（与 Kits.giveKit 同源）：1.21.1 下 NBT 标签由原版解析写入
-        // CustomData 组件，TaCZ 读取同一键位；规避 Data Component API 直写差异。
+        // 必须在实体入世后执行（selector @e 才命中），首帧未中就由 tick 自动重试补挂。
         Kits.KitSpec kit = Kits.spec(cls);
-        exec(server, String.format(
-                "replaceitem entity @e[tag=%s%s,limit=1] weapon.mainhand "
-                        + "tacz:modern_kinetic_gun{GunId:\"tacz:%s\",GunCurrentAmmoCount:%d} 1",
-                TAG_PREFIX, sid, kit.gunId(), kit.magSize()));
         e.setPosition(p.x, p.y, p.z);
         world.spawnEntity(e);
+        armNpc(server, e, kit);
 
         Npc n = new Npc();
         n.side = side;
@@ -280,9 +278,29 @@ public final class NpcSquad {
         n.lastX = p.x;
         n.lastY = p.y;
         n.lastZ = p.z;
+        n.armTries = 1;
+        n.lastArmAtMs = System.currentTimeMillis();
         units.put(n.id, n);
         BreakfrontServer.LOGGER.info("[Breakfront] npc {} spawned ({} / {} , {}) alive={}",
                 label + " AI-" + sid, side.labelCn, cls, kit.gunId(), units.size());
+    }
+
+    /** 给指定 NPC 主手挂 TaCZ 枪（replaceitem 用唯一 tag 选择；入世后再调）。 */
+    private static void armNpc(MinecraftServer server, net.minecraft.entity.LivingEntity e, Kits.KitSpec kit) {
+        String sid = null;
+        for (String tag : e.getCommandTags()) {
+            if (tag.startsWith(TAG_PREFIX)) {
+                sid = tag.substring(TAG_PREFIX.length());
+                break;
+            }
+        }
+        if (sid == null) {
+            return;
+        }
+        exec(server, String.format(
+                "replaceitem entity @e[tag=%s%s,limit=1] weapon.mainhand "
+                        + "tacz:modern_kinetic_gun{GunId:\"tacz:%s\",GunCurrentAmmoCount:%d} 1",
+                TAG_PREFIX, sid, kit.gunId(), kit.magSize()));
     }
 
     /** 出生点：以阵营出生区中心为基准做 ±9m 随机散布，避免整队叠单点；
@@ -292,14 +310,22 @@ public final class NpcSquad {
     private Vec3d spawnPos(ServerMatch match, MinecraftServer server, Side side) {
         double[] s = match.spawnsFor(side, server.getOverworld());
         double baseY = s[1];
-        for (int attempt = 0; attempt < 6; attempt++) {
+        for (int attempt = 0; attempt < 10; attempt++) {
             double ang = SPAWN_RNG.nextDouble() * Math.PI * 2.0;
-            double rad = 1.0 + SPAWN_RNG.nextDouble() * 9.0;
+            // 环带 2..20m 散布（低海拔地图地面可为负值：阈值为世界底，勿用 >0 判定）
+            double rad = 2.0 + SPAWN_RNG.nextDouble() * 18.0;
             double tx = s[0] + Math.cos(ang) * rad;
             double tz = s[2] + Math.sin(ang) * rad;
             double g = groundY(server, tx, tz);
-            if (Math.abs(g - baseY) <= 4.0 && g > 0) {
+            if (Math.abs(g - baseY) <= 5.0 && g > -66.0) {
                 return new Vec3d(tx, g + 0.3, tz);
+            }
+        }
+        // 全失败：以中心向 +x 找可站柱（防叠点）
+        for (int d = 4; d <= 40; d += 4) {
+            double g = groundY(server, s[0] + d, s[2]);
+            if (g > -66.0) {
+                return new Vec3d(s[0] + d, g + 0.3, s[2]);
             }
         }
         return new Vec3d(s[0], baseY, s[2]);
@@ -359,6 +385,13 @@ public final class NpcSquad {
             // 抑制原版僵尸自带的追击/挥击（保持只走我们的策略）：清掉它的目标选择器结果
             if (e instanceof MobEntity mob) {
                 mob.setTarget(null);
+            }
+            // 补挂枪兜底：selector 首帧未命中/被清空等导致主手空 → 每 ≥1.5s 重试（上限 6）
+            if (n.armTries < 6 && le.getMainHandStack().isEmpty()
+                    && now - n.lastArmAtMs > 1500) {
+                armNpc(server, le, Kits.spec(n.cls));
+                n.armTries++;
+                n.lastArmAtMs = now;
             }
             LivingEntity foe = resolveFoe(match, server, n, now);
             if (foe != null) {

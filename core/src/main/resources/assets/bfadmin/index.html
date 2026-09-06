@@ -400,6 +400,7 @@ async function mapLoad(keepUndo){
 
 /* 下发编辑操作（操作前缓存完整 JSON，用于撤销） */
 async function applyEdit(op, fields){
+  if(!TOKEN){ expireAuth(); return {ok:false, code:401}; }
   if(mapState.raw) undoStack.push(JSON.parse(JSON.stringify(mapState.raw)));
   if(undoStack.length>80) undoStack.shift();
   const r = await sendEdit(op, fields, false);
@@ -408,6 +409,7 @@ async function applyEdit(op, fields){
   return r;
 }
 async function sendEdit(op, fields, doReload){
+  if(!TOKEN){ expireAuth(); return {ok:false, code:401}; }
   const payload = Object.assign({}, fields||{});
   const body = {token:TOKEN, op:op, name:op, side:(fields&&fields.side)||''};
   for(const k in fields) body[k]=fields[k];                   // 平铺字段，兼容两种服务端解析方式
