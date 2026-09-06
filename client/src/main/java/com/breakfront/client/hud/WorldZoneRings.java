@@ -450,7 +450,7 @@ public final class WorldZoneRings {
             double[] b = bounds(z);
             // 中心 + 四边各 pe 个点（顺时针）
             double[] g = new double[1 + 4 * pe];
-            g[0] = groundYAt(world, z.worldX(), z.worldZ());
+            g[0] = centerGround(world, z);
             double[][][] edges = {
                     {{b[0], b[1]}, {b[2], b[1]}},
                     {{b[2], b[1]}, {b[2], b[3]}},
@@ -467,8 +467,37 @@ public final class WorldZoneRings {
                     g[1 + e * pe + k] = groundYAt(world, sx, sz);
                 }
             }
+            // 领地边带不爬高层结构（屋顶/高台）：高于中心层+2 的点夹到中心层，
+            // 保证室内/地下时整圈领地贴「玩家所在连续层」而非浮在最高层天花板。
+            if (!Double.isNaN(g[0])) {
+                for (int k = 1; k < g.length; k++) {
+                    if (!Double.isNaN(g[k]) && g[k] > g[0] + 2.0) {
+                        g[k] = g[0];
+                    }
+                }
+            }
             ground[i] = g;
         }
+    }
+
+    /**
+     * 领地中心站面：优先「玩家所在连续层」（玩家在该领地内时）——室内/地下建筑
+     * 中领地贴玩家脚下那层；玩家在领地外则取该处最高地表（远观整体高度）。
+     */
+    private static double centerGround(ClientWorld world, ZoneView z) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        double base = groundYAt(world, z.worldX(), z.worldZ());
+        var p = mc.player;
+        if (p == null) {
+            return base;
+        }
+        boolean inside = Math.abs(p.getX() - z.worldX()) <= z.radius() + 1.5
+                && Math.abs(p.getZ() - z.worldZ()) <= z.radius() + 1.5;
+        if (!inside) {
+            return base;
+        }
+        double pg = groundYAt(world, p.getX(), p.getZ());
+        return Double.isNaN(pg) ? base : Math.min(base, pg);
     }
 
     /** 客户端本地地表 Y（最高实体阻挡方块顶 +1）；区块未加载返回 NaN（调用方兜底）。 */
