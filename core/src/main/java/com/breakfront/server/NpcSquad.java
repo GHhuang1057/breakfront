@@ -249,6 +249,7 @@ public final class NpcSquad {
         // 名字牌不显示：头顶阵营标记由客户端 FriendlyHostileMarks 接管（蓝=友/红=敌，穿墙语义不同）
         e.setCustomNameVisible(false);
         e.setAiDisabled(false);     // v0.7：启用原版导航 AI，移动交给 getNavigation()
+        e.setPersistent(true);      // 防距离 despawn（玩家离出生区>128 格时 mob 被清→整批消失再补员）
         e.setNoGravity(false);      // 让导航按地形行走（落体/爬台阶正常）
         e.setSilent(true);          // 不出僵尸声（配合客户端去原版音效）
         e.addCommandTag("breakfront.npc");
@@ -285,22 +286,9 @@ public final class NpcSquad {
                 label + " AI-" + sid, side.labelCn, cls, kit.gunId(), units.size());
     }
 
-    /** 给指定 NPC 主手挂 TaCZ 枪（replaceitem 用唯一 tag 选择；入世后再调）。 */
+    /** 给指定 NPC 主手挂 TaCZ 枪（Java API 直接置主手；spawnEntity 后调用）。 */
     private static void armNpc(MinecraftServer server, net.minecraft.entity.LivingEntity e, Kits.KitSpec kit) {
-        String sid = null;
-        for (String tag : e.getCommandTags()) {
-            if (tag.startsWith(TAG_PREFIX)) {
-                sid = tag.substring(TAG_PREFIX.length());
-                break;
-            }
-        }
-        if (sid == null) {
-            return;
-        }
-        exec(server, String.format(
-                "replaceitem entity @e[tag=%s%s,limit=1] weapon.mainhand "
-                        + "tacz:modern_kinetic_gun{GunId:\"tacz:%s\",GunCurrentAmmoCount:%d} 1",
-                TAG_PREFIX, sid, kit.gunId(), kit.magSize()));
+        Kits.equipGun(e, kit);
     }
 
     /** 出生点：以阵营出生区中心为基准做 ±9m 随机散布，避免整队叠单点；

@@ -1,8 +1,18 @@
 package com.breakfront.server;
 
 import com.breakfront.weapon.WeaponCatalog;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.Identifier;
 
 import java.util.Map;
 
@@ -61,7 +71,9 @@ public final class Kits {
 
     /**
      * 套件发放：按玩家实际「兵种 + 主武器」发放（无选定枪则用兵种默认枪）。
-     * 主武器强制上主手（满弹匣），备弹进背包（指令自动按堆叠上限拆分）。
+     * 主武器强制上主手（满弹匣），备弹进背包。
+     * 2026-09-06：改用 Java API 直接置物（1.21.1 命令层 legacy {NBT} 物品语法已废弃，
+     * replaceitem/give 带 GunId NBT 会解析失败 trailing data → 玩家/bot 空手根因）。
      */
     public static void giveKit(ServerMatch match, MinecraftServer server, ServerPlayerEntity player) {
         String classId = match.teams().classOf(player.getUuid());
@@ -70,16 +82,51 @@ public final class Kits {
         String gunId = WeaponCatalog.isGunAllowed(classId, chosen)
                 ? chosen : WeaponCatalog.defaultGun(classId);
         KitSpec spec = GUNS.getOrDefault(gunId, GUNS.get(WeaponCatalog.defaultGun(classId)));
-        String name = player.getGameProfile().getName();
+        equipGun(player, spec);
+        giveAmmo(player, spec);
+    }
 
-        // 主手 = 主武器（满弹匣）——replaceitem 无条件覆盖，保证每次发放可预期
-        String gunNbt = String.format("{GunId:\"tacz:%s\",GunCurrentAmmoCount:%d}",
-                spec.gunId(), spec.magSize());
-        exec(server, String.format("replaceitem entity %s weapon.mainhand "
-                + "tacz:modern_kinetic_gun%s 1", name, gunNbt));
-        // 备弹（弹药 id 不带 tacz: 前缀时同样补全；give 超过堆叠上限会自动拆组）
-        exec(server, String.format("give %s tacz:ammo{AmmoId:\"tacz:%s\"} %d",
-                name, spec.ammoId(), spec.spareAmmo()));
+    /**
+     * 主手挂枪（LivingEntity：真人玩家与 NPC bot 通用）。
+     * 运行时按注册表取 TaCZ 物品，NBT 经 DataComponent CUSTOM_DATA 写入 ——
+     * 与 TaCZ 读取键（GunId / GunCurrentAmmoCount）一致，且无任何编译期依赖。
+     */
+    public static void equipGun(LivingEntity le, KitSpec spec) {
+        if (le == null || spec == null) {
+            return;
+        }
+        Item gun = Registries.ITEM.get(Identifier.tryParse("tacz:modern_kinetic_gun"));
+        if (gun == null || gun == Items.AIR) {
+            return; // TaCZ 未装载：静默（bot 走近战路径兜底）
+        }
+        ItemStack st = new ItemStack(gun);
+        NbtCompound tg = new NbtCompound();
+        tg.putString("GunId", "tacz:" + spec.gunId());
+        tg.putInt("GunCurrentAmmoCount", spec.magSize());
+        st.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tg));
+        le.equipStack(EquipmentSlot.MAINHAND, st);
+    }
+
+    /** 备弹入背包（按物品堆叠上限拆分，背包满则丢弃不阻塞）。 */
+    public static void giveAmmo(ServerPlayerEntity player, KitSpec spec) {
+        if (player == null || spec == null || spec.spareAmmo() <= 0) {
+            return;
+        }
+        Item ammo = Registries.ITEM.get(Identifier.tryParse("tacz:ammo"));
+        if (ammo == null || ammo == Items.AIR) {
+            return;
+        }
+        int left = spec.spareAmmo();
+        int max = Math.max(1, Math.min(64, ammo.getMaxCount()));
+        while (left > 0) {
+            int n = Math.min(max, left);
+            ItemStack a = new ItemStack(ammo, n);
+            NbtCompound ac = new NbtCompound();
+            ac.putString("AmmoId", "tacz:" + spec.ammoId());
+            a.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(ac));
+            player.getInventory().offerOrDrop(a);
+            left -= n;
+        }
     }
 
     /** 服务端指令执行（与 ServerMatch.exec 同实现，避免跨类私有访问）。 */
