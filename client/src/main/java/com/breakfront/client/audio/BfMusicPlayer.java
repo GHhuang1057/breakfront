@@ -170,7 +170,9 @@ public final class BfMusicPlayer {
 
     /** JLayer 解码 mp3 → PCM16 LE（后台线程）。 */
     private static Decoded decodeMp3(Path file) throws Exception {
-        try (Bitstream bs = new Bitstream(new BufferedInputStream(new FileInputStream(file.toFile())))) {
+        Bitstream bs = null;
+        try {
+            bs = new Bitstream(new BufferedInputStream(new FileInputStream(file.toFile())));
             Decoder dec = new Decoder();
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(1 << 20);
             int freq = -1;
@@ -195,6 +197,13 @@ public final class BfMusicPlayer {
                 throw new IOException("no audio frame decoded");
             }
             return new Decoded(out.toByteArray(), freq, channels);
+        } finally {
+            if (bs != null) {
+                try {
+                    bs.close();
+                } catch (IOException ignored) {
+                }
+            }
         }
     }
 
