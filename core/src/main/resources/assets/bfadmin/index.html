@@ -78,6 +78,11 @@
     <div class="hint" style="margin-bottom:14px">输入服务器管理员密码（admin.password）</div>
     <input type="password" id="pw" placeholder="管理员密码" autocomplete="off">
     <button class="btn primary" onclick="login()">登 录</button>
+    <div class="sep" style="margin:14px 0;border-top:1px solid rgba(255,255,255,.08)"></div>
+    <div class="hint" style="margin-bottom:8px">或使用 <b>Geekhonize 账号</b>（跨作品，需 admin 角色）</div>
+    <input type="text" id="gx-user" placeholder="Geekhonize 用户名" autocomplete="off" style="margin-bottom:6px">
+    <input type="password" id="gx-pass" placeholder="密码" autocomplete="off">
+    <button class="btn" onclick="geoLogin()" style="margin-top:6px">Geekhonize 登 录</button>
     <div class="hint" id="lgmsg"></div>
   </div>
 
@@ -232,6 +237,18 @@ async function login(){
   if (r.ok){ TOKEN = r.token; localStorage.setItem('bfadmin_token', TOKEN);
     $('lgmsg').textContent='登录成功'; authOk(); showConsole(); poll();
   } else { $('lgmsg').textContent = r.msg || '失败'; }
+}
+
+/** Geekhonize 账号登录（管理台代理，需 Auth 账号含 admin 角色）。 */
+async function geoLogin(){
+  const u=$('gx-user').value.trim(), p=$('gx-pass').value;
+  if(!u||!p){ $('lgmsg').textContent='请输入账号与密码'; return; }
+  const r = await api('/bfadmin/api/authlogin', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username:u, password:p})});
+  if (r.ok){ TOKEN = r.token; localStorage.setItem('bfadmin_token', TOKEN);
+    $('lgmsg').textContent = r.msg || '登录成功'; authOk(); showConsole(); poll();
+  } else { $('lgmsg').textContent = r.msg || '登录失败'; }
 }
 
 async function cmd(name){

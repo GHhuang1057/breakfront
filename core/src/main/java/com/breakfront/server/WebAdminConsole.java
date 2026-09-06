@@ -119,6 +119,8 @@ public final class WebAdminConsole {
             String m = ex.getRequestMethod();
             if (path.equals("/bfadmin/api/login") && m.equalsIgnoreCase("POST")) {
                 login(ex);
+            } else if (path.equals("/bfadmin/api/authlogin") && m.equalsIgnoreCase("POST")) {
+                authLogin(ex);
             } else if (path.equals("/bfadmin/api/status") && m.equalsIgnoreCase("GET")) {
                 status(ex);
             } else if (path.equals("/bfadmin/api/map") && m.equalsIgnoreCase("GET")) {
@@ -144,6 +146,28 @@ public final class WebAdminConsole {
     }
 
     // ================= API =================
+
+    /** Geekhonize 账号登录（管理台代理）：Auth /login → roles 含 admin 才发管理会话。 */
+    private static void authLogin(HttpExchange ex) throws IOException {
+        String body = readBody(ex);
+        String user = quoted(body, "username");
+        String pw = quoted(body, "password");
+        if (user == null || pw == null) {
+            json(ex, 400, "{\"ok\":false,\"msg\":\"缺少用户名或密码\"}");
+            return;
+        }
+        AuthBridge.LoginResult lr = AuthBridge.login(user, pw);
+        if (!lr.ok() || !lr.roles().contains("admin")) {
+            json(ex, 200, "{\"ok\":false,\"msg\":\"" + (lr.ok()
+                    ? "该账号无管理权限（需 admin 角色）" : "登录失败：账号或密码错误") + "\"}");
+            return;
+        }
+        String token = randomToken();
+        TOKENS.put(token, System.currentTimeMillis());
+        saveTokens();
+        json(ex, 200, "{\"ok\":true,\"token\":\"" + token
+                + "\",\"msg\":\"Geekhonize 管理员 " + esc(lr.username()) + " 已登录\"}");
+    }
 
     private static void login(HttpExchange ex) throws IOException {
         String body = readBody(ex);

@@ -93,6 +93,37 @@ public final class BreakfrontServer {
                     }
                 }));
 
+        // GeoAuth：玩家提交 Geekhonize 令牌绑定账号（防离线服自报名冒名）。
+        // HTTP 校验放 IO 线程池（不阻塞 netty/主线程），结果回主线程执行绑定并回执。
+        ServerPlayNetworking.registerGlobalReceiver(com.breakfront.net.AuthLoginPayload.ID,
+                (payload, context) -> {
+                    ServerPlayerEntity p = context.player();
+                    String tok = payload.token() == null ? "" : payload.token().trim();
+                    if (p == null || tok.isEmpty()) {
+                        // 空令牌 = 解除本地绑定
+                        context.player().server.execute(() -> {
+                            var m = match();
+                            if (m != null) {
+                                m.unbindGeo(context.player().getUuid());
+                            }
+                            sendAuthResult(context.player(), 1, true, "", "", "已注销本地账号绑定");
+                        });
+                        return;
+                    }
+                    java.util.concurrent.CompletableFuture
+                            .supplyAsync(() -> AuthBridge.me(tok))
+                            .thenAccept(res -> p.server.execute(() -> {
+                                var m = match();
+                                if (m != null && res.ok()) {
+                                    m.bindGeo(p.getUuid(), res.username(), res.roles());
+                                }
+                                sendAuthResult(p, 0, res.ok(), res.username(),
+                                        String.join(",", res.roles()),
+                                        res.ok() ? "已绑定 Geekhonize 账号"
+                                                : "令牌校验失败：" + res.msg());
+                            }));
+                });
+
         // M8：管理员登录（C2S）——校验通过建立会话并回发结果；不提升 op
         ServerPlayNetworking.registerGlobalReceiver(com.breakfront.net.AdminLoginPayload.ID,
                 (payload, context) -> context.player().server.execute(() -> {
@@ -198,6 +229,14 @@ public final class BreakfrontServer {
 
     public static ServerMatch match() {
         return match;
+    }
+
+    private static void sendAuthResult(ServerPlayerEntity p, int op, boolean ok,
+                                       String user, String roles, String msg) {
+        if (p != null && p.networkHandler != null) {
+            ServerPlayNetworking.send(p,
+                    new com.breakfront.net.AuthResultPayload(op, ok, user, roles, msg));
+        }
     }
 
     /** 命中反馈发送（服务端线程）。kind: 0=命中 2=击杀。 */

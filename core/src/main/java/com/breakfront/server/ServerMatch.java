@@ -804,6 +804,9 @@ public final class ServerMatch {
     /** 玩家最后被救援时间戳（防抖，避免下坠途中反复瞬移）。 */
     private final java.util.Map<java.util.UUID, Long> lastRescueAt = new java.util.HashMap<>();
 
+    /** Geekhonize 账号绑定：UUID -> [username, rolesCsv]（离线服防自报名冒名）。 */
+    private final java.util.Map<java.util.UUID, String[]> geoBinds = new java.util.HashMap<>();
+
     /** 掉出世界救援（2026-09-05 v3 根治版）：只认「低于世界建造底部 +2」的真·掉出世界。
      *  判据 = getBottomY()+2（1.21.1 = -62）——平坦/低海拔地图的地面（如 y≈-60 超级平坦层）
      *  完全不受影响，任何真实实体表面行走都不会被拉回（此前写死 y<-10 把低海拔地图当虚空，
@@ -951,6 +954,28 @@ public final class ServerMatch {
         return autostart;
     }
 
+    // ---------- Geekhonize 账号绑定 ----------
+
+    public void bindGeo(java.util.UUID id, String username, java.util.List<String> roles) {
+        geoBinds.put(id, new String[]{username, String.join(",", roles)});
+    }
+
+    public void unbindGeo(java.util.UUID id) {
+        geoBinds.remove(id);
+    }
+
+    /** 绑定的 Geekhonize 用户名（未绑定返回 null）。 */
+    public String geoName(java.util.UUID id) {
+        String[] b = geoBinds.get(id);
+        return b == null ? null : b[0];
+    }
+
+    /** 绑定角色是否含 admin（管理权限凭证）。 */
+    public boolean geoAdmin(java.util.UUID id) {
+        String[] b = geoBinds.get(id);
+        return b != null && b[1].contains("admin");
+    }
+
     public void setAutostart(boolean on) {
         autostart = on;
         if (!on) {
@@ -1080,6 +1105,10 @@ public final class ServerMatch {
                         } catch (NumberFormatException ignored) {
                             // 保留默认
                         }
+                    } else if (k.equals("auth.endpoint")) {
+                        if (!v.isBlank()) {
+                            AuthBridge.endpoint = v.trim();
+                        }
                     } else if (k.equals("spawn.attacker") || k.equals("spawn.defender")) {
                         int ci = v.indexOf(',');
                         if (ci > 0) {
@@ -1112,6 +1141,8 @@ public final class ServerMatch {
                     "# 管理员会话（M8）：密码与会话有效期（秒），/bfs 与 /bf admin goto 需此会话",
                     "admin.password=" + AdminService.password,
                     "admin.timeout=" + AdminService.timeoutSecs,
+                    "# Geekhonize Auth 端点（Java core AuthBridge 校验玩家/管理台令牌）",
+                    "auth.endpoint=" + AuthBridge.endpoint,
                     "# 出生点覆盖（/bf spawns set 或 Web 管理端写）：x,z",
                     "spawn.attacker=" + spawnKey(attackerSpawn),
                     "spawn.defender=" + spawnKey(defenderSpawn)) + "\n",
