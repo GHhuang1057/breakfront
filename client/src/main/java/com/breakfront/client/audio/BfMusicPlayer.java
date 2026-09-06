@@ -201,7 +201,7 @@ public final class BfMusicPlayer {
             if (bs != null) {
                 try {
                     bs.close();
-                } catch (IOException ignored) {
+                } catch (Exception ignored) {
                 }
             }
         }
