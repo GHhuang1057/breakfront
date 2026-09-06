@@ -558,6 +558,11 @@ public class BreakfrontMainMenu extends Screen {
         startFlow("ALL-OUT WARFARE");
     }
 
+    /** Geekhonize 账号：登录/注册/查看当前账号（已登录展示在菜单即用）。 */
+    private void openAccount() {
+        client.setScreen(new BfGeoLoginScreen(this));
+    }
+
     private void startFlow(String title) {
         flowTitle = title;
         // 启动检查已完成且无阻塞 → 直接连（部署不重复检查）

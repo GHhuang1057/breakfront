@@ -258,7 +258,8 @@ async fn root() -> Json<serde_json::Value> {
             "POST /api/v1/auth/register",
             "POST /api/v1/auth/login",
             "GET  /api/v1/auth/me",
-            "POST /api/v1/auth/logout"
+            "POST /api/v1/auth/logout",
+            "POST /api/v1/auth/change_password"
         ],
         "apps": ["breakfront", "geekhonize-portal", "sxsm"]
     }))

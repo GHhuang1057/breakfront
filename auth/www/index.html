@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geekhonize 账号中心</title>
+<style>
+  :root{
+    --bg0:#070B12; --bg1:#101A26; --panel:#0F1823; --line:#22364A;
+    --teal:#35E6D2; --text:#EAF2F8; --muted:#7E93A8; --red:#FF4A3C; --ok:#3EE88C;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%}
+  body{
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    color:var(--text);
+    background:radial-gradient(1200px 700px at 20% -10%, #12283a 0%, transparent 55%),
+               radial-gradient(900px 600px at 110% 30%, #0d2230 0%, transparent 50%),
+               linear-gradient(180deg,var(--bg0),var(--bg1));
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+  }
+  header{width:100%; max-width:980px; padding:30px 20px 6px; display:flex; align-items:baseline; gap:14px}
+  header .logo{font-size:20px; letter-spacing:2px; color:var(--teal); font-weight:600}
+  header .logo b{color:var(--text); font-weight:300}
+  header .sub{color:var(--muted); font-size:12px; letter-spacing:1px}
+  main{width:100%; max-width:980px; flex:1; padding:26px 20px 60px}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px}
+  .card{background:rgba(15,24,35,.92); border:1px solid var(--line); border-top:3px solid var(--teal);
+        border-radius:4px; padding:22px 22px 24px; box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .card h2{font-size:14px; letter-spacing:2px; color:var(--muted); font-weight:600; margin-bottom:16px}
+  .card h2 span{color:var(--teal)}
+  label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px}
+  input{width:100%; background:#0B121C; border:1px solid var(--line); color:var(--text);
+        padding:10px 12px; font-size:14px; border-radius:3px; outline:none}
+  input:focus{border-color:var(--teal)}
+  button{margin-top:18px; width:100%; background:var(--teal); color:#06121a; border:0; cursor:pointer;
+         font-size:15px; letter-spacing:3px; padding:11px 0; border-radius:3px; font-weight:600}
+  button:hover{filter:brightness(1.12)}
+  button.ghost{background:transparent; border:1px solid var(--line); color:var(--text); letter-spacing:1px}
+  button.ghost:hover{border-color:var(--teal); color:var(--teal)}
+  button.danger{background:transparent; border:1px solid var(--red); color:var(--red)}
+  .row{display:flex; gap:10px}
+  .row button{margin-top:0}
+  .msg{margin-top:12px; font-size:13px; min-height:18px; word-break:break-all}
+  .msg.err{color:var(--red)}
+  .msg.ok{color:var(--ok)}
+  .who{display:flex; flex-wrap:wrap; gap:18px; align-items:center; margin-bottom:14px}
+  .who .avatar{width:44px; height:44px; border-radius:3px; background:var(--teal); color:#06121a;
+        display:flex; align-items:center; justify-content:center; font-weight:700; font-size:18px}
+  .who .nm{font-size:18px}
+  .who .rl{color:var(--muted); font-size:12px; margin-top:2px}
+  .who .rl i{font-style:normal; background:#0B121C; border:1px solid var(--line); padding:1px 7px;
+        border-radius:2px; margin-right:6px; color:var(--teal)}
+  .muted{color:var(--muted); font-size:12px}
+  .sep{border-top:1px solid var(--line); margin:18px 0}
+  footer{color:#51606e; font-size:11px; letter-spacing:1px; padding:14px; text-align:center; width:100%}
+  .apptag{display:inline-block; font-size:11px; color:var(--teal); border:1px solid var(--teal);
+        padding:2px 8px; border-radius:2px; margin-right:6px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">GEEKHONIZE <b>账号中心</b></div>
+  <div class="sub">ACCOUNT CENTER · 一个账号通行全部作品</div>
+</header>
+<main><div id="root" class="grid"></div></main>
+<footer>Geekhonize Auth · 跨作品统一账号服务 · 如遇问题请联系管理员</footer>
+
+<script>
+const API='/api/v1/auth/';
+const K='geohonize_portal_session';
+let S=null; // {token,user:{username,display_name,email,roles[]}}
+
+function el(tag,cls,text){const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e;}
+function card(title){const c=el('div','card'); c.appendChild(el('h2','',title)); return c;}
+function field(label,type,ph,name){const l=el('label','',label); const i=el('input',''); i.type=type||'text'; i.placeholder=ph||''; i.name=name||''; l.appendChild(i); return l;}
+function msgWrap(){const m=el('div','msg'); return m;}
+function show(w){document.getElementById('root').innerHTML=''; document.getElementById('root').appendChild(w);}
+
+async function api(path,opts){
+  const o=opts||{};
+  const h={'Content-Type':'application/json'};
+  if(S&&S.token) h['Authorization']='Bearer '+S.token;
+  try{
+    const r=await fetch(API+path,{method:o.method||'POST',headers:h,body:o.body?JSON.stringify(o.body):undefined});
+    const j=await r.json().catch(()=>({ok:false,msg:'响应解析失败 '+r.status}));
+    if(!j.ok) throw new Error(j.msg||('HTTP '+r.status));
+    return j;
+  }catch(e){
+    const err=new Error(e.message||'网络错误');
+    err.fatal=e instanceof TypeError; throw err;
+  }
+}
+
+function persist(){try{localStorage.setItem(K,JSON.stringify(S||{}));}catch(e){}}
+function restore(){try{const t=localStorage.getItem(K); if(t){const o=JSON.parse(t); if(o&&o.token&&o.user) S=o;}}catch(e){}}
+function signout(){S=null; persist(); render();}
+
+/* ---------- 视图 ---------- */
+function viewLogin(msg,err){
+  const c=card('登 录 LOGIN');
+  c.appendChild(field('用户名','text','geekhonize 用户名','u'));
+  c.appendChild(field('密码','password','••••••••','p'));
+  const m=msgWrap(); if(err)m.className='msg err';
+  const b=el('button','','登  录'); b.onclick=async()=>{
+    const u=c.querySelector('[name=u]').value.trim(), p=c.querySelector('[name=p]').value;
+    if(!u||!p){m.className='msg err';m.textContent='请输入用户名与密码';return;}
+    b.disabled=true;b.textContent='登录中…';
+    try{const j=await api('login',{body:{username:u,password:p,app:'geekhonize-portal'}});
+      S={token:j.access_token,user:j.user}; persist(); render();
+    }catch(e){m.className='msg err';m.textContent=e.message;}
+    b.disabled=false;b.textContent='登  录';
+  };
+  c.appendChild(b);
+  const b2=el('button','ghost','没有账号？注册 Geekhonize 账号');
+  b2.onclick=()=>renderRegister(); c.appendChild(b2);
+  c.appendChild(m);
+  show(c);
+}
+
+function viewRegister(msg,err){
+  const c=card('注 册 REGISTER');
+  c.appendChild(field('用户名（3-32 位字母/数字/_- .，注册后不可改）','text','geekhonize 用户名','u'));
+  c.appendChild(field('邮箱（选填，找回密码用）','text','you@example.com','e'));
+  c.appendChild(field('密码（6-128 位）','password','••••••••','p'));
+  c.appendChild(field('确认密码','password','••••••••','p2'));
+  const m=msgWrap(); if(err)m.className='msg err';
+  const b=el('button','','注册并登录');
+  b.onclick=async()=>{
+    const q=n=>c.querySelector('[name='+n+']').value;
+    const u=q('u').trim(),e=q('e').trim(),p=q('p'),p2=q('p2');
+    if(!u||!p){m.className='msg err';m.textContent='请输入用户名与密码';return;}
+    if(p!==p2){m.className='msg err';m.textContent='两次密码不一致';return;}
+    b.disabled=true;b.textContent='注册中…';
+    try{const body={username:u,password:p,app:'geekhonize-portal'};
+      if(e)body.email=e;
+      const j=await api('register',{body});
+      S={token:j.access_token,user:j.user}; persist(); render();
+    }catch(e){m.className='msg err';m.textContent=e.message;}
+    b.disabled=false;b.textContent='注册并登录';
+  };
+  c.appendChild(b);
+  const b2=el('button','ghost','← 返回登录'); b2.onclick=()=>renderLogin(); c.appendChild(b2);
+  c.appendChild(m);
+  show(c);
+}
+
+function viewAccount(){
+  const u=S.user||{};
+  const c=card('账号信息 ACCOUNT');
+  const who=el('div','who');
+  const av=el('div','avatar',(u.display_name||u.username||'?').slice(0,1).toUpperCase());
+  const nm=el('div',''); nm.appendChild(el('div','nm',u.display_name||u.username));
+  const sub=el('div',''); const rl=el('div','rl'); (u.roles||[]).forEach(r=>rl.appendChild(el('i','',r)));
+  const idl=el('div','muted','@'+u.username+(u.email?(' · '+u.email):''));
+  nm.appendChild(idl); nm.appendChild(rl); who.appendChild(av); who.appendChild(nm); c.appendChild(who);
+
+  c.appendChild(el('div','apptag','breakfront'));
+  c.appendChild(el('div','apptag','geekhonize-portal'));
+  c.appendChild(el('div','apptag','sxsm'));
+  const note=el('div','muted','以上作品均已接入 Geekhonize 账号体系');
+  note.style.marginTop='6px'; c.appendChild(note);
+
+  const d=el('div','sep'); c.appendChild(d);
+  const bL=el('button','ghost','修改密码'); bL.onclick=()=>viewChangePw(); c.appendChild(bL);
+  const bO=el('button','danger','退出登录'); bO.onclick=signout; c.appendChild(bO);
+  const bB=el('button','ghost','刷新身份'); bB.style.marginTop='10px';
+  bB.onclick=async()=>{bB.textContent='校验中…';
+    try{const j=await api('me',{method:'GET'}); const d=j.data||{};
+      S.user={username:d.username,roles:d.roles}; persist();
+      if(bB.textContent==='校验中…')bB.textContent='✓ 令牌有效（角色已刷新）';
+    }catch(e){signout(); }
+  };
+  c.appendChild(bB);
+  show(c);
+}
+
+function viewChangePw(msg,err){
+  const c=card('修改密码 CHANGE PASSWORD');
+  c.appendChild(field('当前密码','password','','o'));
+  c.appendChild(field('新密码（6-128 位）','password','','n'));
+  c.appendChild(field('确认新密码','password','','n2'));
+  const m=msgWrap(); if(err)m.className='msg err';
+  const b=el('button','','确认修改');
+  b.onclick=async()=>{
+    const q=n=>c.querySelector('[name='+n+']').value;
+    const o=q('o'),n=q('n'),n2=q('n2');
+    if(!o||!n){m.className='msg err';m.textContent='请填写完整';return;}
+    if(n!==n2){m.className='msg err';m.textContent='两次新密码不一致';return;}
+    b.disabled=true;b.textContent='提交中…';
+    try{const j=await api('change_password',{body:{old_password:o,new_password:n}});
+      m.className='msg ok';m.textContent=j.msg||'密码已更新';
+      signout(); setTimeout(render,1400);
+    }catch(e){m.className='msg err';m.textContent=e.message;}
+    b.disabled=false;b.textContent='确认修改';
+  };
+  c.appendChild(b);
+  const b2=el('button','ghost','← 返回账号'); b2.onclick=()=>render(); c.appendChild(b2);
+  c.appendChild(m);
+  show(c);
+}
+
+/* ---------- 路由 ---------- */
+function render(){ if(S&&S.token) viewAccount(); else viewLogin(); }
+function renderLogin(){ if(S&&S.token) viewAccount(); else viewLogin(); }
+function renderRegister(){ viewRegister(); }
+
+/* 首屏：若有令牌 → 后台校验有效性，失败则静默登出 */
+(async function boot(){
+  restore();
+  if(S&&S.token){
+    try{await api('me',{method:'GET'});}
+    catch(e){S=null; persist();}
+  }
+  render();
+})();
+</script>
+</body>
+</html>

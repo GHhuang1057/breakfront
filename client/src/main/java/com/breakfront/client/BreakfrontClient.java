@@ -212,6 +212,16 @@ public class BreakfrontClient implements ClientModInitializer {
                                             }
                                             return 1;
                                         }))
+                                .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("ui")
+                                        .executes(ctx -> {
+                                            var c = MinecraftClient.getInstance();
+                                            if (!(c.currentScreen
+                                                    instanceof com.breakfront.client.ui.BfGeoLoginScreen)) {
+                                                c.setScreen(new com.breakfront.client.ui.BfGeoLoginScreen(
+                                                        c.currentScreen));
+                                            }
+                                            return 1;
+                                        }))
                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("who")
                                         .executes(ctx -> {
                                             var c = MinecraftClient.getInstance();
