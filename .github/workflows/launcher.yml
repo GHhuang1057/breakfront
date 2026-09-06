@@ -19,7 +19,7 @@ jobs:
       - name: Build (Release)
         run: dotnet build launcher/Geekhonize.App/Geekhonize.App.csproj -c Release --no-restore
       - name: Publish linux-x64
-        run: dotnet publish launcher/Geekhonize.App/Geekhonize.App.csproj -c Release -r linux-x64 --self-contained true --no-restore -o dist/linux
+        run: dotnet publish launcher/Geekhonize.App/Geekhonize.App.csproj -c Release -r linux-x64 --self-contained true -o dist/linux
       - uses: actions/upload-artifact@v4
         with:
           name: geekhonize-launcher-linux-x64
@@ -37,7 +37,7 @@ jobs:
       - name: Build (Release)
         run: dotnet build launcher/Geekhonize.App/Geekhonize.App.csproj -c Release --no-restore
       - name: Publish win-x64
-        run: dotnet publish launcher/Geekhonize.App/Geekhonize.App.csproj -c Release -r win-x64 --self-contained true --no-restore -o dist/win
+        run: dotnet publish launcher/Geekhonize.App/Geekhonize.App.csproj -c Release -r win-x64 --self-contained true -o dist/win
       - uses: actions/upload-artifact@v4
         with:
           name: geekhonize-launcher-win-x64
