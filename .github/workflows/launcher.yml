@@ -74,7 +74,7 @@ jobs:
           path: dist/android/*.apk
 
   release:
-    needs: [linux, windows]
+    needs: [linux, windows, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,11 +88,19 @@ jobs:
         with:
           name: geekhonize-launcher-linux-x64
           path: art/linux
-      - name: Package zips
+      - uses: actions/download-artifact@v4
+        if: needs.android.result == 'success'
+        with:
+          name: geekhonize-launcher-android
+          path: art/android
+      - name: Package zips (+ apk if present)
         run: |
           cd art/win  && zip -qr ../../geekhonize-launcher-win-x64.zip   . && cd ../..
           cd art/linux && zip -qr ../../geekhonize-launcher-linux-x64.zip . && cd ../..
-          ls -la geekhonize-launcher-*.zip
+          if [ -d art/android ]; then
+            find art/android -name '*.apk' -exec cp {} ./geekhonize-launcher-android.apk \; 2>/dev/null || true
+          fi
+          ls -la geekhonize-launcher-*
       - name: Publish prerelease (launcher-dev-<sha>)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,7 +109,10 @@ jobs:
           TAG="launcher-dev-${SHA}"
           gh release delete "${TAG}" --yes --cleanup-tag 2>/dev/null || true
           ASSETS="geekhonize-launcher-win-x64.zip geekhonize-launcher-linux-x64.zip"
+          if [ -f geekhonize-launcher-android.apk ]; then ASSETS="$ASSETS geekhonize-launcher-android.apk"; fi
+          NOTES=".NET/Avalonia 专属启动器（Geekhonize 登录→写入会话→启动游戏）。Win/Linux x64 自包含。"
+          if [ -f geekhonize-launcher-android.apk ]; then NOTES="$NOTES Android APK 已产出。"; fi
           gh release create "${TAG}" ${ASSETS} \
             --prerelease \
             --title "BREAKFRONT Launcher dev build (${SHA})" \
-            --notes ".NET/Avalonia 专属启动器（Geekhonize 登录→写入会话→启动游戏）。Win/Linux x64 自包含；Android APK 见 android job 产物（构建中）。"
+            --notes "${NOTES}"
