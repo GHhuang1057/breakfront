@@ -11,6 +11,7 @@
     <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
     <AndroidPackageFormats>apk</AndroidPackageFormats>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
