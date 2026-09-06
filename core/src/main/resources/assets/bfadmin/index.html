@@ -201,14 +201,24 @@
 
 <script>
 let TOKEN = localStorage.getItem('bfadmin_token') || '';
+let _authPrompted = false;
 const $ = id => document.getElementById(id);
 function el(tag, cls, text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e; }
+
+/** 会话失效统一处理：清 token、弹登录（避免各调用点 401 洪泛）。 */
+function expireAuth(){
+  TOKEN=''; localStorage.removeItem('bfadmin_token');
+  try{ if(!_authPrompted){ _authPrompted=true; showLogin(); } }catch(e){}
+}
+function authOk(){ _authPrompted=false; }
 
 async function api(path, opts){
   const r = await fetch(path, opts);
   let j = null;
   try{ j = await r.json(); }catch(e){ j = {ok:false, msg:'响应解析失败 ' + r.status}; }
-  return {code:r.status, ...j};
+  const out = {code:r.status, ...j};
+  if (r.status === 401 && !path.startsWith('/bfadmin/api/login') && TOKEN){ expireAuth(); }
+  return out;
 }
 
 async function login(){
@@ -216,7 +226,7 @@ async function login(){
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({pw: $('pw').value})});
   if (r.ok){ TOKEN = r.token; localStorage.setItem('bfadmin_token', TOKEN);
-    $('lgmsg').textContent='登录成功'; showConsole(); poll();
+    $('lgmsg').textContent='登录成功'; authOk(); showConsole(); poll();
   } else { $('lgmsg').textContent = r.msg || '失败'; }
 }
 

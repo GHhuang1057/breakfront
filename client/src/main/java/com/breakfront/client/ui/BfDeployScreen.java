@@ -19,12 +19,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 部署界面（BF2042 Deploy 结构）：
+ * 部署界面（BF2042 Deploy 结构 · 全窗口版）：
  *
- * - COUNTDOWN 模式（每局开战自动弹）：左侧「战区俯瞰」平面图 + 右侧 4 兵种卡 + 主武器选择；
- *   此时不渲染可部署点选择（仅展示据点拓扑与我方出生区，规划用）。
- * - RESPAWN 模式（战斗中死亡）：在俯瞰图中选择己方可部署入口（出生区 / 已控据点），
- *   点「部署」→ 发 /bf deploy &lt;zoneId|base|observe&gt; → vanilla respawn 落到所选点。
+ * - 地形俯瞰占满整个窗口（顶栏 48px 以下 → 底部兵种条 96px 以上），每次进入自动
+ *   fit（据点集 + 出生区包围盒 8% 边距居中）；内部仍可拖拽平移、滚轮缩放。
+ * - 底部【左下横排】4 个兵种菱形卡（assault/engineer/support/recon），左右 ◀▶ 切换
+ *   主武器，当前武器名显示在该条中部；条最右侧放「部署(⌁)」主按钮与「旁观」次按钮。
  *
  * 全矢量绘制。由 BreakfrontClient 按 phase 自动开合。
  */
@@ -61,13 +61,13 @@ public class BfDeployScreen extends Screen {
 
     // 渲染期缓存（供鼠标命中检测）
     private int mapX, mapY, mapW, mapH;
+    /** 单一世界→屏幕变换（fit 基线 + 用户平移/缩放合成）。所有命中/绘制统一走它。 */
     private double mapScale, mapOffX, mapOffY;
 
-    // 地图视口：基础 fit（基于据点包围盒自算）+ 用户平移/缩放
+    // 地图视口：fit 基线（基于据点包围盒自算）+ 用户平移/缩放
     private double baseScale, baseOffX, baseOffY; // fit 基线（无平移/缩放）
     private double panX, panY;                     // 拖拽平移（px）
     private double zoom = 1.0;                      // 滚轮缩放倍率
-    private int fitBx, fitBy, fitBw, fitBh;         // 复位(FIT)按钮屏幕矩形
 
     // 拖拽状态
     private boolean dragging = false;
@@ -76,10 +76,14 @@ public class BfDeployScreen extends Screen {
 
     private final List<int[]> targetScreen = new ArrayList<>(); // {sx, sy, half, index}
     private final List<DeployTarget> targets = new ArrayList<>();
+    private final List<int[]> classCards = new ArrayList<>();   // {x, y, w, h, index}
     private int deployBx, deployBy, deployBw, deployBh;
     private int obsBx, obsBy, obsBw, obsBh;
     private int wpPrevX, wpPrevY, wpNextX, wpNextY, wpBtnH;
     private int lastMx, lastMy; // 渲染期捕获的鼠标坐标（供无参 mouseIn 使用）
+
+    // 底部兵种条几何（供 render 与 mouse 复用）
+    private static final int BAR_H = 96;
 
     public BfDeployScreen() {
         this(false);
@@ -104,39 +108,33 @@ public class BfDeployScreen extends Screen {
         int sw = this.width;
         int sh = this.height;
 
+        // 全屏冷底
         BfDraw.gradientV(ctx, 0, 0, sw, sh, 0xFF0A0D12, 0xFF141B26);
-        BfDraw.parallelogram(ctx, -120, sh - 190, sw / 2, 5, 60, 0x14FFFFFF);
-        BfDraw.parallelogram(ctx, sw / 3, -30, sw / 3, 4, -40, 0x0FFFFFFF);
+        BfDraw.parallelogram(ctx, -120, sh - 220, sw / 2, 5, 60, 0x10FFFFFF);
+        BfDraw.parallelogram(ctx, sw / 3, -30, sw / 3, 4, -40, 0x0CFFFFFF);
         BfDraw.fill(ctx, 0, 0, 4, sh, BfTheme.TEAL);
 
         double in = BfEasing.staged(age, 0.05, 0.5);
         int a = (int) (255 * in);
-        int rise = (int) ((1 - in) * 20);
+        int rise = (int) ((1 - in) * 18);
         int pad = Math.max(30, sw / 22);
-        int ty = pad + rise;
+        int ty = 10 + rise;
 
         int mySide = mySide();
 
+        // 顶部标题（占屏顶 ~48px）
         renderHeader(ctx, sw, sh, pad, ty, a);
 
-        // 左：战区俯瞰
-        int panelTop = ty + 64;
-        int mapH = sh - panelTop - (respawnMode ? 170 : 90);
-        renderMap(ctx, pad, panelTop, (int) Math.min(sw * 0.46, 600), mapH, mySide, mouseX, mouseY, a);
-
-        // 右：兵种 + 武器
-        int clsW = (int) Math.min(sw * 0.40, 380);
-        int clsX = sw - pad - clsW;
-        renderLoadout(ctx, clsX, clsW, panelTop, mapH, mouseX, mouseY, a);
-
-        if (respawnMode) {
-            renderFooter(ctx, sw, sh, pad, a);
-        } else {
-            String hint = "开战后自动关闭 · ESC 可提前返回战场";
-            int hw = this.textRenderer.getWidth(hint);
-            ctx.drawText(this.textRenderer, Text.literal(hint), sw / 2 - hw / 2, sh - 24,
-                    argb(BfTheme.FAINT, a), false);
+        // 战区俯瞰：占满全屏（顶 48 → 底部扣出兵种条）
+        int mapTop = 48;
+        int mapH = sh - mapTop - BAR_H;
+        if (mapH < 80) {
+            mapH = 80;
         }
+        renderMap(ctx, 0, mapTop, sw, mapH, mySide, mouseX, mouseY, a);
+
+        // 底部兵种条
+        renderBar(ctx, sw, sh, mapTop + mapH, BAR_H, mouseX, mouseY, a);
     }
 
     // ---- 顶部标题 ----
@@ -150,20 +148,20 @@ public class BfDeployScreen extends Screen {
             ctx.drawText(this.textRenderer, Text.literal("DEPLOYMENT  部署"),
                     pad, ty, argb(BfTheme.TEAL, a), false);
             ctx.drawText(this.textRenderer, Text.literal("ALL-OUT WARFARE  ·  全面战争"),
-                    pad, ty + 13, argb(BfTheme.MUTED, a), false);
+                    pad, ty + 14, argb(BfTheme.MUTED, a), false);
 
             String cd = String.format("%.0f", Math.max(0, ClientMatchState.countdownRemainingSeconds()));
             int cdW = this.textRenderer.getWidth(cd);
-            ctx.drawText(this.textRenderer, Text.literal(cd), sw / 2 - cdW / 2, 40,
+            ctx.drawText(this.textRenderer, Text.literal(cd), sw - pad - cdW, ty,
                     argb(BfTheme.TEAL, a), false);
             String lbl = "开战倒计时";
             int lw = this.textRenderer.getWidth(lbl);
-            ctx.drawText(this.textRenderer, Text.literal(lbl), sw / 2 - lw / 2, 66,
+            ctx.drawText(this.textRenderer, Text.literal(lbl), sw - pad - lw, ty + 15,
                     argb(BfTheme.MUTED, a), false);
         }
     }
 
-    // ---- 战区俯瞰平面图 ----
+    // ---- 战区俯瞰平面图（全窗口）----
     private void renderMap(DrawContext ctx, int x, int y, int w, int h, int mySide,
                            int mx, int my, int a) {
         this.mapX = x;
@@ -206,7 +204,7 @@ public class BfDeployScreen extends Screen {
                     valid, owner.ordinal(), defContested));
         }
 
-        // 计算世界坐标范围并 fit 到面板（基线，不含平移/缩放）
+        // 自动 fit：整个据点集 + 出生区包围盒 → 视口居中，留 8% 边距
         double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE;
         double minZ = Double.MAX_VALUE, maxZ = -Double.MAX_VALUE;
         for (DeployTarget t : targets) {
@@ -216,16 +214,16 @@ public class BfDeployScreen extends Screen {
         if (minX == Double.MAX_VALUE) { minX = -10; maxX = 10; minZ = -10; maxZ = 10; }
         double spanX = Math.max(1, maxX - minX);
         double spanZ = Math.max(1, maxZ - minZ);
-        int margin = 36;
-        int availW = w - margin * 2;
-        int availH = h - margin * 2 - 10;
+        double margin = 0.08;
+        int availW = (int) (w * (1 - 2 * margin));
+        int availH = (int) (h * (1 - 2 * margin));
         double scale = Math.min(availW / spanX, availH / spanZ);
         double drawW = spanX * scale, drawH = spanZ * scale;
         this.baseScale = scale;
         this.baseOffX = x + (w - drawW) / 2 - minX * scale;
-        this.baseOffY = y + 24 + (availH - drawH) / 2 - minZ * scale;
+        this.baseOffY = y + (h - drawH) / 2 - minZ * scale;
 
-        // 合成用户平移/缩放 → 有效变换（与 TerrainOverview 共用同一映射）
+        // 合成用户平移/缩放 → 单一有效变换（全屏统一换算）
         double effScale = baseScale * zoom;
         double effOffX = baseOffX + panX;
         double effOffY = baseOffY + panY;
@@ -233,28 +231,19 @@ public class BfDeployScreen extends Screen {
         this.mapOffX = effOffX;
         this.mapOffY = effOffY;
 
-        // 地形俯瞰底图（先画真实地形，再叠拓扑）
+        // 地形俯瞰底图（真实材质色，先画地形，再叠拓扑）
         ClientWorld world = this.client != null ? this.client.world : null;
-        TerrainOverview.draw(ctx, world, x, y + 24, w, h - 34,
+        TerrainOverview.draw(ctx, world, x, y, w, h,
                 effOffX, effOffY, effScale, TerrainOverview.DEFAULT_MAX_CELLS);
 
         // 网格（覆盖于地形之上，战术感）
-        int gridN = 8;
+        int gridN = 10;
         for (int i = 0; i <= gridN; i++) {
-            int gx = (int) (x + margin + (w - margin * 2) * i / gridN);
-            ctx.fill(gx, y + 24, gx + 1, y + h - 10, 0x14FFFFFF);
-            int gy = (int) (y + 24 + (h - 34) * i / gridN);
-            ctx.fill(x + margin, gy, x + w - margin, gy + 1, 0x14FFFFFF);
+            int gx = (int) (x + (w) * i / gridN);
+            ctx.fill(gx, y, gx + 1, y + h, 0x12FFFFFF);
+            int gy = (int) (y + (h) * i / gridN);
+            ctx.fill(x, gy, x + w, gy + 1, 0x12FFFFFF);
         }
-
-        // 复位(FIT)按钮：回到初始 fit
-        fitBw = 52; fitBh = 20;
-        fitBx = x + w - fitBw - 10; fitBy = y + 8;
-        boolean fitHov = mouseIn(fitBx, fitBy, fitBw, fitBh);
-        BfDraw.fill(ctx, fitBx, fitBy, fitBw, fitBh, argb(fitHov ? 0xE6303E50 : BfTheme.PANEL, a));
-        BfDraw.border(ctx, fitBx, fitBy, fitBw, fitBh, argb(fitHov ? BfTheme.TEAL : BfTheme.PANEL_LINE, a));
-        ctx.drawText(this.textRenderer, Text.literal("FIT"), fitBx + 14, fitBy + 5,
-                argb(fitHov ? BfTheme.TEAL : BfTheme.TEXT_DIM, a), false);
 
         // 目标方块（坐标换算统一走 TerrainOverview.worldToScreen，与地形底图严格对齐）
         for (int i = 0; i < targets.size(); i++) {
@@ -337,74 +326,124 @@ public class BfDeployScreen extends Screen {
                 argb(BfTheme.TEXT_DIM, a), false);
     }
 
-    // ---- 兵种 + 主武器 ----
-    private void renderLoadout(DrawContext ctx, int x, int w, int top, int h,
-                                int mx, int my, int a) {
+    // ---- 底部兵种条（左下横排菱形卡 + 武器切换 + 部署/旁观）----
+    private void renderBar(DrawContext ctx, int sw, int sh, int y0, int barH,
+                           int mx, int my, int a) {
         // 校验当前选择合法
         normalizeSelection();
 
-        ctx.drawText(this.textRenderer, Text.literal("兵种  ·  SELECT CLASS"),
-                x, top - 24, argb(BfTheme.TEXT_DIM, a), false);
+        // 半透明 PANEL 底 + 顶部分隔线 + 荧光强调线
+        BfDraw.fill(ctx, 0, y0, sw, barH, argb(BfTheme.PANEL, a));
+        BfDraw.fill(ctx, 0, y0, sw, 1, argb(BfTheme.PANEL_LINE, a));
+        BfDraw.fill(ctx, 0, y0, sw, 2, argb(BfTheme.TEAL_DIM, a));
 
-        int cardH = Math.min(56, h / 5);
-        int gap = 8;
+        ctx.drawText(this.textRenderer, Text.literal("兵种  ·  CLASS"),
+                14, y0 + 8, argb(BfTheme.TEXT_DIM, a), false);
+
+        classCards.clear();
+        int card = 60, gap = 12;
+        int cx0 = 14;
+        int cy = y0 + (barH - card) / 2 + 6;
         hoverClass = -1;
         for (int i = 0; i < CLASSES.length; i++) {
-            int cy = top + i * (cardH + gap);
-            int ry = cy + cardH;
-            boolean hov = mx >= x && mx <= x + w && my >= cy && my <= ry;
-            if (hov) hoverClass = i;
-            boolean sel = CLASSES[i][0].equals(selClass);
-            int cardCol = argb(sel ? 0xE6303E50 : BfTheme.PANEL, a);
-            BfDraw.fill(ctx, x, cy, w, cardH, cardCol);
-            int edge = sel ? BfTheme.TEAL : (hov ? argb(BfTheme.TEXT_DIM, a) : argb(BfTheme.PANEL_LINE, a));
-            BfDraw.border(ctx, x, cy, w, cardH, edge);
-            if (sel) {
-                BfDraw.fill(ctx, x, cy, 3, cardH, BfTheme.TEAL);
+            int x = cx0 + i * (card + gap);
+            int ccx = x + card / 2;
+            int ccy = cy + card / 2;
+            int half = card / 2 - 8;
+            boolean hov = mx >= x && mx <= x + card && my >= cy && my <= cy + card;
+            if (hov) {
+                hoverClass = i;
             }
-            ctx.drawText(this.textRenderer, Text.literal(CLASSES[i][2]),
-                    x + 14, cy + 9, argb(sel ? BfTheme.TEAL : BfTheme.TEXT, a), false);
-            ctx.drawText(this.textRenderer, Text.literal(CLASSES[i][3]),
-                    x + 14, cy + 24, argb(BfTheme.MUTED, a), false);
-            String cn = CLASSES[i][1];
-            int cnW = this.textRenderer.getWidth(cn);
-            ctx.drawText(this.textRenderer, Text.literal(cn),
-                    x + w - cnW - 12, cy + 8, argb(BfTheme.FAINT, a), false);
+            boolean sel = CLASSES[i][0].equals(selClass);
+            int fillCol = argb(sel ? 0xE6303E50 : (hov ? 0x40202C3A : BfTheme.PANEL), a);
+            int borderCol = argb(sel ? BfTheme.TEAL : (hov ? BfTheme.TEXT_DIM : BfTheme.PANEL_LINE), a);
+            // 菱形：外圈描边 + 内圈填充
+            BfDraw.diamond(ctx, ccx, ccy, half + 1, borderCol);
+            BfDraw.diamond(ctx, ccx, ccy, half, fillCol);
             if (sel) {
-                BfDraw.fill(ctx, x + w - 26, cy + cardH / 2 - 6, 14, 12, BfTheme.TEAL);
-                ctx.drawText(this.textRenderer, Text.literal("✓"),
-                        x + w - 23, cy + cardH / 2 - 5, 0xFF0A0D12, false);
+                BfGlow.rect(ctx, ccx - half - 3, ccy - half - 3, (half + 3) * 2, (half + 3) * 2,
+                        BfTheme.TEAL & 0xFFFFFF, 50, 5);
+            }
+            // 图标字母
+            String letter = CLASSES[i][2].substring(0, 1);
+            int lw = this.textRenderer.getWidth(letter);
+            ctx.drawText(this.textRenderer, Text.literal(letter), ccx - lw / 2, ccy - 4,
+                    argb(sel ? BfTheme.TEAL : BfTheme.TEXT, a), false);
+            // 中文名（卡下）
+            String cn = CLASSES[i][1];
+            int cnw = this.textRenderer.getWidth(cn);
+            ctx.drawText(this.textRenderer, Text.literal(cn), x + card / 2 - cnw / 2, cy + card + 1,
+                    argb(sel ? BfTheme.TEAL : BfTheme.FAINT, a), false);
+
+            classCards.add(new int[]{x, cy, card, card, i});
+        }
+
+        // 主武器行（卡右侧）：◀ 武器名 ▶，当前武器名显示在该条中部
+        int afterX = cx0 + CLASSES.length * (card + gap) + 26;
+        int arrow = 30;
+        int ay = cy + (card - arrow) / 2;
+        wpPrevX = afterX; wpPrevY = ay; wpBtnH = arrow;
+        drawArrow(ctx, wpPrevX, ay, arrow, false, mx, my, a);
+
+        int bw = 190;
+        int bx = afterX + arrow + 6;
+        String label = GUN_LABEL.getOrDefault(selGun, selGun);
+        BfDraw.fill(ctx, bx, ay, bw, arrow, argb(BfTheme.PANEL, a));
+        BfDraw.border(ctx, bx, ay, bw, arrow, argb(BfTheme.PANEL_LINE, a));
+        int lw2 = this.textRenderer.getWidth(label);
+        ctx.drawText(this.textRenderer, Text.literal(label), bx + bw / 2 - lw2 / 2, ay + arrow / 2 - 4,
+                argb(BfTheme.TEXT, a), false);
+        ctx.drawText(this.textRenderer, Text.literal("主武器  ·  PRIMARY"),
+                bx, ay - 14, argb(BfTheme.TEXT_DIM, a), false);
+
+        wpNextX = bx + bw + 6; wpNextY = ay;
+        drawArrow(ctx, wpNextX, ay, arrow, true, mx, my, a);
+
+        // 选中重生点信息（武器名右侧、按钮左侧）
+        if (respawnMode && selectedDeployIndex >= 0 && selectedDeployIndex < targets.size()) {
+            DeployTarget t = targets.get(selectedDeployIndex);
+            String info = "重生点：" + t.label() + (t.valid() ? "" : " (不可部署)");
+            int iw = this.textRenderer.getWidth(info);
+            int ix = wpNextX + arrow + 18;
+            int rightLimit = sw - 360;
+            if (ix + iw <= rightLimit) {
+                ctx.drawText(this.textRenderer, Text.literal(info), ix, y0 + barH / 2 - 4,
+                        argb(t.valid() ? BfTheme.TEAL : BfTheme.MUTED, a), false);
             }
         }
 
-        // 主武器行
-        int wTop = top + CLASSES.length * (cardH + gap) + 14;
-        ctx.drawText(this.textRenderer, Text.literal("主武器  ·  PRIMARY"),
-                x, wTop - 20, argb(BfTheme.TEXT_DIM, a), false);
-        String[] guns = CLASS_GUNS.getOrDefault(selClass, new String[]{"hk416d"});
-        String label = GUN_LABEL.getOrDefault(selGun, selGun);
-        int bw = (int) (w * 0.7);
-        int bx = x + 24;
-        int by = wTop;
-        int bh = 34;
-        BfDraw.fill(ctx, bx, by, bw, bh, argb(BfTheme.PANEL, a));
-        BfDraw.border(ctx, bx, by, bw, bh, argb(BfTheme.PANEL_LINE, a));
-        int lw = this.textRenderer.getWidth(label);
-        ctx.drawText(this.textRenderer, Text.literal(label), bx + bw / 2 - lw / 2, by + 10,
-                argb(BfTheme.TEXT, a), false);
-        // 左右切换箭头
-        int arrowS = 30;
-        int ay = by + (bh - arrowS) / 2;
-        wpPrevX = bx - arrowS - 4; wpPrevY = ay;
-        wpNextX = bx + bw + 4; wpNextY = ay; wpBtnH = arrowS;
-        drawArrow(ctx, wpPrevX, ay, arrowS, false, mx, my, a);
-        drawArrow(ctx, wpNextX, ay, arrowS, true, mx, my, a);
+        // 条最右侧：部署主按钮 + 旁观次按钮（仅 respawning 可交互）
+        if (respawnMode) {
+            deployBw = 200; deployBh = 46;
+            deployBx = sw - deployBw - 20;
+            deployBy = y0 + (barH - deployBh) / 2;
+            boolean hov = mouseIn(deployBx, deployBy, deployBw, deployBh);
+            BfDraw.fill(ctx, deployBx, deployBy, deployBw, deployBh,
+                    hov ? 0xFF0A0D12 : BfTheme.TEAL);
+            BfDraw.border(ctx, deployBx, deployBy, deployBw, deployBh,
+                    hov ? BfTheme.TEAL : BfTheme.TEAL_DIM);
+            String txt = "部署  ⌁ 提交重生";
+            int tw = this.textRenderer.getWidth(txt);
+            ctx.drawText(this.textRenderer, Text.literal(txt),
+                    deployBx + deployBw / 2 - tw / 2, deployBy + 15,
+                    hov ? BfTheme.TEAL : 0xFF0A0D12, false);
 
-        // 武器白名单提示
-        StringBuilder sb = new StringBuilder("可选：");
-        for (String g : guns) sb.append(GUN_LABEL.getOrDefault(g, g)).append("  ");
-        ctx.drawText(this.textRenderer, Text.literal(sb.toString()),
-                x, by + bh + 8, argb(BfTheme.FAINT, a), false);
+            obsBw = 132; obsBh = 34;
+            obsBx = deployBx - obsBw - 12;
+            obsBy = deployBy + (deployBh - obsBh) / 2;
+            boolean hov2 = mouseIn(obsBx, obsBy, obsBw, obsBh);
+            BfDraw.fill(ctx, obsBx, obsBy, obsBw, obsBh, argb(BfTheme.PANEL, a));
+            BfDraw.border(ctx, obsBx, obsBy, obsBw, obsBh, argb(BfTheme.PANEL_LINE, a));
+            String ot = "观察  OBSERVE";
+            int ow2 = this.textRenderer.getWidth(ot);
+            ctx.drawText(this.textRenderer, Text.literal(ot), obsBx + obsBw / 2 - ow2 / 2, obsBy + 10,
+                    argb(BfTheme.TEXT_DIM, a), false);
+        } else {
+            String hint = "开战后自动关闭 · ESC 可提前返回战场";
+            int hw = this.textRenderer.getWidth(hint);
+            ctx.drawText(this.textRenderer, Text.literal(hint), sw / 2 - hw / 2, y0 + barH / 2 - 4,
+                    argb(BfTheme.FAINT, a), false);
+        }
     }
 
     private void drawArrow(DrawContext ctx, int x, int y, int s, boolean right,
@@ -416,49 +455,6 @@ public class BfDeployScreen extends Screen {
         int sw2 = this.textRenderer.getWidth(sym);
         ctx.drawText(this.textRenderer, Text.literal(sym), x + s / 2 - sw2 / 2, y + s / 2 - 5,
                 argb(BfTheme.TEXT, a), false);
-    }
-
-    // ---- 底部按钮（RESPAWN 模式）----
-    private void renderFooter(DrawContext ctx, int sw, int sh, int pad, int a) {
-        deployBw = Math.min(sw - 160, 360);
-        deployBh = 46;
-        deployBx = sw / 2 - deployBw / 2;
-        deployBy = sh - 96;
-        boolean hov = mouseIn(deployBx, deployBy, deployBw, deployBh);
-        BfDraw.fill(ctx, deployBx, deployBy, deployBw, deployBh, hov ? 0xFF0A0D12 : BfTheme.TEAL);
-        BfDraw.border(ctx, deployBx, deployBy, deployBw, deployBh, hov ? BfTheme.TEAL : BfTheme.TEAL_DIM);
-        String txt = "部署  DEPLOY";
-        int tw = this.textRenderer.getWidth(txt);
-        ctx.drawText(this.textRenderer, Text.literal(txt), sw / 2 - tw / 2, deployBy + 15,
-                hov ? BfTheme.TEAL : 0xFF0A0D12, false);
-
-        // 观察按钮（旁观）
-        obsBw = Math.min(sw - 160, 200);
-        obsBh = 30;
-        obsBx = sw / 2 - obsBw / 2;
-        obsBy = deployBy + deployBh + 10;
-        boolean hov2 = mouseIn(obsBx, obsBy, obsBw, obsBh);
-        BfDraw.fill(ctx, obsBx, obsBy, obsBw, obsBh, argb(BfTheme.PANEL, a));
-        BfDraw.border(ctx, obsBx, obsBy, obsBw, obsBh, argb(BfTheme.PANEL_LINE, a));
-        String ot = "观察  OBSERVE";
-        int ow2 = this.textRenderer.getWidth(ot);
-        ctx.drawText(this.textRenderer, Text.literal(ot), sw / 2 - ow2 / 2, obsBy + 9,
-                argb(BfTheme.TEXT_DIM, a), false);
-
-        // 选中点信息
-        if (selectedDeployIndex >= 0 && selectedDeployIndex < targets.size()) {
-            DeployTarget t = targets.get(selectedDeployIndex);
-            String info = "重生点：" + t.label()
-                    + (t.valid() ? "" : (respawnMode ? " (不可部署)" : ""));
-            int iw = this.textRenderer.getWidth(info);
-            ctx.drawText(this.textRenderer, Text.literal(info), sw / 2 - iw / 2, deployBy - 22,
-                    argb(t.valid() || !respawnMode ? BfTheme.TEAL : BfTheme.MUTED, a), false);
-        }
-
-        String stats = "本局击杀 " + myKills() + "  ·  爆头 " + myHeadshots();
-        int stw = this.textRenderer.getWidth(stats);
-        ctx.drawText(this.textRenderer, Text.literal(stats), sw / 2 - stw / 2, deployBy - 44,
-                argb(BfTheme.TEXT_DIM, a), false);
     }
 
     // ============================================================
@@ -478,11 +474,17 @@ public class BfDeployScreen extends Screen {
             }
         }
 
-        // FIT 复位按钮
-        if (mouseIn(fitBx, fitBy, fitBw, fitBh, mx, my)) {
-            resetView();
-            return true;
+        // 兵种菱形卡
+        for (int[] card : classCards) {
+            if (mx >= card[0] && mx <= card[0] + card[2] && my >= card[1] && my <= card[1] + card[3]) {
+                selectClassByIndex(card[4]);
+                return true;
+            }
         }
+
+        // 武器左右箭头
+        if (mouseIn(wpPrevX, wpPrevY, wpBtnH, wpBtnH, mx, my)) { cycleWeapon(-1); return true; }
+        if (mouseIn(wpNextX, wpNextY, wpBtnH, wpBtnH, mx, my)) { cycleWeapon(1); return true; }
 
         // 地图面板：按下即进入拖拽（拖拽=平移，松开未移动=选中目标）
         if (inMapPanel(mx, my)) {
@@ -492,15 +494,6 @@ public class BfDeployScreen extends Screen {
             dragStartY = mouseY;
             return true;
         }
-
-        // 兵种卡
-        if (hoverClass >= 0 && hoverClass < CLASSES.length) {
-            selectClassByIndex(hoverClass);
-            return true;
-        }
-        // 武器左右箭头
-        if (mouseIn(wpPrevX, wpPrevY, wpBtnH, wpBtnH, mx, my)) { cycleWeapon(-1); return true; }
-        if (mouseIn(wpNextX, wpNextY, wpBtnH, wpBtnH, mx, my)) { cycleWeapon(1); return true; }
 
         return super.mouseClicked(mouseX, mouseY, button);
     }
@@ -782,7 +775,7 @@ public class BfDeployScreen extends Screen {
                                boolean valid, int owner, boolean contested) {
     }
 
-    private static int argb(int rgb, int alpha) {
+    private int argb(int rgb, int alpha) {
         int aa = Math.max(0, Math.min(255, alpha));
         return (aa << 24) | (rgb & 0xFFFFFF);
     }
