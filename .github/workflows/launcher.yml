@@ -1,0 +1,47 @@
+name: launcher
+
+on:
+  push:
+    paths:
+      - 'launcher/**'
+      - '.github/workflows/launcher.yml'
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore launcher/Geekhonize.App/Geekhonize.App.csproj
+      - name: Build (Release)
+        run: dotnet build launcher/Geekhonize.App/Geekhonize.App.csproj -c Release --no-restore
+      - name: Publish linux-x64
+        run: dotnet publish launcher/Geekhonize.App/Geekhonize.App.csproj -c Release -r linux-x64 --self-contained true --no-restore -o dist/linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geekhonize-launcher-linux-x64
+          path: dist/linux
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore launcher/Geekhonize.App/Geekhonize.App.csproj
+      - name: Build (Release)
+        run: dotnet build launcher/Geekhonize.App/Geekhonize.App.csproj -c Release --no-restore
+      - name: Publish win-x64
+        run: dotnet publish launcher/Geekhonize.App/Geekhonize.App.csproj -c Release -r win-x64 --self-contained true --no-restore -o dist/win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geekhonize-launcher-win-x64
+          path: dist/win
+
+  # Android（net8.0-android / Avalonia.Android）：workload 体积大且需 Android SDK，
+  # 待 B1.5 将 UI 工程多目标化后在 Linux runner 上产出 APK（当前骨架以 Win/Linux 桌面为绿线）。
