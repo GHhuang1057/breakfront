@@ -1,6 +1,6 @@
 using Avalonia;
 
-namespace Geekhonize.App;
+namespace Geekhonize.Desktop;
 
 internal static class Program
 {
@@ -9,7 +9,7 @@ internal static class Program
         .StartWithClassicDesktopLifetime(args);
 
     public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
+        => AppBuilder.Configure<Geekhonize.App.App>()
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace();
