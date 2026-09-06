@@ -369,6 +369,44 @@ async fn logout() -> Json<ApiOk<()>> {
     Json(ApiOk { ok: true, data: None, msg: Some("已退出（请客户端丢弃令牌）".into()) })
 }
 
+#[derive(Deserialize)]
+struct ChangePwReq {
+    old_password: String,
+    new_password: String,
+}
+
+/// 修改密码（需 Bearer 令牌）：验证旧密码 → 写新哈希。改密后旧令牌仍有效至过期（无状态 JWT 约定）。
+async fn change_password(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ChangePwReq>,
+) -> Result<Json<ApiOk<()>>, AppErr> {
+    let token = bearer(&headers).ok_or_else(|| AppErr(StatusCode::UNAUTHORIZED, "缺少令牌".into()))?;
+    let claims = decode_token(&st.cfg, &token)?;
+    validate_password(&req.new_password)?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT pass_hash FROM users WHERE id=? AND username=? AND status=1",
+    )
+    .bind(claims.uid)
+    .bind(&claims.sub)
+    .fetch_optional(&st.pool)
+    .await?;
+    let (old_hash,) = match row {
+        Some(r) => r,
+        None => return Err(AppErr(StatusCode::UNAUTHORIZED, "账号不存在或已停用".into())),
+    };
+    if !verify_password(&req.old_password, &old_hash) {
+        return Err(AppErr(StatusCode::BAD_REQUEST, "当前密码不正确".into()));
+    }
+    let new_hash = hash_password(&req.new_password)?;
+    sqlx::query("UPDATE users SET pass_hash=? WHERE id=?")
+        .bind(&new_hash)
+        .bind(claims.uid)
+        .execute(&st.pool)
+        .await?;
+    Ok(Json(ApiOk { ok: true, data: None, msg: Some("密码已更新，请重新登录".into()) }))
+}
+
 fn bearer(headers: &HeaderMap) -> Option<String> {
     headers
         .get("authorization")
@@ -421,6 +459,7 @@ async fn main() {
         .route("/api/v1/auth/login", axum::routing::post(login))
         .route("/api/v1/auth/me", get(me))
         .route("/api/v1/auth/logout", axum::routing::post(logout))
+        .route("/api/v1/auth/change_password", axum::routing::post(change_password))
         .layer(cors)
         .with_state(state);
 
