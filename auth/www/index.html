@@ -2,217 +2,411 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070B12">
 <title>Geekhonize 账号中心</title>
 <style>
   :root{
-    --bg0:#070B12; --bg1:#101A26; --panel:#0F1823; --line:#22364A;
-    --teal:#35E6D2; --text:#EAF2F8; --muted:#7E93A8; --red:#FF4A3C; --ok:#3EE88C;
+    --bg0:#070B12; --bg1:#101A26; --panel:rgba(15,24,35,.92); --panel2:#0B121C;
+    --line:#22364A; --teal:#35E6D2; --text:#EAF2F8; --muted:#7E93A8;
+    --red:#FF4A3C; --ok:#3EE88C; --amber:#E8B93C;
   }
-  *{box-sizing:border-box; margin:0; padding:0}
-  html,body{height:100%}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{min-height:100%}
   body{
-    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;
     color:var(--text);
-    background:radial-gradient(1200px 700px at 20% -10%, #12283a 0%, transparent 55%),
-               radial-gradient(900px 600px at 110% 30%, #0d2230 0%, transparent 50%),
-               linear-gradient(180deg,var(--bg0),var(--bg1));
-    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+    background:
+      radial-gradient(900px 520px at 15% -8%, #12303f 0%, transparent 55%),
+      radial-gradient(760px 520px at 110% 20%, #0c2434 0%, transparent 52%),
+      linear-gradient(180deg,var(--bg0),var(--bg1));
+    background-attachment:fixed; min-height:100vh; display:flex; flex-direction:column;
   }
-  header{width:100%; max-width:980px; padding:30px 20px 6px; display:flex; align-items:baseline; gap:14px}
-  header .logo{font-size:20px; letter-spacing:2px; color:var(--teal); font-weight:600}
+  header{width:100%; max-width:1080px; margin:0 auto; padding:26px 18px 4px; display:flex;
+         align-items:baseline; gap:12px; flex-wrap:wrap}
+  header .logo{font-size:19px; letter-spacing:2px; color:var(--teal); font-weight:600}
   header .logo b{color:var(--text); font-weight:300}
-  header .sub{color:var(--muted); font-size:12px; letter-spacing:1px}
-  main{width:100%; max-width:980px; flex:1; padding:26px 20px 60px}
-  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px}
-  .card{background:rgba(15,24,35,.92); border:1px solid var(--line); border-top:3px solid var(--teal);
-        border-radius:4px; padding:22px 22px 24px; box-shadow:0 18px 50px rgba(0,0,0,.45)}
-  .card h2{font-size:14px; letter-spacing:2px; color:var(--muted); font-weight:600; margin-bottom:16px}
-  .card h2 span{color:var(--teal)}
+  header .sub{color:var(--muted); font-size:11px; letter-spacing:1px}
+  nav{margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center}
+  nav button{background:transparent;border:1px solid var(--line);color:var(--muted);
+    font-size:12px; padding:6px 12px; border-radius:3px; cursor:pointer}
+  nav button.on{color:var(--teal); border-color:var(--teal)}
+  main{width:100%; max-width:1080px; margin:0 auto; flex:1; padding:22px 18px 70px}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; align-items:start}
+  .card{background:var(--panel); border:1px solid var(--line); border-top:3px solid var(--teal);
+        border-radius:6px; padding:20px 20px 22px; box-shadow:0 18px 46px rgba(0,0,0,.42)}
+  .card h2{font-size:13px; letter-spacing:2px; color:var(--muted); font-weight:600; margin-bottom:14px}
+  .card.wide{grid-column:1/-1}
   label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px}
-  input{width:100%; background:#0B121C; border:1px solid var(--line); color:var(--text);
-        padding:10px 12px; font-size:14px; border-radius:3px; outline:none}
+  .row{display:flex; gap:8px; align-items:center}
+  .row .grow{flex:1}
+  input{width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--text);
+        padding:11px 12px; font-size:14px; border-radius:4px; outline:none; min-width:0}
   input:focus{border-color:var(--teal)}
-  button{margin-top:18px; width:100%; background:var(--teal); color:#06121a; border:0; cursor:pointer;
-         font-size:15px; letter-spacing:3px; padding:11px 0; border-radius:3px; font-weight:600}
-  button:hover{filter:brightness(1.12)}
-  button.ghost{background:transparent; border:1px solid var(--line); color:var(--text); letter-spacing:1px}
-  button.ghost:hover{border-color:var(--teal); color:var(--teal)}
-  button.danger{background:transparent; border:1px solid var(--red); color:var(--red)}
-  .row{display:flex; gap:10px}
-  .row button{margin-top:0}
-  .msg{margin-top:12px; font-size:13px; min-height:18px; word-break:break-all}
-  .msg.err{color:var(--red)}
-  .msg.ok{color:var(--ok)}
-  .who{display:flex; flex-wrap:wrap; gap:18px; align-items:center; margin-bottom:14px}
-  .who .avatar{width:44px; height:44px; border-radius:3px; background:var(--teal); color:#06121a;
-        display:flex; align-items:center; justify-content:center; font-weight:700; font-size:18px}
-  .who .nm{font-size:18px}
-  .who .rl{color:var(--muted); font-size:12px; margin-top:2px}
-  .who .rl i{font-style:normal; background:#0B121C; border:1px solid var(--line); padding:1px 7px;
-        border-radius:2px; margin-right:6px; color:var(--teal)}
-  .muted{color:var(--muted); font-size:12px}
-  .sep{border-top:1px solid var(--line); margin:18px 0}
-  footer{color:#51606e; font-size:11px; letter-spacing:1px; padding:14px; text-align:center; width:100%}
-  .apptag{display:inline-block; font-size:11px; color:var(--teal); border:1px solid var(--teal);
-        padding:2px 8px; border-radius:2px; margin-right:6px}
+  button{margin-top:14px; width:100%; background:var(--teal); color:#06121a; border:0; cursor:pointer;
+         font-size:14px; letter-spacing:2px; padding:11px 0; border-radius:4px; font-weight:600}
+  button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5; cursor:default}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  button.ghost:hover{border-color:var(--teal);color:var(--teal)}
+  button.danger{background:transparent;border:1px solid var(--red);color:var(--red)}
+  button.small{width:auto; padding:9px 14px; margin-top:0; font-size:12px}
+  .msg{margin-top:10px; font-size:13px; min-height:16px; word-break:break-all; white-space:pre-wrap}
+  .msg.err{color:var(--red)} .msg.ok{color:var(--ok)} .msg.warn{color:var(--amber)}
+  .who{display:flex; gap:14px; align-items:center; margin-bottom:12px}
+  .avatar{width:48px;height:48px;border-radius:6px;background:linear-gradient(135deg,var(--teal),#1d8f86);
+          color:#06121a;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;flex:0 0 auto}
+  .nm{font-size:17px;font-weight:600}
+  .rl{margin-top:4px} .rl i{font-style:normal;background:var(--panel2);border:1px solid var(--line);
+     padding:2px 8px;border-radius:3px;margin-right:6px;font-size:11px;color:var(--teal)}
+  .kv{display:grid;grid-template-columns:110px 1fr;row-gap:8px;font-size:13px;align-items:center}
+  .kv .k{color:var(--muted)}
+  .badge{display:inline-block;padding:1px 8px;border-radius:3px;font-size:11px;border:1px solid var(--line);
+         margin-right:4px;margin-top:2px}
+  .badge.on{color:var(--ok);border-color:var(--ok)}
+  .badge.off{color:var(--amber);border-color:var(--amber)}
+  .badge.band{color:var(--red);border-color:var(--red)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;overflow-x:auto;display:block}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #1a2a3c;vertical-align:middle;white-space:nowrap}
+  th{color:var(--muted);font-weight:500;font-size:11px;letter-spacing:1px}
+  td b{font-weight:600}
+  .tabs{display:flex;gap:4px;margin:4px 0 14px;flex-wrap:wrap}
+  .tabs button{width:auto;margin:0;padding:8px 14px;font-size:12px;background:transparent;
+     border:1px solid var(--line);color:var(--muted)}
+  .tabs button.on{color:#06121a;background:var(--teal);border-color:var(--teal)}
+  footer{color:#51606e;font-size:11px;letter-spacing:1px;padding:12px 0 26px;text-align:center}
+  .muted{color:var(--muted)} .small{font-size:12px}
+  .apptag{display:inline-block;font-size:11px;color:var(--teal);border:1px solid var(--teal);
+    padding:2px 9px;border-radius:3px;margin-right:6px;margin-top:6px}
+  .linkbtn{background:none;border:none;color:var(--muted);text-decoration:underline;cursor:pointer;
+    padding:0;font-size:12px;margin-top:10px;width:auto}
+  .linkbtn:hover{color:var(--teal)}
+  .card > .card{margin-top:4px;box-shadow:none;border-top:none;padding:14px 0 0}
+  @media (max-width:640px){ header .sub{display:none}
+    nav{margin-left:0;width:100%;margin-top:10px}
+    .kv{grid-template-columns:86px 1fr}
+    .card{padding:16px 14px 18px}
+  }
 </style>
 </head>
 <body>
 <header>
   <div class="logo">GEEKHONIZE <b>账号中心</b></div>
   <div class="sub">ACCOUNT CENTER · 一个账号通行全部作品</div>
+  <nav id="nav"></nav>
 </header>
-<main><div id="root" class="grid"></div></main>
-<footer>Geekhonize Auth · 跨作品统一账号服务 · 如遇问题请联系管理员</footer>
+<main id="root" class="grid"></main>
+<footer>Geekhonize Auth · 验证码经邮箱发送 · 如遇问题请联系管理员</footer>
 
 <script>
 const API='/api/v1/auth/';
 const K='geohonize_portal_session';
-let S=null; // {token,user:{username,display_name,email,roles[]}}
+let S=null;
+let view='';
+let meTab='overview';
 
-function el(tag,cls,text){const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e;}
-function card(title){const c=el('div','card'); c.appendChild(el('h2','',title)); return c;}
-function field(label,type,ph,name){const l=el('label','',label); const i=el('input',''); i.type=type||'text'; i.placeholder=ph||''; i.name=name||''; l.appendChild(i); return l;}
-function msgWrap(){const m=el('div','msg'); return m;}
-function show(w){document.getElementById('root').innerHTML=''; document.getElementById('root').appendChild(w);}
+const el=(t,c,s)=>{const e=document.createElement(t);if(c)e.className=c;if(s!=null)e.textContent=s;return e;};
+const qs=s=>document.querySelector(s);
+
+function navBtn(label,key){const b=el('button',view===key?'on':'',label);b.onclick=()=>{location.hash='#'+key;};return b;}
+function renderNav(){
+  const nav=qs('#nav');nav.innerHTML='';
+  if(!S||!S.token){
+    nav.appendChild(navBtn('登录','login'));
+    nav.appendChild(navBtn('注册','register'));
+  }else{
+    nav.appendChild(navBtn('我的','me'));
+    if((S.user.roles||[]).includes('admin'))nav.appendChild(navBtn('管理','admin'));
+    const o=el('button','','退出');o.onclick=()=>{S=null;persist();location.hash='#login';};
+    nav.appendChild(o);
+  }
+}
 
 async function api(path,opts){
   const o=opts||{};
   const h={'Content-Type':'application/json'};
-  if(S&&S.token) h['Authorization']='Bearer '+S.token;
+  if(S&&S.token)h['Authorization']='Bearer '+S.token;
   try{
     const r=await fetch(API+path,{method:o.method||'POST',headers:h,body:o.body?JSON.stringify(o.body):undefined});
     const j=await r.json().catch(()=>({ok:false,msg:'响应解析失败 '+r.status}));
-    if(!j.ok) throw new Error(j.msg||('HTTP '+r.status));
+    if(!j.ok)throw new Error(j.msg||('HTTP '+r.status));
     return j;
-  }catch(e){
-    const err=new Error(e.message||'网络错误');
-    err.fatal=e instanceof TypeError; throw err;
-  }
+  }catch(e){const err=new Error(e.message||'网络错误');err.fatal=e instanceof TypeError;throw err;}
+}
+const persist=()=>{try{localStorage.setItem(K,JSON.stringify(S||{}));}catch(e){}};
+function restore(){try{const t=localStorage.getItem(K);if(t){const o=JSON.parse(t);if(o&&o.token){S=o;if(!S.user)S.user={};}}}catch(e){}}
+
+function card(title,wide){const c=el('div','card'+(wide?' wide':''));c.appendChild(el('h2','',title));return c;}
+function field(label,type,ph,name){const l=el('label','',label);const i=el('input','');i.type=type||'text';i.placeholder=ph||'';i.name=name||'';l.appendChild(i);return l;}
+function msgBox(){const m=el('div','msg');return m;}
+function show(node){qs('#root').innerHTML='';qs('#root').appendChild(node);}
+function btn(t,cls,fn){const b=el('button',cls||'',t);b.onclick=fn;return b;}
+function badge(t,cls){return el('span','badge '+(cls||''),t);}
+
+function startCd(btnEl){
+  btnEl.disabled=true;let n=60;btnEl.textContent=n+'s';
+  const iv=setInterval(()=>{
+    if(--n<=0){clearInterval(iv);btnEl.disabled=false;btnEl.textContent='重新发送';}
+    else btnEl.textContent=n+'s';
+  },1000);
+  return iv;
+}
+function fillDev(js,m,cdBox){
+  if(js.data&&js.data.dev_code){
+    m.className='msg ok';m.textContent='验证码已发送（联调已自动填入）';
+    cdBox.value=js.data.dev_code;
+  }else{m.className='msg ok';m.textContent='验证码已发送';}
 }
 
-function persist(){try{localStorage.setItem(K,JSON.stringify(S||{}));}catch(e){}}
-function restore(){try{const t=localStorage.getItem(K); if(t){const o=JSON.parse(t); if(o&&o.token&&o.user) S=o;}}catch(e){}}
-function signout(){S=null; persist(); render();}
-
-/* ---------- 视图 ---------- */
-function viewLogin(msg,err){
+/* ================= 视图：登录 ================= */
+function vLogin(){
   const c=card('登 录 LOGIN');
   c.appendChild(field('用户名','text','geekhonize 用户名','u'));
   c.appendChild(field('密码','password','••••••••','p'));
-  const m=msgWrap(); if(err)m.className='msg err';
-  const b=el('button','','登  录'); b.onclick=async()=>{
-    const u=c.querySelector('[name=u]').value.trim(), p=c.querySelector('[name=p]').value;
+  const m=msgBox();
+  const b=btn('登  录',null,async()=>{
+    const u=c.querySelector('[name=u]').value.trim(),p=c.querySelector('[name=p]').value;
     if(!u||!p){m.className='msg err';m.textContent='请输入用户名与密码';return;}
     b.disabled=true;b.textContent='登录中…';
     try{const j=await api('login',{body:{username:u,password:p,app:'geekhonize-portal'}});
-      S={token:j.access_token,user:j.user}; persist(); render();
+      S={token:j.access_token,user:j.user};persist();renderNav();location.hash='#me';
     }catch(e){m.className='msg err';m.textContent=e.message;}
     b.disabled=false;b.textContent='登  录';
-  };
+  });
   c.appendChild(b);
-  const b2=el('button','ghost','没有账号？注册 Geekhonize 账号');
-  b2.onclick=()=>renderRegister(); c.appendChild(b2);
-  c.appendChild(m);
-  show(c);
+  c.appendChild(btn('没有账号？邮箱验证码注册','ghost',()=>location.hash='#register'));
+  const f=el('button','linkbtn','忘记密码？');f.onclick=()=>location.hash='#forgot';c.appendChild(f);
+  c.appendChild(m);show(c);
 }
 
-function viewRegister(msg,err){
+/* ================= 视图：注册（邮箱验证码） ================= */
+function sendCodeOf(box,email,purpose,m,onFill){
+  return async()=>{
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+      m.className='msg err';m.textContent='请先填写有效邮箱';return;
+    }
+    box.disabled=true;
+    try{
+      const j=await api('send_code',{body:{email,purpose}});
+      if(j.data&&j.data.dev_code&&onFill)onFill(j.data.dev_code);
+      fillDev(j,m,onFill?box:null);
+    }catch(e){box.disabled=false;box.textContent='发送验证码';m.className='msg err';m.textContent=e.message;return;}
+    startCd(box);
+  };
+}
+
+function vRegister(){
   const c=card('注 册 REGISTER');
-  c.appendChild(field('用户名（3-32 位字母/数字/_- .，注册后不可改）','text','geekhonize 用户名','u'));
-  c.appendChild(field('邮箱（选填，找回密码用）','text','you@example.com','e'));
+  c.appendChild(field('用户名（3-32 位字母/数字/_- .）','text','geekhonize 用户名','u'));
+  c.appendChild(field('邮箱（用于接收验证码）','email','you@example.com','e'));
+  const rw=el('div','row');
+  const cd=field('邮箱验证码','text','6 位验证码','cd');cd.classList.add('grow');
+  const sb=btn('发送验证码','small ghost',null);
+  rw.appendChild(cd);rw.appendChild(sb);c.appendChild(rw);
   c.appendChild(field('密码（6-128 位）','password','••••••••','p'));
   c.appendChild(field('确认密码','password','••••••••','p2'));
-  const m=msgWrap(); if(err)m.className='msg err';
-  const b=el('button','','注册并登录');
-  b.onclick=async()=>{
+  const m=msgBox();
+  const reg=btn('注册并登录',null,async()=>{
     const q=n=>c.querySelector('[name='+n+']').value;
-    const u=q('u').trim(),e=q('e').trim(),p=q('p'),p2=q('p2');
-    if(!u||!p){m.className='msg err';m.textContent='请输入用户名与密码';return;}
+    const u=q('u').trim(),e=q('e').trim(),code=q('cd').trim(),p=q('p'),p2=q('p2');
+    if(!u||!e||!code||!p){m.className='msg err';m.textContent='请填写完整信息';return;}
     if(p!==p2){m.className='msg err';m.textContent='两次密码不一致';return;}
-    b.disabled=true;b.textContent='注册中…';
-    try{const body={username:u,password:p,app:'geekhonize-portal'};
-      if(e)body.email=e;
-      const j=await api('register',{body});
-      S={token:j.access_token,user:j.user}; persist(); render();
-    }catch(e){m.className='msg err';m.textContent=e.message;}
-    b.disabled=false;b.textContent='注册并登录';
-  };
-  c.appendChild(b);
-  const b2=el('button','ghost','← 返回登录'); b2.onclick=()=>renderLogin(); c.appendChild(b2);
-  c.appendChild(m);
-  show(c);
+    reg.disabled=true;reg.textContent='注册中…';
+    try{const j=await api('register',{body:{username:u,password:p,email:e,code:code,app:'geekhonize-portal'}});
+      S={token:j.access_token,user:j.user};persist();renderNav();location.hash='#me';
+    }catch(e2){m.className='msg err';m.textContent=e2.message;}
+    reg.disabled=false;reg.textContent='注册并登录';
+  });
+  const ev=()=>c.querySelector('[name=e]').value.trim();
+  sb.onclick=sendCodeOf(sb,ev(),'register',m,v=>{c.querySelector('[name=cd]').value=v;});
+  c.appendChild(reg);
+  c.appendChild(btn('← 返回登录','ghost',()=>location.hash='#login'));
+  c.appendChild(m);show(c);
 }
 
-function viewAccount(){
+/* ================= 视图：找回密码 ================= */
+function vForgot(){
+  const c=card('找回密码 RESET');
+  c.appendChild(field('绑定邮箱','email','you@example.com','e'));
+  const rw=el('div','row');
+  const cd=field('邮箱验证码','text','6 位验证码','cd');cd.classList.add('grow');
+  const sb=btn('发送验证码','small ghost',null);rw.appendChild(cd);rw.appendChild(sb);c.appendChild(rw);
+  c.appendChild(field('新密码（6-128 位）','password','••••••••','p'));
+  const m=msgBox();
+  const rs=btn('重置密码',null,async()=>{
+    const q=n=>c.querySelector('[name='+n+']').value;
+    const e=q('e').trim(),code=q('cd').trim(),p=q('p');
+    if(!e||!code||!p){m.className='msg err';m.textContent='请填写完整信息';return;}
+    rs.disabled=true;rs.textContent='提交中…';
+    try{await api('reset_password',{body:{email:e,code:code,new_password:p}});
+      m.className='msg ok';m.textContent='密码已重置，请用新密码登录';
+      setTimeout(()=>location.hash='#login',1300);
+    }catch(e2){m.className='msg err';m.textContent=e2.message;}
+    rs.disabled=false;rs.textContent='重置密码';
+  });
+  const ev=()=>c.querySelector('[name=e]').value.trim();
+  sb.onclick=sendCodeOf(sb,ev(),'reset',m,v=>{c.querySelector('[name=cd]').value=v;});
+  c.appendChild(rs);
+  c.appendChild(btn('← 返回登录','ghost',()=>location.hash='#login'));
+  c.appendChild(m);show(c);
+}
+
+/* ================= 视图：我的 ================= */
+function vMe(){
+  if(!S||!S.token){location.hash='#login';return;}
   const u=S.user||{};
-  const c=card('账号信息 ACCOUNT');
+  const c=card('我的账号 ACCOUNT',true);
   const who=el('div','who');
   const av=el('div','avatar',(u.display_name||u.username||'?').slice(0,1).toUpperCase());
-  const nm=el('div',''); nm.appendChild(el('div','nm',u.display_name||u.username));
-  const sub=el('div',''); const rl=el('div','rl'); (u.roles||[]).forEach(r=>rl.appendChild(el('i','',r)));
-  const idl=el('div','muted','@'+u.username+(u.email?(' · '+u.email):''));
-  nm.appendChild(idl); nm.appendChild(rl); who.appendChild(av); who.appendChild(nm); c.appendChild(who);
+  const info=el('div','');
+  info.appendChild(el('div','nm',u.display_name||u.username));
+  const rl=el('div','rl');(u.roles||[]).forEach(r=>rl.appendChild(el('i','',r)));
+  info.appendChild(rl);who.appendChild(av);who.appendChild(info);c.appendChild(who);
 
-  c.appendChild(el('div','apptag','breakfront'));
-  c.appendChild(el('div','apptag','geekhonize-portal'));
-  c.appendChild(el('div','apptag','sxsm'));
-  const note=el('div','muted','以上作品均已接入 Geekhonize 账号体系');
-  note.style.marginTop='6px'; c.appendChild(note);
+  const tabs=el('div','tabs');
+  [['overview','概览'],['profile','昵称'],['email','换绑邮箱'],['pw','修改密码']].forEach(([k,l])=>{
+    const b=btn(l,'small'+(meTab===k?' on':' ghost'),()=>{meTab=k;vMe();});tabs.appendChild(b);});
+  c.appendChild(tabs);
 
-  const d=el('div','sep'); c.appendChild(d);
-  const bL=el('button','ghost','修改密码'); bL.onclick=()=>viewChangePw(); c.appendChild(bL);
-  const bO=el('button','danger','退出登录'); bO.onclick=signout; c.appendChild(bO);
-  const bB=el('button','ghost','刷新身份'); bB.style.marginTop='10px';
-  bB.onclick=async()=>{bB.textContent='校验中…';
-    try{const j=await api('me',{method:'GET'}); const d=j.data||{};
-      S.user={username:d.username,roles:d.roles}; persist();
-      if(bB.textContent==='校验中…')bB.textContent='✓ 令牌有效（角色已刷新）';
-    }catch(e){signout(); }
-  };
-  c.appendChild(bB);
+  const body=card('');
+  if(meTab==='overview'){
+    const kv=el('div','kv');
+    rowkv(kv,'用户名','@'+(u.username||''));
+    rowkv(kv,'邮箱',u.email||'（未绑定）');
+    rowkv(kv,'邮箱状态',u.email?badge(u.email_verified?'已验证':'未验证',u.email_verified?'on':'off'):'—');
+    rowkv(kv,'角色',(u.roles||[]).join(' / '));
+    rowkv(kv,'ID',u.uid||'');
+    body.appendChild(kv);
+    const a=el('div','');a.appendChild(el('div','muted small','本账号可用作品：'));
+    ['breakfront','geekhonize-portal','sxsm'].forEach(x=>a.appendChild(el('span','apptag',x)));
+    body.appendChild(a);
+  }else if(meTab==='profile'){
+    body.appendChild(field('显示名 / 昵称','text',u.display_name||u.username||'','dn'));
+    const m=msgBox();
+    const b=btn('保存昵称',null,async()=>{
+      const dn=body.querySelector('[name=dn]').value.trim();
+      if(!dn){m.className='msg err';m.textContent='昵称不能为空';return;}
+      try{const j=await api('update_profile',{body:{display_name:dn}});
+        S.user.display_name=dn;persist();m.className='msg ok';m.textContent=j.msg||'已保存';
+        setTimeout(()=>vMe(),600);
+      }catch(e){m.className='msg err';m.textContent=e.message;}
+    });
+    body.appendChild(b);body.appendChild(m);
+  }else if(meTab==='email'){
+    body.appendChild(field('新邮箱','email','you@example.com','ne'));
+    const rw=el('div','row');const cd=field('验证码','text','6 位','cd');cd.classList.add('grow');
+    const sb=btn('发送验证码','small ghost',null);rw.appendChild(cd);rw.appendChild(sb);body.appendChild(rw);
+    const m=msgBox();
+    const b=btn('确认换绑',null,async()=>{
+      const ne=body.querySelector('[name=ne]').value.trim(),code=body.querySelector('[name=cd]').value.trim();
+      if(!ne||!code){m.className='msg err';m.textContent='请填写新邮箱与验证码';return;}
+      try{const j=await api('rebind_email',{body:{new_email:ne,code:code}});
+        S.user.email=ne;S.user.email_verified=true;persist();
+        m.className='msg ok';m.textContent=j.msg||'邮箱已更新';
+        setTimeout(()=>vMe(),700);
+      }catch(e){m.className='msg err';m.textContent=e.message;}
+    });
+    const ev=()=>body.querySelector('[name=ne]').value.trim();
+    sb.onclick=sendCodeOf(sb,ev(),'rebind',m,v=>{body.querySelector('[name=cd]').value=v;});
+    body.appendChild(b);body.appendChild(m);
+  }else if(meTab==='pw'){
+    body.appendChild(field('当前密码','password','','o'));
+    body.appendChild(field('新密码（6-128 位）','password','','n'));
+    body.appendChild(field('确认新密码','password','','n2'));
+    const m=msgBox();
+    const b=btn('确认修改',null,async()=>{
+      const q=n=>body.querySelector('[name='+n+']').value;
+      const o=q('o'),n=q('n'),n2=q('n2');
+      if(!o||!n){m.className='msg err';m.textContent='请填写完整';return;}
+      if(n!==n2){m.className='msg err';m.textContent='两次新密码不一致';return;}
+      try{await api('change_password',{body:{old_password:o,new_password:n}});
+        m.className='msg ok';m.textContent='密码已修改，请重新登录';
+        setTimeout(()=>{S=null;persist();renderNav();location.hash='#login';},1300);
+      }catch(e){m.className='msg err';m.textContent=e.message;}
+    });
+    body.appendChild(b);body.appendChild(m);
+  }
+  c.appendChild(body);
+  c.appendChild(btn('退出登录','danger',()=>{S=null;persist();renderNav();location.hash='#login';}));
   show(c);
 }
+function rowkv(kv,k,v){kv.appendChild(el('div','k',k));const d=el('div','');if(typeof v==='string')d.textContent=v;else d.appendChild(v);kv.appendChild(d);}
 
-function viewChangePw(msg,err){
-  const c=card('修改密码 CHANGE PASSWORD');
-  c.appendChild(field('当前密码','password','','o'));
-  c.appendChild(field('新密码（6-128 位）','password','','n'));
-  c.appendChild(field('确认新密码','password','','n2'));
-  const m=msgWrap(); if(err)m.className='msg err';
-  const b=el('button','','确认修改');
-  b.onclick=async()=>{
-    const q=n=>c.querySelector('[name='+n+']').value;
-    const o=q('o'),n=q('n'),n2=q('n2');
-    if(!o||!n){m.className='msg err';m.textContent='请填写完整';return;}
-    if(n!==n2){m.className='msg err';m.textContent='两次新密码不一致';return;}
-    b.disabled=true;b.textContent='提交中…';
-    try{const j=await api('change_password',{body:{old_password:o,new_password:n}});
-      m.className='msg ok';m.textContent=j.msg||'密码已更新';
-      signout(); setTimeout(render,1400);
-    }catch(e){m.className='msg err';m.textContent=e.message;}
-    b.disabled=false;b.textContent='确认修改';
-  };
-  c.appendChild(b);
-  const b2=el('button','ghost','← 返回账号'); b2.onclick=()=>render(); c.appendChild(b2);
-  c.appendChild(m);
+/* ================= 视图：管理 ================= */
+function vAdmin(){
+  if(!S||!S.token||!(S.user.roles||[]).includes('admin')){location.hash='#login';return;}
+  const c=card('用户管理 ADMIN',true);
+  const rw=el('div','row');
+  const q=field('搜索（用户名/邮箱，留空=全部）','text','','q');q.classList.add('grow');
+  const b=btn('查询','small ghost',()=>loadUsers(qs('#root input[name=q]').value.trim()));
+  rw.appendChild(q);rw.appendChild(b);c.appendChild(rw);
+  const box=card('');
+  c.appendChild(box);
   show(c);
+
+  async function loadUsers(qq){
+    box.innerHTML='';box.appendChild(el('div','muted small','加载中…'));
+    try{
+      const j=await api('admin/users?q='+encodeURIComponent(qq||''),{method:'GET'});
+      const list=(j.data&&j.data.users)||[];
+      box.innerHTML='';
+      if(!list.length){box.appendChild(el('div','muted small','无匹配用户'));return;}
+      const t=el('table','');const hr=el('tr');
+      ['ID','用户','邮箱','状态','角色','操作'].forEach(h=>hr.appendChild(el('th','',h)));
+      t.appendChild(hr);
+      list.forEach(u=>{
+        const tr=el('tr');
+        tr.appendChild(el('td','',String(u.id)));
+        const ud=el('td','');ud.appendChild(el('b','',u.username));
+        if(u.display_name&&u.display_name!==u.username)ud.appendChild(el('div','muted small','昵称：'+u.display_name));
+        tr.appendChild(ud);
+        tr.appendChild(el('td','',u.email||'—'));
+        const sd=el('td','');sd.appendChild(u.status===1?badge('正常','on'):badge('已封禁','band'));tr.appendChild(sd);
+        const rd=el('td','');(u.roles||[]).forEach(role=>rd.appendChild(badge(role)));tr.appendChild(rd);
+        const od=el('td','');
+        if(u.username!==(S.user.username||'')){
+          const rb=btn(u.status===1?'封禁':'解封','small '+(u.status===1?'danger':'ghost'),
+            async()=>{try{await api('admin/user',{body:{id:u.id,status:u.status===1?0:1}});loadUsers(qq);}catch(e){alert(e.message);}});
+          const rlb=btn('轮换角色','small ghost',async()=>{
+            const cur=u.roles||[];
+            const next=cur.includes('admin')?cur.filter(r=>r!=='admin').concat(['builder'])
+              :cur.includes('builder')?cur.filter(r=>r!=='builder').concat(['player'])
+              :cur.filter(r=>r!=='player').concat(['admin']);
+            try{await api('admin/user',{body:{id:u.id,roles:next}});loadUsers(qq);}catch(e){alert(e.message);}
+          });
+          od.appendChild(rb);od.appendChild(rlb);
+        }else od.appendChild(el('span','muted small','（本人）'));
+        tr.appendChild(od);t.appendChild(tr);
+      });
+      box.appendChild(t);
+    }catch(e){box.innerHTML='';box.appendChild(el('div','msg err',e.message));}
+  }
+  loadUsers(qs('#root input[name=q]')?qs('#root input[name=q]').value.trim():'');
 }
 
-/* ---------- 路由 ---------- */
-function render(){ if(S&&S.token) viewAccount(); else viewLogin(); }
-function renderLogin(){ if(S&&S.token) viewAccount(); else viewLogin(); }
-function renderRegister(){ viewRegister(); }
+/* ================= 路由 ================= */
+function route(){
+  const h=(location.hash||'#login').replace(/^#\/?/,'')||'login';
+  view=h.split('/')[0];
+  renderNav();
+  if(!S||!S.token){if(view==='me'||view==='admin')view='login';}
+  if(view==='login')vLogin();else if(view==='register')vRegister();
+  else if(view==='forgot')vForgot();else if(view==='me')vMe();
+  else if(view==='admin')vAdmin();else vLogin();
+}
+window.addEventListener('hashchange',route);
 
-/* 首屏：若有令牌 → 后台校验有效性，失败则静默登出 */
 (async function boot(){
   restore();
   if(S&&S.token){
-    try{await api('me',{method:'GET'});}
-    catch(e){S=null; persist();}
+    try{const j=await api('me',{method:'GET'});const d=j.data||{};
+      S.user={username:d.username,uid:d.uid,display_name:d.display_name,email:d.email,
+        email_verified:d.email_verified,roles:d.roles||[]};
+      persist();
+    }catch(e){S=null;persist();}
   }
-  render();
+  if(!location.hash)location.hash='#login';
+  route();
 })();
 </script>
 </body>

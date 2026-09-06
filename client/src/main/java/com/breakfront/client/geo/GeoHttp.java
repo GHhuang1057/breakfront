@@ -22,16 +22,24 @@ public final class GeoHttp {
     private GeoHttp() {
     }
 
-    public record Res(boolean ok, String token, String username, String msg) {
+    public record Res(boolean ok, String token, String username, String msg, String devCode) {
+        public Res(boolean ok, String token, String username, String msg) {
+            this(ok, token, username, msg, "");
+        }
     }
 
-    /** 注册并自动登录（app=breakfront）。 */
-    public static Res register(String user, String pass, String display) {
+    /** 发送邮箱验证码（注册/找回/换绑）。 */
+    public static Res sendCode(String email, String purpose) {
+        return post("/api/v1/auth/send_code",
+                "{\"email\":\"" + esc(email.trim()) + "\",\"purpose\":\"" + esc(purpose) + "\"}");
+    }
+
+    /** 注册（需邮箱验证码）并自动登录（app=breakfront）。 */
+    public static Res register(String user, String pass, String email, String code) {
         return post("/api/v1/auth/register",
                 "{\"username\":\"" + esc(user) + "\",\"password\":\"" + esc(pass)
-                        + "\",\"app\":\"breakfront\""
-                        + (display == null || display.isEmpty() ? "" : ",\"display_name\":\"" + esc(display) + "\"")
-                        + "}");
+                        + "\",\"email\":\"" + esc(email.trim()) + "\",\"code\":\"" + esc(code.trim())
+                        + "\",\"app\":\"breakfront\"}");
     }
 
     /** 登录。 */
@@ -51,15 +59,17 @@ public final class GeoHttp {
             HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
             String text = resp.body();
             if (resp.statusCode() != 200) {
-                return new Res(false, "", "", "服务返回 " + resp.statusCode());
+                return new Res(false, "", "", "服务返回 " + resp.statusCode(), "");
             }
             boolean ok = text.contains("\"ok\":true");
             String token = quoted(text, "access_token");
             String user = quoted(text, "username");
             String msg = ok ? "ok" : quoted(text, "msg");
-            return new Res(ok, token, user, msg == null ? "" : msg);
+            String devCode = quoted(text, "dev_code");
+            return new Res(ok, token, user, msg == null ? "" : msg,
+                    devCode == null ? "" : devCode);
         } catch (Exception e) {
-            return new Res(false, "", "", "网络错误：" + e.getClass().getSimpleName());
+            return new Res(false, "", "", "网络错误：" + e.getClass().getSimpleName(), "");
         }
     }
 

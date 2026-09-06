@@ -26,11 +26,6 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Breakfront Client —— 客户端入口（BF2042 UI 翻新版）。
- *
- * 职责：
- * - 主菜单替换：原版 TitleScreen 出现即切换为 BREAKFRONT 主菜单（一键直连，无服务器选择）
- * - S2C 接收：对局状态/击杀流 → ClientMatchState → HUD
- * - 世界渲染：据点区域描边环
  */
 public class BreakfrontClient implements ClientModInitializer {
 
@@ -41,8 +36,6 @@ public class BreakfrontClient implements ClientModInitializer {
 
     /** 本进程只跑一次启动预检（BootstrapScreen），完成后进主菜单。 */
     private static volatile boolean bootstrapped = false;
-
-    /** 管理控制台已独立为 Web 程序（core /bfadmin），客户端不再内置任何管理 UI。 */
 
     @Override
     public void onInitializeClient() {
@@ -59,7 +52,6 @@ public class BreakfrontClient implements ClientModInitializer {
         // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）+ 死亡替换为部署重生页
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.currentScreen instanceof TitleScreen) {
-                // 首次进入：先跑「启动预检屏」（更新+音频下载进度），完成后自动进主菜单
                 if (!bootstrapped) {
                     bootstrapped = true;
                     client.setScreen(new BfBootstrapScreen());
@@ -72,9 +64,6 @@ public class BreakfrontClient implements ClientModInitializer {
                 return;
             }
 
-            // 暂停屏接管：原版 GameMenuScreen(PauseScreen) 出现即替换为 BF 暂停屏。
-            // 选项…通过 parent=this 回跳；返回主菜单走 client.disconnect(TitleScreen)，
-            // 由下方 TitleScreen 分支接管为 BF 主菜单。BfPauseScreen 自身不会被再次命中。
             if (client.currentScreen != null) {
                 net.minecraft.client.gui.screen.Screen cur = client.currentScreen;
                 boolean isPause = cur instanceof GameMenuScreen
@@ -93,41 +82,30 @@ public class BreakfrontClient implements ClientModInitializer {
                     client.setScreen(new BfDeployScreen(false));
                 }
             } else if (ph == 2) {
-                // 战斗中：部署/阵亡页处理
                 if (client.currentScreen instanceof BfDeployScreen s) {
                     if (client.player.isAlive() || (!s.isRespawnMode())) {
                         s.close();
                     }
                 } else if (client.player.isDead()
                         && client.currentScreen instanceof net.minecraft.client.gui.screen.DeathScreen) {
-                    client.setScreen(new BfDeployScreen(true)); // 阵亡 → BF 部署页
+                    client.setScreen(new BfDeployScreen(true));
                 }
             } else if (client.currentScreen instanceof BfDeployScreen) {
                 client.currentScreen.close();
             }
         });
 
-        // S2C 接收：对局状态同步帧
+        // S2C 接收
         ClientPlayNetworking.registerGlobalReceiver(MatchStatePayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyMatch(payload)));
-
-        // S2C 接收：击杀流
         ClientPlayNetworking.registerGlobalReceiver(KillFeedPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyKill(payload)));
-
-        // S2C 接收：位置帧（雷达友军点）
         ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.PlayerPosPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyFriends(payload)));
-
-        // S2C 接收：比分/击杀榜
         ClientPlayNetworking.registerGlobalReceiver(ScoreboardPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyScoreboard(payload)));
-
-        // S2C 接收：命中反馈（HitMarker）
         ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.HitMarkerPayload.ID,
                 (payload, context) -> context.client().execute(() -> ClientMatchState.applyHit(payload)));
-
-        // S2C 接收：扇区编辑器预览（/bfs 会话）
         ClientPlayNetworking.registerGlobalReceiver(com.breakfront.net.SectorEditPayload.ID,
                 (payload, context) -> context.client().execute(() -> SectorEditState.apply(payload)));
 
@@ -138,13 +116,9 @@ public class BreakfrontClient implements ClientModInitializer {
                     if (mc.player == null) {
                         return;
                     }
-                    String head = switch (payload.op()) {
-                        case 1 -> "[Geekhonize] ";
-                        default -> "[Geekhonize] ";
-                    };
                     String roles = payload.rolesCsv().isEmpty() ? ""
                             : "（" + payload.rolesCsv() + "）";
-                    mc.player.sendMessage(net.minecraft.text.Text.literal(head
+                    mc.player.sendMessage(net.minecraft.text.Text.literal("[Geekhonize] "
                             + (payload.ok() ? "§a" : "§c") + payload.message()
                             + (payload.ok() && payload.username() != null
                             && !payload.username().isEmpty()
@@ -166,7 +140,7 @@ public class BreakfrontClient implements ClientModInitializer {
                     }
                 });
 
-        // GeoAuth：/geo login|register|logout|who（离线 MC 玩家登录 Geekhonize 账号）
+        // GeoAuth 命令：/geo login|register|sendcode|ui|logout|who
         net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register(
                 (dispatcher, registryAccess) -> dispatcher.register(
                         net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("geo")
@@ -176,7 +150,7 @@ public class BreakfrontClient implements ClientModInitializer {
                                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
                                                         .argument("password", com.mojang.brigadier.arguments.StringArgumentType.greedyString())
                                                         .executes(ctx -> {
-                                                            geoDo(false,
+                                                            geoLogin(
                                                                     com.mojang.brigadier.arguments.StringArgumentType
                                                                             .getString(ctx, "username"),
                                                                     com.mojang.brigadier.arguments.StringArgumentType
@@ -188,16 +162,34 @@ public class BreakfrontClient implements ClientModInitializer {
                                         .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
                                                 .argument("username", com.mojang.brigadier.arguments.StringArgumentType.word())
                                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
-                                                        .argument("password", com.mojang.brigadier.arguments.StringArgumentType.greedyString())
-                                                        .executes(ctx -> {
-                                                            geoDo(true,
-                                                                    com.mojang.brigadier.arguments.StringArgumentType
-                                                                            .getString(ctx, "username"),
-                                                                    com.mojang.brigadier.arguments.StringArgumentType
-                                                                            .getString(ctx, "password"),
-                                                                    MinecraftClient.getInstance());
-                                                            return 1;
-                                                        }))))
+                                                        .argument("email", com.mojang.brigadier.arguments.StringArgumentType.word())
+                                                        .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
+                                                                .argument("code", com.mojang.brigadier.arguments.StringArgumentType.word())
+                                                                .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
+                                                                        .argument("password", com.mojang.brigadier.arguments.StringArgumentType.greedyString())
+                                                                        .executes(ctx -> {
+                                                                            geoRegister(
+                                                                                    com.mojang.brigadier.arguments.StringArgumentType
+                                                                                            .getString(ctx, "username"),
+                                                                                    com.mojang.brigadier.arguments.StringArgumentType
+                                                                                            .getString(ctx, "email"),
+                                                                                    com.mojang.brigadier.arguments.StringArgumentType
+                                                                                            .getString(ctx, "code"),
+                                                                                    com.mojang.brigadier.arguments.StringArgumentType
+                                                                                            .getString(ctx, "password"),
+                                                                                    MinecraftClient.getInstance());
+                                                                            return 1;
+                                                                        }))))))
+                                .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("sendcode")
+                                        .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
+                                                .argument("email", com.mojang.brigadier.arguments.StringArgumentType.word())
+                                                .executes(ctx -> {
+                                                    geoSendCode(
+                                                            com.mojang.brigadier.arguments.StringArgumentType
+                                                                    .getString(ctx, "email"),
+                                                            MinecraftClient.getInstance());
+                                                    return 1;
+                                                })))
                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("logout")
                                         .executes(ctx -> {
                                             com.breakfront.client.geo.GeoSession.clear();
@@ -212,6 +204,18 @@ public class BreakfrontClient implements ClientModInitializer {
                                             }
                                             return 1;
                                         }))
+                                .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("who")
+                                        .executes(ctx -> {
+                                            var c = MinecraftClient.getInstance();
+                                            if (c.player != null) {
+                                                String u = com.breakfront.client.geo.GeoSession.username();
+                                                c.player.sendMessage(net.minecraft.text.Text.literal(
+                                                        "[Geekhonize] " + (u.isEmpty()
+                                                                ? "未登录（/geo login <用户名> <密码>；注册需邮箱验证码，网页端注册更佳）"
+                                                                : "已登录：" + u)), false);
+                                            }
+                                            return 1;
+                                        }))
                                 .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("ui")
                                         .executes(ctx -> {
                                             var c = MinecraftClient.getInstance();
@@ -221,68 +225,87 @@ public class BreakfrontClient implements ClientModInitializer {
                                                         c.currentScreen));
                                             }
                                             return 1;
-                                        }))
-                                .then(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("who")
-                                        .executes(ctx -> {
-                                            var c = MinecraftClient.getInstance();
-                                            if (c.player != null) {
-                                                String u = com.breakfront.client.geo.GeoSession.username();
-                                                c.player.sendMessage(net.minecraft.text.Text.literal(
-                                                        "[Geekhonize] " + (u.isEmpty()
-                                                                ? "未登录（/geo login <用户名> <密码>）"
-                                                                : "已登录：" + u)), false);
-                                            }
-                                            return 1;
                                         }))));
 
         HudRenderCallback.EVENT.register(new BreakfrontHud()::render);
-
-        // 据点区域描边（世界空间方形亮边）——战地式高亮
         WorldRenderEvents.AFTER_TRANSLUCENT.register(WorldZoneRings::render);
-
-        // 战场士兵标记（BF ESP）：友军蓝菱形穿墙可见 / 敌军红菱形被墙遮挡
         WorldRenderEvents.AFTER_TRANSLUCENT.register(
                 com.breakfront.client.hud.FriendlyHostileMarks::render);
-
-        // 扇区编辑器地面预览（世界空间圆环，按扇区分色）
         WorldRenderEvents.AFTER_TRANSLUCENT.register(SectorPreviewRenderer::render);
 
         // AI 增援：僵尸实体 → 史蒂夫士兵渲染（玩家模型+默认皮肤+持枪装备）
         net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
                 net.minecraft.entity.EntityType.ZOMBIE, com.breakfront.client.render.BotSoldierRenderer::new);
 
-        // 情境音乐播放器：低频评估场景（大厅/战斗/胜负），后台解码 mp3 + OpenAL 循环
+        // 情境音乐播放器
         ClientTickEvents.END_CLIENT_TICK.register(
                 com.breakfront.client.audio.BfMusicPlayer::tick);
     }
 
-    /** /geo login|register 执行：Auth 网络调用在 IO 线程，结果回主线程保存+进服绑定。 */
-    private static void geoDo(boolean register, String user, String pass, MinecraftClient c) {
+    // ================= /geo 执行 =================
+
+    /** /geo login <user> <pass>。 */
+    private static void geoLogin(String user, String pass, MinecraftClient c) {
         if (user == null || pass == null || user.isBlank() || pass.isBlank()) {
-            geoMsg(c, "§c用法：/geo " + (register ? "register" : "login")
-                    + " <用户名> <密码>");
+            geoMsg(c, "§c用法：/geo login <用户名> <密码>");
             return;
         }
-        String u = user.trim();
-        String pw = pass.trim();
         java.util.concurrent.CompletableFuture
-                .supplyAsync(() -> register
-                        ? com.breakfront.client.geo.GeoHttp.register(u, pw, u)
-                        : com.breakfront.client.geo.GeoHttp.login(u, pw))
+                .supplyAsync(() -> com.breakfront.client.geo.GeoHttp.login(user.trim(), pass.trim()))
                 .thenAccept(r -> c.execute(() -> {
                     if (r.ok()) {
-                        com.breakfront.client.geo.GeoSession.save(r.token(), r.username());
-                        if (c.getNetworkHandler() != null) {
-                            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
-                                    .send(new com.breakfront.net.AuthLoginPayload(r.token()));
-                        }
-                        geoMsg(c, "§a" + (register ? "注册并登录成功：" : "登录成功：")
-                                + r.username() + "（已自动与服务器绑定）");
+                        afterAuthOk(c, r, false);
                     } else {
-                        geoMsg(c, "§c" + (r.msg() == null || r.msg().isEmpty()
-                                ? "登录失败" : r.msg()));
+                        geoMsg(c, "§c" + (r.msg() == null || r.msg().isEmpty() ? "登录失败" : r.msg()));
                     }
                 }));
+    }
+
+    /** /geo register <user> <email> <code> <pass>。 */
+    private static void geoRegister(String user, String email, String code, String pass, MinecraftClient c) {
+        if (user == null || email == null || code == null || pass == null
+                || user.isBlank() || email.isBlank() || code.isBlank() || pass.isBlank()) {
+            geoMsg(c, "§c用法：/geo register <用户名> <邮箱> <验证码> <密码>（验证码用 /geo sendcode <邮箱> 获取）");
+            return;
+        }
+        java.util.concurrent.CompletableFuture
+                .supplyAsync(() -> com.breakfront.client.geo.GeoHttp
+                        .register(user.trim(), pass.trim(), email.trim(), code.trim()))
+                .thenAccept(r -> c.execute(() -> {
+                    if (r.ok()) {
+                        afterAuthOk(c, r, true);
+                    } else {
+                        geoMsg(c, "§c" + (r.msg() == null || r.msg().isEmpty() ? "注册失败" : r.msg()));
+                    }
+                }));
+    }
+
+    /** /geo sendcode <email>（注册用验证码）。 */
+    private static void geoSendCode(String email, MinecraftClient c) {
+        if (email == null || email.isBlank() || !email.contains("@")) {
+            geoMsg(c, "§c用法：/geo sendcode <邮箱>");
+            return;
+        }
+        java.util.concurrent.CompletableFuture
+                .supplyAsync(() -> com.breakfront.client.geo.GeoHttp.sendCode(email.trim(), "register"))
+                .thenAccept(r -> c.execute(() -> {
+                    if (r.ok()) {
+                        geoMsg(c, "§a验证码已发送" + (r.devCode() == null || r.devCode().isEmpty()
+                                ? "" : "（联调：" + r.devCode() + "）"));
+                    } else {
+                        geoMsg(c, "§c" + (r.msg() == null || r.msg().isEmpty() ? "发送失败" : r.msg()));
+                    }
+                }));
+    }
+
+    private static void afterAuthOk(MinecraftClient c, com.breakfront.client.geo.GeoHttp.Res r, boolean reg) {
+        com.breakfront.client.geo.GeoSession.save(r.token(), r.username());
+        if (c.getNetworkHandler() != null) {
+            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
+                    .send(new com.breakfront.net.AuthLoginPayload(r.token()));
+        }
+        geoMsg(c, "§a" + (reg ? "注册并登录成功：" : "登录成功：")
+                + r.username() + "（已自动与服务器绑定）");
     }
 
     private static void geoMsg(MinecraftClient c, String text) {

@@ -18,7 +18,7 @@
 
 use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -416,8 +416,8 @@ fn base64_std(data: &[u8]) -> String {
 }
 
 /// 读取 SMTP 多行响应直到 `prefix ` 结尾；非 2xx/3xx 立即报错。
-async fn read_reply<R: tokio::io::AsyncBufRead + Unpin>(
-    rd: &mut BufReader<R>,
+async fn read_reply<B: tokio::io::AsyncBufRead + Unpin>(
+    rd: &mut B,
     prefix: &str,
     line: &mut String,
 ) -> Result<String, String> {
@@ -534,7 +534,10 @@ async fn root() -> Json<serde_json::Value> {
             "POST /api/v1/auth/logout",
             "POST /api/v1/auth/change_password",
             "POST /api/v1/auth/reset_password {email,code,new_password}",
-            "POST /api/v1/auth/rebind_email   {new_email,code} (Bearer)"
+            "POST /api/v1/auth/rebind_email   {new_email,code} (Bearer)",
+            "POST /api/v1/auth/update_profile {display_name} (Bearer)",
+            "GET  /api/v1/auth/admin/users    ?q= (admin)",
+            "POST /api/v1/auth/admin/user     {id,roles?,status?} (admin)"
         ],
         "apps": ["breakfront", "geekhonize-portal", "sxsm"],
         "mail_mode": "stub"
@@ -819,6 +822,134 @@ async fn rebind_email(
     Ok(Json(ApiOk { ok: true, data: None, msg: Some("邮箱已更新".into()) }))
 }
 
+// ---------------- 资料与管理员 ----------------
+
+#[derive(Deserialize)]
+struct UpdateProfileReq {
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+/// 更新个人资料（昵称）。
+async fn update_profile(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateProfileReq>,
+) -> Result<Json<ApiOk<()>>, AppErr> {
+    let token = bearer(&headers).ok_or_else(|| AppErr(StatusCode::UNAUTHORIZED, "缺少令牌".into()))?;
+    let claims = decode_token(&st.cfg, &token)?;
+    let dn = req.display_name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let dn = match dn {
+        Some(s) if s.chars().count() <= 64 => s,
+        _ => return Err(AppErr(StatusCode::BAD_REQUEST, "昵称需 1-64 字符".into())),
+    };
+    sqlx::query("UPDATE users SET display_name=? WHERE id=?")
+        .bind(&dn)
+        .bind(claims.uid)
+        .execute(&st.pool)
+        .await?;
+    Ok(Json(ApiOk { ok: true, data: None, msg: Some("昵称已更新".into()) }))
+}
+
+#[derive(Deserialize)]
+struct UsersQuery {
+    #[serde(default)]
+    q: Option<String>,
+}
+
+async fn require_admin(
+    st: &AppState,
+    headers: &HeaderMap,
+) -> Result<Claims, AppErr> {
+    let token = bearer(headers).ok_or_else(|| AppErr(StatusCode::UNAUTHORIZED, "缺少令牌".into()))?;
+    let claims = decode_token(&st.cfg, &token)?;
+    if !claims.roles.iter().any(|r| r == "admin") {
+        return Err(AppErr(StatusCode::FORBIDDEN, "需要管理员权限".into()));
+    }
+    Ok(claims)
+}
+
+/// 管理员：用户列表（支持用户名/邮箱模糊搜索）。
+async fn admin_users(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<UsersQuery>,
+) -> Result<Json<serde_json::Value>, AppErr> {
+    let _actor = require_admin(&st, &headers).await?;
+    let qf = q.q.unwrap_or_default().trim().to_lowercase();
+    let rows: Vec<(u64, String, Option<String>, Option<String>, String, i8, String)> = if qf.is_empty() {
+        sqlx::query_as(
+            "SELECT id, username, email, display_name, roles, status, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i') FROM users ORDER BY id DESC LIMIT 200",
+        )
+        .fetch_all(&st.pool)
+        .await?
+    } else {
+        let like = format!("%{qf}%");
+        sqlx::query_as(
+            "SELECT id, username, email, display_name, roles, status, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i') FROM users WHERE username LIKE ? OR email LIKE ? ORDER BY id DESC LIMIT 200",
+        )
+        .bind(&like)
+        .bind(&like)
+        .fetch_all(&st.pool)
+        .await?
+    };
+    let users: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(id, username, email, dname, roles, status, created)| {
+            let role_list: Vec<String> = roles.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect();
+            serde_json::json!({
+                "id": id, "username": username, "email": email,
+                "display_name": dname, "roles": role_list, "status": status, "created_at": created
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({"ok": true, "data": {"users": users}})))
+}
+
+#[derive(Deserialize)]
+struct AdminUserReq {
+    id: u64,
+    #[serde(default)]
+    roles: Option<Vec<String>>,
+    #[serde(default)]
+    status: Option<i8>,
+}
+
+/// 管理员：改角色 / 封禁解封（禁操作自己；角色白名单校验）。
+async fn admin_user(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AdminUserReq>,
+) -> Result<Json<ApiOk<()>>, AppErr> {
+    let actor = require_admin(&st, &headers).await?;
+    if req.id == actor.uid {
+        return Err(AppErr(StatusCode::BAD_REQUEST, "不能操作自己的账号".into()));
+    }
+    if let Some(roles) = &req.roles {
+        let allowed = ["player", "admin", "builder"];
+        if roles.is_empty() || roles.iter().any(|r| !allowed.contains(&r.as_str())) {
+            return Err(AppErr(StatusCode::BAD_REQUEST, "角色只能包含 player/admin/builder".into()));
+        }
+        let csv = roles.join(",");
+        sqlx::query("UPDATE users SET roles=? WHERE id=?")
+            .bind(&csv)
+            .bind(req.id)
+            .execute(&st.pool)
+            .await?;
+    }
+    if let Some(status) = req.status {
+        if status != 0 && status != 1 {
+            return Err(AppErr(StatusCode::BAD_REQUEST, "status 只能为 0/1".into()));
+        }
+        sqlx::query("UPDATE users SET status=? WHERE id=?")
+            .bind(status)
+            .bind(req.id)
+            .execute(&st.pool)
+            .await?;
+    }
+    Ok(Json(ApiOk { ok: true, data: None, msg: Some("已更新".into()) }))
+}
+
 fn bearer(headers: &HeaderMap) -> Option<String> {
     headers
         .get("authorization")
@@ -875,6 +1006,9 @@ async fn main() {
         .route("/api/v1/auth/change_password", axum::routing::post(change_password))
         .route("/api/v1/auth/reset_password", axum::routing::post(reset_password))
         .route("/api/v1/auth/rebind_email", axum::routing::post(rebind_email))
+        .route("/api/v1/auth/update_profile", axum::routing::post(update_profile))
+        .route("/api/v1/auth/admin/users", get(admin_users))
+        .route("/api/v1/auth/admin/user", axum::routing::post(admin_user))
         .layer(cors)
         .with_state(state);
 

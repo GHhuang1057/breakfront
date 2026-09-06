@@ -13,9 +13,8 @@ import org.lwjgl.glfw.GLFW;
 /**
  * Geekhonize 账号登录 / 注册屏（BREAKFRONT 矢量风格，无贴图）。
  *
- * <p>供离线 MC 玩家在进服前（主菜单）或游戏内（/geo ui）登录统一账号：
- * 直连 auth.geekhonize.top 注册/登录 → token 存本地 → 进服自动携带令牌与服务器绑定
- * （防自报名冒名）。已登录态显示账号并可退出/提示网页端改密。
+ * <p>登录：直连 auth.geekhonize.top；注册：需邮箱 + 验证码（可一键发送，stub 联调自动回填）。
+ * token 存本地（GeoSession），进服自动携带令牌与服务器绑定（防自报名冒名）。
  */
 public class BfGeoLoginScreen extends Screen {
 
@@ -24,10 +23,16 @@ public class BfGeoLoginScreen extends Screen {
     // 输入态
     private String userBuf = "";
     private String passBuf = "";
-    private int focus = 0;                 // 0 用户名 / 1 密码
-    private boolean registerMode = false;  // 登录 or 注册
+    private String emailBuf = "";
+    private String codeBuf = "";
+    private int focus = 0;                 // 0 用户名 / 1 密码 / 2 邮箱 / 3 验证码
+    private boolean registerMode = false;
     private boolean busy = false;
     private boolean showPw = false;
+
+    // 验证码发送倒计时（毫秒时间戳，0=可发送）
+    private long sendCdUntil = 0;
+    private boolean sendBusy = false;
 
     // 反馈
     private String msgText = "";
@@ -35,9 +40,12 @@ public class BfGeoLoginScreen extends Screen {
 
     // 布局（每次 render 重算；鼠标命中复用）
     private int panelX, panelY, panelW, panelH;
-    private int boxX, boxW, boxH, userBoxY, passBoxY;
+    private int boxX, boxW, boxH;
+    private final int[] boxY = new int[4];
+    private int rows;
     private int submitX, submitY, submitW, submitH;
     private int toggleX, toggleY, toggleW, toggleH;
+    private int sendX, sendY, sendW, sendH;
     private int logoutX, logoutY, logoutW, logoutH;
     private int closeX, closeY, closeW, closeH;
 
@@ -61,37 +69,46 @@ public class BfGeoLoginScreen extends Screen {
         layout();
 
         if (GeoSession.signedIn()) {
-            renderSignedIn(ctx, mouseX, mouseY, sw);
+            renderSignedIn(ctx, mouseX, mouseY);
         } else {
-            renderForm(ctx, mouseX, mouseY, sw);
+            renderForm(ctx, mouseX, mouseY);
         }
     }
 
     private void layout() {
         int sw = this.width;
         int sh = this.height;
-        panelW = Math.min(440, sw - 56);
+        panelW = Math.min(460, sw - 56);
         boolean si = GeoSession.signedIn();
-        panelH = si ? 232 : 306;
+        rows = (si || !registerMode) ? 2 : 4;
+        panelH = si ? 232 : (registerMode ? 300 + (rows - 2) * 62 : 300);
         panelX = (sw - panelW) / 2;
-        panelY = Math.max(24, (sh - panelH) / 2 - 20);
+        panelY = Math.max(24, (sh - panelH) / 2 - 16);
 
         boxX = panelX + 30;
         boxW = panelW - 60;
         boxH = 36;
-        userBoxY = panelY + (si ? 0 : 96);
-        passBoxY = userBoxY + boxH + 30;
+        int baseY = si ? panelY : panelY + 88;
+        for (int i = 0; i < rows; i++) {
+            boxY[i] = baseY + i * 62;
+        }
 
-        int bottomPad = si ? 40 : 62;
         submitW = Math.min(240, panelW - 60);
         submitH = 40;
         submitX = panelX + (panelW - submitW) / 2;
-        submitY = panelY + panelH - bottomPad - submitH;
+        int rowsEnd = si ? panelY : (rows > 0 ? boxY[rows - 1] + boxH : panelY);
+        submitY = Math.max(si ? panelY : rowsEnd + 30, panelY + panelH - 96);
 
-        toggleW = 200;
+        toggleW = 220;
         toggleH = 22;
         toggleX = panelX + (panelW - toggleW) / 2;
         toggleY = submitY + submitH + 6;
+
+        // 发送验证码（仅注册模式，位于验证码行内右侧）
+        sendW = 118;
+        sendH = 26;
+        sendX = panelX + panelW - 30 - sendW;
+        sendY = (registerMode && rows == 4) ? boxY[3] + boxH - sendH - 5 : 0;
 
         logoutW = Math.min(180, (panelW - 60) / 2);
         logoutH = 36;
@@ -102,21 +119,59 @@ public class BfGeoLoginScreen extends Screen {
         closeY = logoutY;
     }
 
-    private void renderForm(DrawContext ctx, int mouseX, int mouseY, int sw) {
+    private void renderForm(DrawContext ctx, int mouseX, int mouseY) {
         panel(ctx);
-        // 标题
-        int ty = panelY + 22;
+        int ty = panelY + 20;
         ctx.drawText(this.textRenderer, Text.literal("GEEKHONIZE 账号"),
                 panelX + 30, ty, BfTheme.TEAL, false);
         ctx.drawText(this.textRenderer,
-                Text.literal(registerMode ? "注册 Geekhonize 账号" : "登录后进服自动绑定 · 防冒名"),
+                Text.literal(registerMode ? "邮箱验证码注册（一个账号通行全部作品）"
+                        : "登录后进服自动绑定 · 防冒名"),
                 panelX + 30, ty + 14, BfTheme.MUTED, false);
 
-        // 用户名框
-        drawBox(ctx, "用户名", userBuf, userBoxY, focus == 0, mouseX, mouseY, false);
-        // 密码框
-        drawBox(ctx, registerMode ? "密码（6-128 位）" : "密码", passBuf, passBoxY,
-                focus == 1, mouseX, mouseY, true);
+        drawBox(ctx, "用户名", userBuf, boxY[0], focus == 0, mouseX, mouseY, false, 32);
+        drawBox(ctx, registerMode ? "密码（6-128 位）" : "密码", passBuf, boxY[1],
+                focus == 1, mouseX, mouseY, true, 128);
+        if (rows == 4) {
+            drawBox(ctx, "邮箱（接收验证码）", emailBuf, boxY[2],
+                    focus == 2, mouseX, mouseY, false, 160);
+            // 验证码框收窄给发送按钮让位
+            int cdX = boxX;
+            int cdW = boxW - sendW - 10;
+            ctx.drawText(this.textRenderer, Text.literal("邮箱验证码"),
+                    boxX, boxY[3] - 12, focus == 3 ? BfTheme.TEAL : BfTheme.MUTED, false);
+            boolean fov = inRect(mouseX, mouseY, cdX, boxY[3], cdW, boxH);
+            BfDraw.border(ctx, cdX - (fov || focus == 3 ? 1 : 0), boxY[3] - (fov || focus == 3 ? 1 : 0),
+                    cdW + (fov || focus == 3 ? 2 : 0), boxH + (fov || focus == 3 ? 2 : 0),
+                    (focus == 3 ? BfTheme.TEAL : (fov ? BfTheme.PANEL_LINE : BfTheme.PANEL_LINE)));
+            BfDraw.fill(ctx, cdX, boxY[3], cdW, boxH, 0xF00B121C);
+            String shown = codeBuf;
+            int tyy = boxY[3] + boxH / 2 - this.textRenderer.fontHeight / 2;
+            ctx.drawText(this.textRenderer, Text.literal(shown), cdX + 10, tyy,
+                    BfTheme.TEXT, false);
+            if (focus == 3 && blinkOn()) {
+                int tw = this.textRenderer.getWidth(shown);
+                BfDraw.fill(ctx, cdX + 12 + tw, tyy, 1, this.textRenderer.fontHeight, BfTheme.TEAL);
+            }
+            // 发送验证码按钮 / 倒计时
+            long left = (sendCdUntil - System.currentTimeMillis() + 999) / 1000;
+            boolean canSend = left <= 0 && !sendBusy && !busy;
+            boolean shov = inRect(mouseX, mouseY, sendX, sendY, sendW, sendH);
+            String lb = sendBusy ? "发送中…" : (left > 0 ? "重新发送(" + left + "s)" : "发送验证码");
+            if (canSend && shov) {
+                BfGlow.rect(ctx, sendX - 2, sendY - 2, sendW + 4, sendH + 4,
+                        BfTheme.TEAL & 0xFFFFFF, 30, 5);
+            }
+            BfDraw.parallelogram(ctx, sendX, sendY, sendW, sendH, 4,
+                    canSend ? BfTheme.TEAL : BfTheme.PANEL);
+            BfDraw.border(ctx, sendX, sendY, sendW, sendH,
+                    canSend ? BfTheme.TEAL : BfTheme.PANEL_LINE);
+            int lbw = this.textRenderer.getWidth(lb);
+            ctx.drawText(this.textRenderer, Text.literal(lb),
+                    sendX + sendW / 2 - lbw / 2 + 3,
+                    sendY + sendH / 2 - this.textRenderer.fontHeight / 2,
+                    canSend ? 0xFF0A0D12 : BfTheme.MUTED, false);
+        }
 
         // 主按钮
         boolean hover = inRect(mouseX, mouseY, submitX, submitY, submitW, submitH);
@@ -134,7 +189,7 @@ public class BfGeoLoginScreen extends Screen {
                 busy ? BfTheme.MUTED : 0xFF0A0D12, false);
 
         // 切换 登录/注册
-        String tg = registerMode ? "← 已有账号？返回登录" : "没有账号？注册一个（同时登录）";
+        String tg = registerMode ? "← 已有账号？返回登录" : "没有账号？邮箱验证码注册";
         int gw = this.textRenderer.getWidth(tg);
         boolean gh = inRect(mouseX, mouseY, toggleX, toggleY, toggleW, toggleH);
         ctx.drawText(this.textRenderer, Text.literal(tg),
@@ -142,13 +197,14 @@ public class BfGeoLoginScreen extends Screen {
                 gh ? BfTheme.TEAL : BfTheme.MUTED, false);
 
         // 反馈
+        int fy = (rows == 4 ? sendY + sendH : toggleY + 24) + 12;
         if (!msgText.isEmpty()) {
             ctx.drawText(this.textRenderer, Text.literal(msgText),
-                    panelX + 30, toggleY + 24, msgOk ? BfTheme.GREEN : BfTheme.RED, false);
+                    panelX + 30, fy, msgOk ? BfTheme.GREEN : BfTheme.RED, false);
         }
     }
 
-    private void renderSignedIn(DrawContext ctx, int mouseX, int mouseY, int sw) {
+    private void renderSignedIn(DrawContext ctx, int mouseX, int mouseY) {
         panel(ctx);
         int ty = panelY + 24;
         ctx.drawText(this.textRenderer, Text.literal("已登录 Geekhonize"),
@@ -157,7 +213,6 @@ public class BfGeoLoginScreen extends Screen {
         String u = GeoSession.username();
         int ux = panelX + 30;
         int uy = ty + 26;
-        // 首字母方块
         BfDraw.diamond(ctx, ux + 12, uy + 8, 10, BfTheme.TEAL);
         ctx.drawText(this.textRenderer,
                 Text.literal((u.isEmpty() ? "?" : u.substring(0, 1).toUpperCase())),
@@ -170,17 +225,15 @@ public class BfGeoLoginScreen extends Screen {
                 Text.literal("进服后自动与服务器绑定 · 角色以服务端校验为准"),
                 ux, infoY, BfTheme.MUTED, false);
         ctx.drawText(this.textRenderer,
-                Text.literal("网页端改密 / 管理：auth.geekhonize.top"),
+                Text.literal("网页端找回/改密/换绑邮箱：auth.geekhonize.top"),
                 ux, infoY + 14, BfTheme.FAINT, false);
 
-        // 退出
         boolean lh = inRect(mouseX, mouseY, logoutX, logoutY, logoutW, logoutH);
         if (lh) {
             BfGlow.rect(ctx, logoutX - 2, logoutY - 2, logoutW + 4, logoutH + 4,
                     BfTheme.RED & 0xFFFFFF, 34, 5);
         }
-        BfDraw.parallelogram(ctx, logoutX, logoutY, logoutW, logoutH, 5,
-                0xE6161C25);
+        BfDraw.parallelogram(ctx, logoutX, logoutY, logoutW, logoutH, 5, 0xE6161C25);
         BfDraw.border(ctx, logoutX, logoutY, logoutW, logoutH,
                 lh ? BfTheme.RED_DIM : BfTheme.PANEL_LINE);
         String lb = "退出登录";
@@ -190,7 +243,6 @@ public class BfGeoLoginScreen extends Screen {
                 logoutY + logoutH / 2 - this.textRenderer.fontHeight / 2,
                 lh ? BfTheme.RED : BfTheme.TEXT_DIM, false);
 
-        // 关闭
         boolean ch = inRect(mouseX, mouseY, closeX, closeY, closeW, closeH);
         if (ch) {
             BfGlow.rect(ctx, closeX - 2, closeY - 2, closeW + 4, closeH + 4,
@@ -214,36 +266,32 @@ public class BfGeoLoginScreen extends Screen {
         BfDraw.fill(ctx, panelX, panelY, panelW, panelH, BfTheme.PANEL);
         BfDraw.fill(ctx, panelX, panelY, panelW, 3, BfTheme.TEAL);
         BfDraw.border(ctx, panelX, panelY, panelW, panelH, BfTheme.PANEL_LINE);
-        // 右下角青点（装饰呼应）
-        BfDraw.fill(ctx, panelX + panelW - 6, panelY + panelH - 6, 6, 6,
-                0x2435E6D2);
+        BfDraw.fill(ctx, panelX + panelW - 6, panelY + panelH - 6, 6, 6, 0x2435E6D2);
     }
 
     private void drawBox(DrawContext ctx, String label, String val, int y,
-                         boolean focused, int mx, int my, boolean secret) {
+                         boolean focused, int mx, int my, boolean secret, int maxLen) {
         ctx.drawText(this.textRenderer, Text.literal(label),
                 boxX, y - 12, focused ? BfTheme.TEAL : BfTheme.MUTED, false);
         boolean hover = inRect(mx, my, boxX, y, boxW, boxH);
-        if (focused || hover) {
-            BfDraw.border(ctx, boxX - 1, y - 1, boxW + 2, boxH + 2,
-                    focused ? BfTheme.TEAL : BfTheme.PANEL_LINE);
-        } else {
-            BfDraw.border(ctx, boxX, y, boxW, boxH, BfTheme.PANEL_LINE);
-        }
+        BfDraw.border(ctx, boxX - (focused || hover ? 1 : 0), y - (focused || hover ? 1 : 0),
+                boxW + (focused || hover ? 2 : 0), boxH + (focused || hover ? 2 : 0),
+                focused ? BfTheme.TEAL : (hover ? BfTheme.PANEL_LINE : BfTheme.PANEL_LINE));
         BfDraw.fill(ctx, boxX, y, boxW, boxH, 0xF00B121C);
 
         String shown = secret ? mask(val) : val;
+        if (secret && showPw) {
+            shown = val;
+        }
         int ty = y + boxH / 2 - this.textRenderer.fontHeight / 2;
         ctx.drawText(this.textRenderer, Text.literal(shown), boxX + 10, ty,
                 BfTheme.TEXT, false);
         if (focused && blinkOn()) {
             int tw = this.textRenderer.getWidth(shown);
-            BfDraw.fill(ctx, boxX + 12 + tw, ty, 1, this.textRenderer.fontHeight,
-                    BfTheme.TEAL);
+            BfDraw.fill(ctx, boxX + 12 + tw, ty, 1, this.textRenderer.fontHeight, BfTheme.TEAL);
         }
-        // 输入上限/显示切换小字
-        String hint = secret && !val.isEmpty() ? (showPw ? "隐藏" : "显示") : "";
-        if (!hint.isEmpty()) {
+        if (secret && !val.isEmpty()) {
+            String hint = showPw ? "隐藏" : "显示";
             int hw = this.textRenderer.getWidth(hint);
             ctx.drawText(this.textRenderer, Text.literal(hint),
                     boxX + boxW - hw - 10, ty,
@@ -279,18 +327,28 @@ public class BfGeoLoginScreen extends Screen {
             }
             return false;
         }
-        // 输入框聚焦
-        if (inRect(mx, my, boxX, userBoxY, boxW, boxH)) {
-            focus = 0;
-            return true;
+        // 输入行聚焦（注册模式 4 行，登录 2 行）
+        for (int i = 0; i < rows; i++) {
+            if (inRect(mx, my, boxX, boxY[i], boxW, boxH)) {
+                focus = i;
+                return true;
+            }
         }
-        if (inRect(mx, my, boxX, passBoxY, boxW, boxH)) {
-            focus = 1;
-            return true;
+        // 验证码行较窄的框
+        if (rows == 4) {
+            int cdW = boxW - sendW - 10;
+            if (inRect(mx, my, boxX, boxY[3], cdW, boxH)) {
+                focus = 3;
+                return true;
+            }
+            if (inRect(mx, my, sendX, sendY, sendW, sendH)) {
+                doSendCode();
+                return true;
+            }
         }
-        // 密码可见切换
+        // 密码显示切换
         if (focus == 1 && !passBuf.isEmpty()
-                && inRect(mx, my, boxX + boxW - 56, passBoxY, 46, boxH)) {
+                && inRect(mx, my, boxX + boxW - 56, boxY[1], 46, boxH)) {
             showPw = !showPw;
             return true;
         }
@@ -313,7 +371,8 @@ public class BfGeoLoginScreen extends Screen {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
         if (keyCode == GLFW.GLFW_KEY_TAB) {
-            focus = 1 - focus;
+            int n = rows;
+            focus = (focus + 1) % n;
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_BACKSPACE) {
@@ -321,6 +380,10 @@ public class BfGeoLoginScreen extends Screen {
                 userBuf = userBuf.substring(0, userBuf.length() - 1);
             } else if (focus == 1 && !passBuf.isEmpty()) {
                 passBuf = passBuf.substring(0, passBuf.length() - 1);
+            } else if (focus == 2 && !emailBuf.isEmpty()) {
+                emailBuf = emailBuf.substring(0, emailBuf.length() - 1);
+            } else if (focus == 3 && !codeBuf.isEmpty()) {
+                codeBuf = codeBuf.substring(0, codeBuf.length() - 1);
             }
             return true;
         }
@@ -347,7 +410,45 @@ public class BfGeoLoginScreen extends Screen {
             passBuf += chr;
             return true;
         }
+        if (focus == 2 && emailBuf.length() < 160) {
+            emailBuf += chr;
+            return true;
+        }
+        if (focus == 3 && codeBuf.length() < 6 && Character.isDigit(chr)) {
+            codeBuf += chr;
+            return true;
+        }
         return false;
+    }
+
+    private void doSendCode() {
+        if (busy || sendBusy) {
+            return;
+        }
+        String email = emailBuf.trim();
+        if (!email.contains("@") || email.length() < 5) {
+            msgText = "请先填写有效邮箱";
+            msgOk = false;
+            focus = 2;
+            return;
+        }
+        sendBusy = true;
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> GeoHttp.sendCode(email, "register"))
+                .thenAccept(r -> this.client.execute(() -> {
+                    sendBusy = false;
+                    if (r.ok()) {
+                        sendCdUntil = System.currentTimeMillis() + 60_000;
+                        msgText = "验证码已发送";
+                        msgOk = true;
+                        if (!r.devCode().isEmpty() && codeBuf.isEmpty()) {
+                            codeBuf = r.devCode(); // stub 联调自动回填
+                            focus = 3;
+                        }
+                    } else {
+                        msgText = r.msg() == null || r.msg().isEmpty() ? "发送失败" : r.msg();
+                        msgOk = false;
+                    }
+                }));
     }
 
     private void submit() {
@@ -361,43 +462,56 @@ public class BfGeoLoginScreen extends Screen {
             msgOk = false;
             return;
         }
-        busy = true;
-        msgText = "";
-        final boolean reg = registerMode;
-        java.util.concurrent.CompletableFuture.supplyAsync(() -> reg
-                ? GeoHttp.register(u, p, u)
-                : GeoHttp.login(u, p))
-                .thenAccept(r -> this.client.execute(() -> {
-                    busy = false;
-                    if (r.ok()) {
-                        GeoSession.save(r.token(), r.username());
-                        msgText = (reg ? "注册并登录成功：" : "登录成功：") + r.username();
-                        msgOk = true;
-                        // 已在服务器内 → 立即绑定（与 JOIN 自动绑定同通道）
-                        if (this.client.getNetworkHandler() != null) {
-                            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
-                                    .send(new com.breakfront.net.AuthLoginPayload(r.token()));
-                        }
-                        // 稍后自动切入「已登录」视图（后台计时，不阻塞渲染线程）
-                        Thread t = new Thread(() -> {
-                            try {
-                                Thread.sleep(900);
-                            } catch (InterruptedException ignored) {
-                            }
-                            this.client.execute(() -> {
-                                if (this.client.currentScreen == BfGeoLoginScreen.this) {
-                                    GeoSession.load();
-                                    msgText = "";
-                                }
-                            });
-                        });
-                        t.setDaemon(true);
-                        t.start();
-                    } else {
-                        msgText = r.msg() == null || r.msg().isEmpty() ? "登录失败" : r.msg();
-                        msgOk = false;
+        if (registerMode) {
+            String email = emailBuf.trim();
+            String code = codeBuf.trim();
+            if (email.isEmpty() || code.isEmpty()) {
+                msgText = "注册需填写邮箱与验证码";
+                msgOk = false;
+                return;
+            }
+            final String fe = email;
+            final String fc = code;
+            busy = true;
+            msgText = "";
+            java.util.concurrent.CompletableFuture.supplyAsync(() -> GeoHttp.register(u, p, fe, fc))
+                    .thenAccept(r -> this.client.execute(() -> onAuthResult(r, true)));
+        } else {
+            busy = true;
+            msgText = "";
+            java.util.concurrent.CompletableFuture.supplyAsync(() -> GeoHttp.login(u, p))
+                    .thenAccept(r -> this.client.execute(() -> onAuthResult(r, false)));
+        }
+    }
+
+    private void onAuthResult(GeoHttp.Res r, boolean reg) {
+        busy = false;
+        if (r.ok()) {
+            GeoSession.save(r.token(), r.username());
+            msgText = (reg ? "注册并登录成功：" : "登录成功：") + r.username();
+            msgOk = true;
+            if (this.client.getNetworkHandler() != null) {
+                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
+                        .send(new com.breakfront.net.AuthLoginPayload(r.token()));
+            }
+            Thread t = new Thread(() -> {
+                try {
+                    Thread.sleep(900);
+                } catch (InterruptedException ignored) {
+                }
+                this.client.execute(() -> {
+                    if (this.client.currentScreen == BfGeoLoginScreen.this) {
+                        GeoSession.load();
+                        msgText = "";
                     }
-                }));
+                });
+            });
+            t.setDaemon(true);
+            t.start();
+        } else {
+            msgText = r.msg() == null || r.msg().isEmpty() ? "操作失败" : r.msg();
+            msgOk = false;
+        }
     }
 
     private void doLogout() {
@@ -408,7 +522,10 @@ public class BfGeoLoginScreen extends Screen {
         }
         userBuf = "";
         passBuf = "";
+        emailBuf = "";
+        codeBuf = "";
         registerMode = false;
+        sendCdUntil = 0;
         msgText = "已退出登录";
         msgOk = true;
     }
