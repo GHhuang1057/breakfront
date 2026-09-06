@@ -249,7 +249,7 @@ public final class NpcSquad {
         // 名字牌不显示：头顶阵营标记由客户端 FriendlyHostileMarks 接管（蓝=友/红=敌，穿墙语义不同）
         e.setCustomNameVisible(false);
         e.setAiDisabled(false);     // v0.7：启用原版导航 AI，移动交给 getNavigation()
-        e.setPersistent(true);      // 防距离 despawn（玩家离出生区>128 格时 mob 被清→整批消失再补员）
+        e.setPersistent();          // 防距离 despawn（玩家离出生区>128 格时 mob 被清→整批消失再补员）
         e.setNoGravity(false);      // 让导航按地形行走（落体/爬台阶正常）
         e.setSilent(true);          // 不出僵尸声（配合客户端去原版音效）
         e.addCommandTag("breakfront.npc");
