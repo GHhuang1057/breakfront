@@ -7,8 +7,15 @@ import com.breakfront.game.Sector;
 import com.breakfront.game.Side;
 import com.breakfront.game.ZoneState;
 import com.sun.net.httpserver.HttpExchange;
+import net.minecraft.block.BlockState;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.Heightmap;
+
+import java.util.Base64;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -37,6 +44,17 @@ public final class WebAdminConsole {
     /** 会话持久化文件（runDir/breakfront/webtokens.txt）：重启/热更后恢复，浏览器不再 401。 */
     private static volatile java.nio.file.Path tokenFile;
     private static volatile String lastCmdResult = "";
+
+    // ---- 地形底图采样缓存（/bfadmin/api/mapterrain，90s 静态缓存）----
+    private static final Object TERRAIN_LOCK = new Object();
+    private static volatile long terrainCachedAt = 0;
+    private static volatile String terrainKey = "";
+    private static volatile byte[] terrainBytes = null;
+    private static volatile int terrainW = 0, terrainH = 0, terrainStep = 0, terrainX0 = 0, terrainZ0 = 0;
+    /** 底色 / 默认色（无数据或未知方块）：低饱和蓝灰 55697E。 */
+    private static final int[] TERRAIN_BASE = {0x55, 0x69, 0x7E};
+    /** 海拔亮度参考：topY 映射到 0.6~1.15（低海拔暗、高海拔亮）。 */
+    private static final double TERRAIN_REF_LOW = -64.0, TERRAIN_REF_SPAN = 30.0;
 
     private WebAdminConsole() {
     }
@@ -105,6 +123,8 @@ public final class WebAdminConsole {
                 status(ex);
             } else if (path.equals("/bfadmin/api/map") && m.equalsIgnoreCase("GET")) {
                 map(ex);
+            } else if (path.equals("/bfadmin/api/mapterrain") && m.equalsIgnoreCase("GET")) {
+                mapTerrain(ex);
             } else if (path.equals("/bfadmin/api/mapedit") && m.equalsIgnoreCase("POST")) {
                 mapEdit(ex);
             } else if (path.equals("/bfadmin/api/cmd") && m.equalsIgnoreCase("POST")) {
@@ -218,6 +238,145 @@ public final class WebAdminConsole {
             return;
         }
         json(ex, 200, match.layoutJson(server));
+    }
+
+    /** 地形底图采样（管理台俯瞰画布底）：低清方块色网格，90s 缓存。 */
+    private static void mapTerrain(HttpExchange ex) throws IOException {
+        if (!auth(ex)) {
+            json(ex, 401, "{\"ok\":false,\"msg\":\"未授权\"}");
+            return;
+        }
+        MinecraftServer server = BreakfrontServer.server();
+        if (server == null) {
+            json(ex, 200, "{\"ok\":false,\"msg\":\"服务端未就绪\"}");
+            return;
+        }
+        String q = ex.getRequestURI().getQuery();
+        double cx = dq(q, "cx", 0);
+        double cz = dq(q, "cz", 0);
+        double half = Math.max(24, Math.min(240, dq(q, "half", 96)));
+        int step = Math.max(1, Math.min(8, (int) Math.round(dq(q, "step", 2))));
+        int n = (int) Math.floor(2 * half / step);
+        if (n > 150) {
+            step = (int) Math.ceil(2 * half / 150.0);
+            n = (int) Math.floor(2 * half / step);
+        }
+        String key = ((int) cx) + "," + ((int) cz) + "," + half + "," + step;
+        synchronized (TERRAIN_LOCK) {
+            long now = System.currentTimeMillis();
+            if (terrainKey.equals(key) && now - terrainCachedAt < 90000) {
+                respondTerrain(ex);
+                return;
+            }
+            ServerWorld world = server.getOverworld();
+            int x0 = (int) Math.floor(cx - half);
+            int z0 = (int) Math.floor(cz - half);
+            int bottom = world.getBottomY();
+            byte[] rgb = new byte[n * n * 3];
+            int p = 0;
+            for (int row = 0; row < n; row++) {
+                int bz = z0 + row * step;
+                for (int col = 0; col < n; col++) {
+                    int bx = x0 + col * step;
+                    int top = world.getTopY(Heightmap.Type.MOTION_BLOCKING, bx, bz);
+                    BlockState bs = null;
+                    if (top <= bottom) {
+                        top = world.getTopY(Heightmap.Type.WORLD_SURFACE, bx, bz);
+                    }
+                    if (top > bottom) {
+                        bs = world.getBlockState(new BlockPos(bx, top, bz));
+                    }
+                    double factor = 0.6 + 0.55 * Math.max(0.0, Math.min(1.0,
+                            (top - TERRAIN_REF_LOW) / TERRAIN_REF_SPAN));
+                    int[] c = bs == null ? TERRAIN_BASE : terrainPalette(bs);
+                    rgb[p++] = (byte) Math.min(255, (int) (c[0] * factor));
+                    rgb[p++] = (byte) Math.min(255, (int) (c[1] * factor));
+                    rgb[p++] = (byte) Math.min(255, (int) (c[2] * factor));
+                }
+            }
+            terrainKey = key;
+            terrainCachedAt = now;
+            terrainBytes = rgb;
+            terrainW = terrainH = n;
+            terrainStep = step;
+            terrainX0 = x0;
+            terrainZ0 = z0;
+            respondTerrain(ex);
+        }
+    }
+
+    private static void respondTerrain(HttpExchange ex) throws IOException {
+        String b64 = Base64.getEncoder().encodeToString(terrainBytes);
+        json(ex, 200, "{\"ok\":true,\"x0\":" + terrainX0 + ",\"z0\":" + terrainZ0
+                + ",\"step\":" + terrainStep + ",\"w\":" + terrainW + ",\"h\":" + terrainH
+                + ",\"b64\":\"" + b64 + "\"}");
+    }
+
+    private static int[] terrainPalette(BlockState bs) {
+        String id = Registries.BLOCK.getId(bs.getBlock()).getPath();
+        if (id.contains("water")) {
+            return new int[]{0x3A, 0x74, 0xB4};
+        }
+        if (id.contains("lava")) {
+            return new int[]{0xB0, 0x53, 0x28};
+        }
+        if (id.contains("sand")) {
+            return new int[]{0xBF, 0xB6, 0x8C};
+        }
+        if (id.contains("grass") || id.contains("moss") || id.contains("mycel")) {
+            return new int[]{0x6F, 0x9E, 0x68};
+        }
+        if (id.contains("snow") || id.contains("powder")) {
+            return new int[]{0xC9, 0xD2, 0xDC};
+        }
+        if (id.contains("deepslate") || id.contains("blackstone")) {
+            return new int[]{0x4E, 0x52, 0x5C};
+        }
+        if (id.contains("stone") || id.contains("tuff") || id.contains("calcite")
+                || id.contains("granite") || id.contains("diorite") || id.contains("andesite")) {
+            return new int[]{0x8A, 0x8F, 0x9A};
+        }
+        if (id.contains("cobble") || id.contains("gravel")) {
+            return new int[]{0x7A, 0x7E, 0x8A};
+        }
+        if (id.contains("brick") || id.contains("terracotta") || id.contains("red_sandstone")) {
+            return new int[]{0xA2, 0x64, 0x5A};
+        }
+        if (id.contains("plank") || id.contains("log") || id.contains("wood")) {
+            return new int[]{0x92, 0x76, 0x4F};
+        }
+        if (id.contains("leaves")) {
+            return new int[]{0x4A, 0x7A, 0x4E};
+        }
+        if (id.contains("concrete")) {
+            return new int[]{0xA8, 0xAF, 0xBA};
+        }
+        if (id.contains("glass") || id.contains("ice")) {
+            return new int[]{0x86, 0xAF, 0xC8};
+        }
+        if (id.contains("rail") || id.contains("copper")) {
+            return new int[]{0x8F, 0x6A, 0x48};
+        }
+        if (id.contains("clay")) {
+            return new int[]{0x9A, 0xA3, 0xAC};
+        }
+        if (id.contains("obsidian")) {
+            return new int[]{0x34, 0x36, 0x3E};
+        }
+        return TERRAIN_BASE;
+    }
+
+    /** query 数值读取。 */
+    private static double dq(String q, String key, double dflt) {
+        String v = queryValue(q == null ? "" : q, key);
+        if (v == null) {
+            return dflt;
+        }
+        try {
+            return Double.parseDouble(v);
+        } catch (NumberFormatException e) {
+            return dflt;
+        }
     }
 
     /** 地图布局编辑：add/move/resize/remove/save/load/sectorNext/sectorPrev/rename/spawn。 */
@@ -360,6 +519,13 @@ public final class WebAdminConsole {
     private static boolean auth(HttpExchange ex) {
         String q = ex.getRequestURI().getQuery();
         String token = q == null ? null : queryValue(q, "token");
+        if (token == null) {
+            // 兼容 header 方式（前端统一 Authorization: Bearer）
+            String h = ex.getRequestHeaders().getFirst("Authorization");
+            if (h != null && h.startsWith("Bearer ")) {
+                token = h.substring("Bearer ".length()).trim();
+            }
+        }
         if (token == null) {
             return false;
         }

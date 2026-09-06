@@ -213,6 +213,10 @@ function expireAuth(){
 function authOk(){ _authPrompted=false; }
 
 async function api(path, opts){
+  // token 统一拼 URL query（GET/POST 皆可被服务端 auth 识别；避免 body-only 造成的 401）
+  if(TOKEN && path.indexOf('/bfadmin/api/') === 0 && path.indexOf('?') < 0){
+    path += (path.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(TOKEN);
+  }
   const r = await fetch(path, opts);
   let j = null;
   try{ j = await r.json(); }catch(e){ j = {ok:false, msg:'响应解析失败 ' + r.status}; }
@@ -337,7 +341,8 @@ async function mapOp(op, side){
 const mapState = {
   raw:null, model:null, selId:null,
   cam:{cx:0,cz:0,zoom:4}, grid:16,
-  drag:null, pan:null, space:false, _fitted:false
+  drag:null, pan:null, space:false, _fitted:false,
+  terrain:null          // 真实地形底图 {off,x0,z0,step,w,h}
 };
 let undoStack = [];
 const SEC_COLORS = ['#4da6ff','#f5cd54','#6fe873','#ff5a52','#b78bff','#ff9d4d','#4dd0e1'];
@@ -396,6 +401,47 @@ async function mapLoad(keepUndo){
   if(sp.defender){ $('s-dx').value=sp.defender.x; $('s-dz').value=sp.defender.z; }
   if(!loadCam() && !mapState._fitted){ fitView(); mapState._fitted=true; }   // 首次无存档时自动适配
   drawMap(); showZoneInfo();
+  loadTerrain();                                  // 异步拉取真实地形底图
+}
+
+/* 地形底图：服务端采样方块色网格 → 离屏 canvas，drawMap 时按相机变换贴底 */
+async function loadTerrain(){
+  if(!mapState.model || !mapState.cam) return;
+  const cam=mapState.cam;
+  const viewHalf=Math.max((cssW/2)/cam.zoom,(cssH/2)/cam.zoom,64);
+  const half=Math.min(240, Math.max(64, viewHalf+32));
+  const r=await api('/bfadmin/api/mapterrain?cx='+Math.round(cam.cx)
+      +'&cz='+Math.round(cam.cz)+'&half='+Math.round(half)+'&step=2', {});
+  if(!r.ok || !r.b64){ mapState.terrain=null; return; }
+  try{
+    const w=r.w,h=r.h,step=r.step;
+    const bin=atob(r.b64);
+    const img=new ImageData(w,h);
+    const d=img.data;
+    for(let i=0;i<w*h;i++){
+      d[i*4]=bin.charCodeAt(i*3);
+      d[i*4+1]=bin.charCodeAt(i*3+1);
+      d[i*4+2]=bin.charCodeAt(i*3+2);
+      d[i*4+3]=255;
+    }
+    const off=document.createElement('canvas');
+    off.width=w; off.height=h;
+    const octx=off.getContext('2d');
+    octx.putImageData(img,0,0);
+    mapState.terrain={off:off,x0:r.x0,z0:r.z0,step:step,w:w,h:h};
+  }catch(e){ mapState.terrain=null; }
+  if(mapState.model) drawMap();
+}
+function drawTerrainBg(){
+  const t=mapState.terrain; if(!t) return;
+  const [sx0,sy0]=w2s(t.x0, t.z0);
+  const [sx1,sy1]=w2s(t.x0+t.w*t.step, t.z0+t.h*t.step);
+  if(sx1<=sx0||sy1<=sy0) return;
+  ctx.imageSmoothingEnabled=false;
+  ctx.globalAlpha=0.92;
+  ctx.drawImage(t.off, sx0, sy0, sx1-sx0, sy1-sy0);
+  ctx.globalAlpha=1;
+  ctx.imageSmoothingEnabled=true;
 }
 
 /* 下发编辑操作（操作前缓存完整 JSON，用于撤销） */
@@ -472,6 +518,7 @@ function drawMap(){
   if(!ctx) return;
   ctx.clearRect(0,0,cssW,cssH);
   ctx.fillStyle='#06080c'; ctx.fillRect(0,0,cssW,cssH);
+  drawTerrainBg();                                  // 真实地形底（最底层）
   if(!mapState.model){ ctx.fillStyle='#7c8a99'; ctx.font='13px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('点击「读取布局」加载地图数据', cssW/2, cssH/2); return; }
   const m=mapState.model, step=mapState.grid;
   const [wx0,wz0]=s2w(0,0), [wx1,wz1]=s2w(cssW,cssH);
