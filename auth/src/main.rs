@@ -129,6 +129,7 @@ struct Claims {
 
 // ---------------- 错误 ----------------
 
+#[derive(Debug)]
 struct AppErr(StatusCode, String);
 
 impl IntoResponse for AppErr {
