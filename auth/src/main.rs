@@ -291,16 +291,19 @@ async fn register(State(st): State<AppState>, Json(req): Json<RegisterReq>) -> R
     .bind(&roles)
     .execute(&st.pool)
     .await;
-    if let Err(e) = res {
-        let msg = if format!("{e}").contains("Duplicate") || format!("{e}").contains("1062") {
-            "用户名已存在"
-        } else {
-            return Err(e.into());
-        };
-        return Err(AppErr(StatusCode::CONFLICT, msg.into()));
-    }
+    let uid = match res {
+        Ok(r) => r.last_insert_id(),
+        Err(e) => {
+            let msg = if format!("{e}").contains("Duplicate") || format!("{e}").contains("1062") {
+                "用户名已存在"
+            } else {
+                return Err(e.into());
+            };
+            return Err(AppErr(StatusCode::CONFLICT, msg.into()));
+        }
+    };
     let user = UserOut {
-        id: cnt as u64 + 1,
+        id: uid,
         username,
         display_name: Some(display),
         email: req.email,
