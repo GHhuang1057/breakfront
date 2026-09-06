@@ -73,7 +73,7 @@ public static class BfSource
 ///   &lt;root&gt;/mods/                  BREAKFRONT jar（manifest 各 role，URL 模板可用时）与第三方包
 ///   &lt;root&gt;/config/                客户端配置（host/port/updateport + auth.*）
 /// </summary>
-public sealed class LaunchKit
+public sealed class LaunchKit : IDisposable
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
     private string? _assetIndex;
