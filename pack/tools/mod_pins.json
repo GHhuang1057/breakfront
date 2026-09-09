@@ -1,12 +1,25 @@
 {
   "mc_version": "1.21.1",
   "loader": "fabric",
-  "_comment": "BREAKFRONT 性能优化模组版本钉（#44 批次）。expect 为 Modrinth version_number 子串，resolve_mod 命中即钉该版本。env 仅作人工备注，脚本实际以 jar 内 fabric.mod.json / 项目 client_side|server_side 为准计算。",
+  "_comment": "BREAKFRONT 极致优化组合版本钉（#44 批次 + 极致优化扩充）。expect 为 Modrinth version_number 子串，resolve_mod 命中即钉该版本。env 仅作人工备注，脚本实际以 jar 内 fabric.mod.json / 项目 client_side|server_side 为准计算。注意：sodium/iris 必须显式钉住（配对锁定 Iris 1.8.8 + Sodium 0.6.13），否则 sodium-extra/reeses 的依赖递归会拉到 0.8.13 破坏配对启动即崩。",
   "pins": [
-    {"slug": "lithium",            "expect": "mc1.21.1-0.15.4-fabric", "env": "both",   "note": "服务端/客户端通用逻辑优化"},
-    {"slug": "ferrite-core",       "expect": "7.0.3-fabric",           "env": "both",   "note": "内存占用下降"},
-    {"slug": "modernfix",          "expect": "5.25.1+mc1.21.1",        "env": "both",   "note": "综合优化（Dynamic Resources 已知与部分模组有冲突面，需 PCL 实测）"},
-    {"slug": "entityculling",      "expect": "1.10.5",                 "env": "client", "note": "屏幕外实体/方块实体跳过渲染（客户端专属）"},
-    {"slug": "immediatelyfast",    "expect": "1.6.13+1.21.1-fabric",   "env": "client", "note": "立即模式渲染批处理（客户端专属，需 Java>=21）"}
+    {"slug": "sodium",              "expect": "mc1.21.1-0.6.13-fabric",  "env": "both",   "note": "渲染优化核心 · 锁 0.6.13（0.7/0.8 breaks iris<1.8.13，1.21.1 稳定 Iris 仅 1.8.8）"},
+    {"slug": "iris",                "expect": "1.8.8+1.21.1-fabric",     "env": "client", "note": "光影核心 · 锁 1.8.8（1.8.14-beta 不稳）"},
+    {"slug": "lithium",             "expect": "mc1.21.1-0.15.4-fabric",  "env": "both",   "note": "服务端/客户端通用逻辑优化"},
+    {"slug": "ferrite-core",        "expect": "7.0.3-fabric",            "env": "both",   "note": "内存占用下降"},
+    {"slug": "modernfix",           "expect": "5.25.1+mc1.21.1",         "env": "both",   "note": "综合优化（Dynamic Resources 已知与部分模组有冲突面，需 PCL 实测）"},
+    {"slug": "entityculling",       "expect": "1.10.5",                  "env": "client", "note": "屏幕外实体/方块实体跳过渲染（客户端专属）"},
+    {"slug": "immediatelyfast",     "expect": "1.6.13+1.21.1-fabric",    "env": "client", "note": "立即模式渲染批处理（客户端专属，需 Java>=21）"},
+    {"slug": "sodium-extra",        "expect": "mc1.21.1-0.9.3+fabric",   "env": "client", "note": "Sodium 细粒度选项（依赖 sodium 0.6，已显式钉住）"},
+    {"slug": "reeses-sodium-options","expect": "mc1.21.1-2.2.3+fabric",  "env": "client", "note": "视频设置界面增强（依赖 sodium 0.6）"},
+    {"slug": "dynamic-fps",         "expect": "3.11.4",                  "env": "client", "note": "失焦/最小化降帧省电"},
+    {"slug": "moreculling",         "expect": "1.0.10",                  "env": "client", "note": "方块面剔除（叶子/玻璃等）"},
+    {"slug": "language-reload",     "expect": "1.7.6+1.21.1",            "env": "client", "note": "语言资源异步加载"},
+    {"slug": "krypton",             "expect": "0.2.8",                   "env": "both",   "note": "网络栈优化（netty）"},
+    {"slug": "badoptimizations",    "expect": "2.4.1",                   "env": "both",   "note": "杂项微优化（日志/亮度查找表等）"},
+    {"slug": "threadtweak",         "expect": "0.1.5",                   "env": "both",   "note": "线程/调度调优（Smooth Boot 继任）"},
+    {"slug": "servercore",          "expect": "1.5.19+1.21.1",           "env": "both",   "note": "服务端 tick/实体密度治理（默认配置保守）"},
+    {"slug": "noisium",             "expect": "2.3.0+mc1.21-1.21.1",     "env": "both",   "note": "世界生成噪声优化"},
+    {"slug": "c2me-fabric",         "expect": "0.4.0-alpha.0.27+1.21.1", "env": "both",   "note": "并发区块生成/加载（alpha，首崩嫌疑，出问题先摘）"}
   ]
 }
