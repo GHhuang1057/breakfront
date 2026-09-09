@@ -183,7 +183,7 @@ public sealed class LoginWindow : Window
         finally { _login.IsEnabled = true; }
     }
 
-    private void OnSignedIn(LoginResult r)
+    private void OnSignedIn(AuthClient.LoginResult r)
     {
         var u = r.User?.Username ?? "";
         new GeoSessionFile { Token = r.AccessToken!, Username = u }.Save(Path.Combine(_mcDir.Text, "config"));
