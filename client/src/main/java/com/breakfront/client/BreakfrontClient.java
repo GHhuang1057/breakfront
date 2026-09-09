@@ -41,11 +41,9 @@ public class BreakfrontClient implements ClientModInitializer {
     public void onInitializeClient() {
         LOGGER.info("[Breakfront] client initialized (BF2042 UI)");
 
-        // GeoAuth payload 类型注册（playC2S/playS2C，与服务端 Net.java 同步）
-        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S()
-                .register(com.breakfront.net.AuthLoginPayload.ID, com.breakfront.net.AuthLoginPayload.CODEC);
-        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playS2C()
-                .register(com.breakfront.net.AuthResultPayload.ID, com.breakfront.net.AuthResultPayload.CODEC);
+        // 注意：GeoAuth payload（AuthLoginPayload/AuthResultPayload）已在 core 的 Net.java
+        // 公共入口注册过——客户端进程里 core 同样会执行该注册，此处不可重复注册，
+        // 否则 PayloadTypeRegistry 抛 "already registered" 直接崩客户端。
 
         BfServerConfig.load();
 
