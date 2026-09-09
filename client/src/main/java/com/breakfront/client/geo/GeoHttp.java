@@ -49,6 +49,65 @@ public final class GeoHttp {
                         + "\",\"app\":\"breakfront\"}");
     }
 
+    // ---------- 设备码登录（PCL/FCL 等第三方启动器：游戏内跳浏览器授权） ----------
+
+    public record DeviceStart(boolean ok, String code, String msg) {
+    }
+
+    /** 请求 6 位设备码（10 分钟有效）。 */
+    public static DeviceStart deviceStart() {
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(endpoint + "/api/v1/auth/device/start"))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            String text = resp.body();
+            boolean ok = text.contains("\"ok\":true");
+            String code = quoted(text, "code");
+            if (!ok || code == null || code.isEmpty()) {
+                String msg = quoted(text, "msg");
+                return new DeviceStart(false, "", msg == null ? "请求设备码失败" : msg);
+            }
+            return new DeviceStart(true, code, "ok");
+        } catch (Exception e) {
+            return new DeviceStart(false, "", "网络错误：" + e.getClass().getSimpleName());
+        }
+    }
+
+    public record DevicePoll(boolean ok, String status, String token, String username, String msg) {
+    }
+
+    /** 轮询设备码状态；approved 时携带 token/username。 */
+    public static DevicePoll devicePoll(String code) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(endpoint + "/api/v1/auth/device/poll"))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"code\":\"" + esc(code) + "\"}"))
+                    .build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            String text = resp.body();
+            if (!text.contains("\"ok\":true")) {
+                String msg = quoted(text, "msg");
+                return new DevicePoll(false, "", "", "", msg == null ? "轮询失败" : msg);
+            }
+            String status = quoted(text, "status");
+            if (!"approved".equals(status)) {
+                return new DevicePoll(true, "pending", "", "", "ok");
+            }
+            String token = quoted(text, "access_token");
+            String user = quoted(text, "username");
+            if (token == null || token.isEmpty()) {
+                return new DevicePoll(false, "", "", "", "授权响应缺少令牌");
+            }
+            return new DevicePoll(true, "approved", token, user == null ? "" : user, "ok");
+        } catch (Exception e) {
+            return new DevicePoll(false, "", "", "", "网络错误：" + e.getClass().getSimpleName());
+        }
+    }
+
     private static Res post(String path, String body) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(endpoint + path))

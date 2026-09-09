@@ -677,6 +677,7 @@ public final class ServerMatch {
     public void onPlayerLeft(UUID playerId) {
         teams.leave(playerId);
         editorViewers.remove(playerId);
+        unbindGeo(playerId); // Geekhonize 绑定随退服释放，避免残留绑定误判同账号顶号
     }
 
     /** 玩家死亡：任意阶段都把重生点钉在己方部署区（vanilla 复活即回防线/出生区，
@@ -962,6 +963,19 @@ public final class ServerMatch {
 
     public void unbindGeo(java.util.UUID id) {
         geoBinds.remove(id);
+    }
+
+    /**
+     * 账号唯一性：除 self 外是否已有在线玩家绑定了同一 Geekhonize 用户名。
+     * 返回该玩家 UUID（无则 null），供服务端拦截第二处登录（顶号防护）。
+     */
+    public java.util.UUID geoBoundElsewhere(String username, java.util.UUID self) {
+        for (var e : geoBinds.entrySet()) {
+            if (!e.getKey().equals(self) && e.getValue()[0].equals(username)) {
+                return e.getKey();
+            }
+        }
+        return null;
     }
 
     /** 绑定的 Geekhonize 用户名（未绑定返回 null）。 */

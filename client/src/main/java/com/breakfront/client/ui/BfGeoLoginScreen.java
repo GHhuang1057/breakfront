@@ -34,6 +34,10 @@ public class BfGeoLoginScreen extends Screen {
     private long sendCdUntil = 0;
     private boolean sendBusy = false;
 
+    // 设备码登录（PCL/FCL 等第三方启动器：跳浏览器授权）
+    private String deviceCode = "";
+    private boolean devicePolling = false;
+
     // 反馈
     private String msgText = "";
     private boolean msgOk = false;
@@ -46,6 +50,7 @@ public class BfGeoLoginScreen extends Screen {
     private int submitX, submitY, submitW, submitH;
     private int toggleX, toggleY, toggleW, toggleH;
     private int sendX, sendY, sendW, sendH;
+    private int deviceX, deviceY, deviceW, deviceH;
     private int logoutX, logoutY, logoutW, logoutH;
     private int closeX, closeY, closeW, closeH;
 
@@ -81,7 +86,8 @@ public class BfGeoLoginScreen extends Screen {
         panelW = Math.min(460, sw - 56);
         boolean si = GeoSession.signedIn();
         rows = (si || !registerMode) ? 2 : 4;
-        panelH = si ? 232 : (registerMode ? 300 + (rows - 2) * 62 : 300);
+        // 登录模式多一行「浏览器登录」按钮；注册模式比原版多留反馈区余量
+        panelH = si ? 232 : (registerMode ? 448 : 402);
         panelX = (sw - panelW) / 2;
         panelY = Math.max(24, (sh - panelH) / 2 - 16);
 
@@ -103,6 +109,12 @@ public class BfGeoLoginScreen extends Screen {
         toggleH = 22;
         toggleX = panelX + (panelW - toggleW) / 2;
         toggleY = submitY + submitH + 6;
+
+        // 浏览器登录（仅登录模式显示）
+        deviceW = Math.min(320, panelW - 60);
+        deviceH = 24;
+        deviceX = panelX + (panelW - deviceW) / 2;
+        deviceY = toggleY + toggleH + 10;
 
         // 发送验证码（仅注册模式，位于验证码行内右侧）
         sendW = 118;
@@ -196,8 +208,30 @@ public class BfGeoLoginScreen extends Screen {
                 panelX + (panelW - gw) / 2, toggleY + 4,
                 gh ? BfTheme.TEAL : BfTheme.MUTED, false);
 
+        // 浏览器登录（第三方启动器）
+        if (!registerMode) {
+            boolean dh = inRect(mouseX, mouseY, deviceX, deviceY, deviceW, deviceH);
+            boolean active = devicePolling && !deviceCode.isEmpty();
+            if (dh && !devicePolling && !busy) {
+                BfGlow.rect(ctx, deviceX - 2, deviceY - 2, deviceW + 4, deviceH + 4,
+                        BfTheme.TEAL & 0xFFFFFF, 24, 4);
+            }
+            BfDraw.parallelogram(ctx, deviceX, deviceY, deviceW, deviceH, 4,
+                    devicePolling ? BfTheme.PANEL_LINE : 0xE6161C25);
+            BfDraw.border(ctx, deviceX, deviceY, deviceW, deviceH,
+                    dh && !devicePolling ? BfTheme.TEAL : BfTheme.PANEL_LINE);
+            String dl = devicePolling
+                    ? (deviceCode.isEmpty() ? "正在请求设备码…" : "浏览器登录中… 设备码 " + deviceCode)
+                    : "或 浏览器登录（PCL / FCL 等第三方启动器）";
+            int dlw = this.textRenderer.getWidth(dl);
+            ctx.drawText(this.textRenderer, Text.literal(dl),
+                    deviceX + deviceW / 2 - dlw / 2,
+                    deviceY + deviceH / 2 - this.textRenderer.fontHeight / 2,
+                    devicePolling ? BfTheme.TEAL : (dh ? BfTheme.TEXT : BfTheme.TEXT_DIM), false);
+        }
+
         // 反馈
-        int fy = (rows == 4 ? sendY + sendH : toggleY + 24) + 12;
+        int fy = registerMode ? sendY + sendH + 12 : deviceY + deviceH + 10;
         if (!msgText.isEmpty()) {
             ctx.drawText(this.textRenderer, Text.literal(msgText),
                     panelX + 30, fy, msgOk ? BfTheme.GREEN : BfTheme.RED, false);
@@ -362,6 +396,10 @@ public class BfGeoLoginScreen extends Screen {
             focus = 0;
             return true;
         }
+        if (!registerMode && inRect(mx, my, deviceX, deviceY, deviceW, deviceH)) {
+            doDeviceLogin();
+            return true;
+        }
         return false;
     }
 
@@ -419,6 +457,76 @@ public class BfGeoLoginScreen extends Screen {
             return true;
         }
         return false;
+    }
+
+    /** 浏览器设备码登录：请求码 → 跳浏览器 → 轮询至授权完成。 */
+    private void doDeviceLogin() {
+        if (busy || devicePolling) {
+            return;
+        }
+        devicePolling = true;
+        deviceCode = "";
+        msgText = "正在请求设备码…";
+        msgOk = false;
+        java.util.concurrent.CompletableFuture.supplyAsync(GeoHttp::deviceStart)
+                .thenAccept(s -> this.client.execute(() -> {
+                    if (!s.ok()) {
+                        devicePolling = false;
+                        msgText = s.msg().isEmpty() ? "请求设备码失败" : s.msg();
+                        msgOk = false;
+                        return;
+                    }
+                    deviceCode = s.code();
+                    msgText = "请在打开的网页登录并输入设备码 " + s.code() + "（10 分钟内有效）";
+                    msgOk = true;
+                    openBrowser("https://auth.geekhonize.top/#device?code=" + s.code());
+                    startDevicePoll(s.code());
+                }));
+    }
+
+    private void startDevicePoll(String code) {
+        Thread t = new Thread(() -> {
+            for (int i = 0; i < 120 && devicePolling; i++) {
+                try {
+                    Thread.sleep(2500);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                GeoHttp.DevicePoll p = GeoHttp.devicePoll(code);
+                if (p.ok() && "approved".equals(p.status())) {
+                    this.client.execute(() -> {
+                        devicePolling = false;
+                        onAuthResult(new GeoHttp.Res(true, p.token(), p.username(), "ok"), false);
+                    });
+                    return;
+                }
+                if (!p.ok() && p.msg().contains("过期")) {
+                    this.client.execute(() -> {
+                        devicePolling = false;
+                        msgText = "设备码已过期，请重新点击浏览器登录";
+                        msgOk = false;
+                    });
+                    return;
+                }
+            }
+            this.client.execute(() -> {
+                if (devicePolling) {
+                    devicePolling = false;
+                    msgText = "等待授权超时，请重试";
+                    msgOk = false;
+                }
+            });
+        });
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void openBrowser(String url) {
+        try {
+            net.minecraft.util.Util.getOperatingSystem().open(java.net.URI.create(url));
+        } catch (Exception ignored) {
+            // 无桌面环境/打开失败时，玩家仍可手动访问网页输入设备码
+        }
     }
 
     private void doSendCode() {
@@ -526,6 +634,8 @@ public class BfGeoLoginScreen extends Screen {
         codeBuf = "";
         registerMode = false;
         sendCdUntil = 0;
+        devicePolling = false;
+        deviceCode = "";
         msgText = "已退出登录";
         msgOk = true;
     }

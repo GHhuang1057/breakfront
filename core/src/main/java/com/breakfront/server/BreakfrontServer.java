@@ -115,6 +115,19 @@ public final class BreakfrontServer {
                             .thenAccept(res -> p.server.execute(() -> {
                                 var m = match();
                                 if (m != null && res.ok()) {
+                                    // 账号唯一性：同一 Geekhonize 账号只允许一处绑定，后到者踢出
+                                    java.util.UUID other = m.geoBoundElsewhere(res.username(), p.getUuid());
+                                    if (other != null) {
+                                        LOGGER.warn("[Breakfront] geo account {} already bound, kicking duplicate login {} ({})",
+                                                res.username(), p.getName().getString(), p.getUuid());
+                                        sendAuthResult(p, 0, false, res.username(), "",
+                                                "该 Geekhonize 账号已在服务器登录");
+                                        if (p.networkHandler != null) {
+                                            p.networkHandler.disconnect(net.minecraft.text.Text.literal(
+                                                    "该 Geekhonize 账号已在服务器登录（若非本人操作，请立即修改密码）"));
+                                        }
+                                        return;
+                                    }
                                     m.bindGeo(p.getUuid(), res.username(), res.roles());
                                 }
                                 sendAuthResult(p, 0, res.ok(), res.username(),

@@ -46,8 +46,10 @@
 - **C1 132 邮件落地**：Postfix 安装配置 + geekhonize.top SPF/DKIM(Cloudflare) + 发信冒烟(QQ/163)。
 
 ## 状态跟踪
-- [ ] A1 后端（进行中 2026-09-06）
-- [ ] A2 门户 v2
-- [ ] A3 客户端联动
-- [ ] B1 启动器骨架
-- [ ] B2/C1 后续批次
+- [x] A1 后端（2026-09-06 完成，生产运行）
+- [x] A2 门户 v2（完成上线）
+- [x] A3 客户端联动（完成发布）
+- [x] B1 启动器（完成：桌面 Win/Linux 登录+会话；工程拆分 Desktop/App/Shared）
+- [~] B1.5 Android APK（完成：CI 产出 arm64 apk 并发布，官网可下载）
+- [~] C1 132 邮件（完成 Postfix+OpenDKIM 安装与 smtp 模式，**待用户在 Cloudflare 加 SPF/DKIM TXT 后真收件验证**）
+- [ ] B2 启动器完整化（整合包装配/自更新/Java 寻址，后续批次）
