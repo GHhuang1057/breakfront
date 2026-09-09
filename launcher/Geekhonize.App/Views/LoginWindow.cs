@@ -191,6 +191,16 @@ public sealed class LoginWindow : Window
         _status.Text = "✓ 已登录：" + u + "（角色 " + string.Join(",", r.User?.Roles ?? Array.Empty<string>()) + "）\n会话已写入两处配置。";
     }
 
+    private void PostLog(string line)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var parts = (_log.Text + "\n" + line).Split('\n');
+            if (parts.Length > 60) parts = parts[^60..];
+            _log.Text = string.Join('\n', parts);
+        });
+    }
+
     private async Task RunKitAsync(bool launch)
     {
         if (_busy) return;
