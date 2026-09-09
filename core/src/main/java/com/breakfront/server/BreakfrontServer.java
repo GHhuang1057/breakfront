@@ -160,6 +160,15 @@ public final class BreakfrontServer {
             if (match != null) {
                 match.tick(server);
             }
+            // 禁掉落物：每 1s 清扫全服地面物品（玩家 Q 丢、死亡掉落、枪械掉落一律不落地）
+            if (server.getTicks() % 20 == 0) {
+                for (ServerWorld world : server.getWorlds()) {
+                    for (var item : world.getEntitiesByType(
+                            net.minecraft.entity.EntityType.ITEM, e -> true)) {
+                        item.discard();
+                    }
+                }
+            }
         });
 
         // 击杀归属桥 · 第 1 层：vanilla 死亡事件（覆盖全部死因，负责扣票）

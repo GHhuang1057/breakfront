@@ -187,6 +187,9 @@ public final class ServerMatch {
         if (syncCounter % 40 == 0) {
             rescueVoidedPlayers(server); // 真人落出世界（虚空）每 2s 救援
         }
+        if (syncCounter % 20 == 0) {
+            loginGateTick(server); // 登录门禁：未绑定账号宽限期后移出（每 1s）
+        }
         game.tick(0.05);
         syncCounter++;
         boolean syncTick = syncCounter % 10 == 0; // 每 0.5s 广播一次状态
@@ -249,6 +252,11 @@ public final class ServerMatch {
                     } else {
                         defenders++;
                     }
+                    // 领地判定可视化：站进判定方块时显示服务端判定用的锚点/半径，
+                    // 用于现场核对客户端方形描边是否与判定一致（错位排查）
+                    player.sendMessage(net.minecraft.text.Text.literal(String.format(
+                            "§b◈ 占点判定 §f%s §7(x=%.0f, z=%.0f, r=%.0f)",
+                            zoneOrder.get(idx), anchor.x(), anchor.z(), anchor.radius())), true);
                 }
             }
             // NPC 增援计入圈内人数（zombie + 阵营 tag）
@@ -604,6 +612,47 @@ public final class ServerMatch {
 
     public int zoneIndex(String zoneId) {
         return zoneOrder.indexOf(zoneId);
+    }
+
+    // ---------- 登录门禁（正版/离线一律要求 Geekhonize 账号绑定） ----------
+
+    /** 宽限期（毫秒）：进服后未绑定账号允许的登录窗口。 */
+    public static final long LOGIN_GRACE_MS = 90_000;
+    /** 每玩家宽限起点（绑定后移除；退服清理）。 */
+    private final java.util.Map<java.util.UUID, Long> loginGrace = new java.util.HashMap<>();
+
+    /** 每 1s 巡检：未绑定者 actionbar 倒计时；到期 disconnect。op(≥2 级) 豁免。 */
+    private void loginGateTick(MinecraftServer server) {
+        long now = System.currentTimeMillis();
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (geoBinds.containsKey(p.getUuid())) {
+                loginGrace.remove(p.getUuid());
+                continue;
+            }
+            if (p.hasPermissionLevel(2)) {
+                continue; // 管理员豁免
+            }
+            long start = loginGrace.computeIfAbsent(p.getUuid(), k -> now);
+            long leftMs = LOGIN_GRACE_MS - (now - start);
+            if (leftMs <= 0) {
+                loginGrace.remove(p.getUuid());
+                if (p.networkHandler != null) {
+                    BreakfrontServer.LOGGER.info("[Breakfront] login gate: kicking unbound player {}",
+                            p.getName().getString());
+                    p.networkHandler.disconnect(net.minecraft.text.Text.literal(
+                            "请先登录 Geekhonize 账号再进服：官方启动器登录后自动绑定；"
+                                    + "PCL/FCL 等第三方启动器请在游戏内 Esc → GEEKHONIZE 账号 → 浏览器登录"));
+                }
+                continue;
+            }
+            long leftSec = leftMs / 1000 + 1;
+            if (leftSec % 10 == 0 || leftSec <= 10) {
+                p.sendMessage(net.minecraft.text.Text.literal(
+                        "§e[BF] 请在 " + leftSec + " 秒内登录 Geekhonize 账号（GEEKHONIZE 账号界面，"
+                                + "支持浏览器登录），否则将被移出服务器"), true);
+            }
+        }
+        loginGrace.keySet().removeIf(id -> server.getPlayerManager().getPlayer(id) == null);
     }
 
     /** 据点中心 {x, z, y}（y=地表+1），序号越界返回 null。 */

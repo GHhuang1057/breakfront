@@ -508,11 +508,13 @@ public final class NpcSquad {
         if (hasGun) {
             if (dist <= GUN_RANGE && lineOfSight(server, n, foe, dist)) {
                 n.atkAtMs = now + GUN_ATK_MS;
-                strikeFoe(server, n, foe, 7.0, false); // 模拟枪械命中（平衡值后续调）
+                // BOT 互射伤害调低：100HP 下 7.0/0.9s 约 13s 减员，整排 bot 持续消失重生
+                // 是"忽隐忽现"主因；对真人保持 7.0 威胁感，bot 对 bot 降到 3.5 延长交火线
+                strikeFoe(server, n, foe, n.foeIsNpc ? 3.5 : 7.0, false);
             }
         } else if (dist <= MELEE_RANGE + 0.4) {
             n.atkAtMs = now + MELEE_ATK_MS;
-            strikeFoe(server, n, foe, 3.0, true); // 空手近战挥击
+            strikeFoe(server, n, foe, n.foeIsNpc ? 2.0 : 3.0, true); // 空手近战挥击
         }
     }
 
