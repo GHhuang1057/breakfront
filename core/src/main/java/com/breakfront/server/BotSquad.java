@@ -91,6 +91,11 @@ public final class BotSquad {
     private volatile String lastTakeover = "";
     /** 累计顶替次数（诊断用）。 */
     private int takeoverCount;
+    /**
+     * 对账重入闸。生成 BOT 会触发玩家 JOIN 事件，任何「JOIN → reconcile」的接线
+     * 都可能形成递归；这里做最后一道保险（第一道在 ServerMatch.onPlayerJoin 的 BOT 早返回）。
+     */
+    private boolean reconciling;
     private int attSeq;
     private int defSeq;
     private int tickCounter;
@@ -172,6 +177,18 @@ public final class BotSquad {
      * 顶替优先裁掉**最后补进来**的那个（LinkedHashMap 尾部），让先来的单位位置稳定。
      */
     public void reconcile(ServerMatch match, MinecraftServer server) {
+        if (reconciling) {
+            return;                      // 防重入（见 reconciling 字段注释）
+        }
+        reconciling = true;
+        try {
+            reconcileLocked(match, server);
+        } finally {
+            reconciling = false;
+        }
+    }
+
+    private void reconcileLocked(ServerMatch match, MinecraftServer server) {
         // 1) 清扫阵亡单位：玩家壳死亡后仍会留在玩家列表等待重生，必须显式摘除，
         //    否则会累积「幽灵在线」。摘除后按**同名**重建，保持身份稳定
         //    （避免玩家列表不停 join/leave、playerdata 无限增长）。
@@ -293,9 +310,7 @@ public final class BotSquad {
         ServerWorld world = server.getOverworld();
         Vec3d p = spawnPos(match, server, side);
         String cls = Kits.CLASSES[((side == Side.ATTACKER ? attSeq++ : defSeq++)) % Kits.CLASSES.length];
-        // 名字须 ≤16 字符且唯一：BF_<A|D><序号>
-        String name = NAME_PREFIX + (side == Side.ATTACKER ? "A" : "D")
-                + (attSeq + defSeq + troopers.size());
+        String name = nextName(side);
         ServerPlayerEntity bot = BotPlayerFactory.create(server, world, name, p.x, p.y, p.z);
         if (bot == null) {
             BreakfrontServer.LOGGER.warn("[BF-Bot] 生成 {} 失败（工厂返回 null）", name);
@@ -314,6 +329,32 @@ public final class BotSquad {
         troopers.put(t.id, t);
         BreakfrontServer.LOGGER.info("[BF-Bot] 生成假玩家 {}（{} / {}）存活={}",
                 name, side.labelCn, cls, troopers.size());
+    }
+
+    /**
+     * 取该侧**最小未被占用**的编制名：{@code BF_A<n>} / {@code BF_D<n>}。
+     *
+     * <p>必须保证唯一：假玩家的 UUID 由离线玩家名派生（见 BotPlayerFactory），
+     * <b>同名 = 同 UUID = 同一个玩家身份</b>。一旦撞名，{@code troopers.put} 会覆盖
+     * 旧键 → 名册大小不增长 → 对账误判「还缺人」→ 反复生成，形成 churn。
+     *
+     * <p>用「最小未占用」而不是自增计数器，是为了让编号稳定收敛在 BF_A1..BF_A<n>
+     * （阵亡单位由 {@link #respawn} 同名重建，不会占新号），玩家列表/Tab 更干净。
+     * 名字同时是**客户端判定阵营的唯一依据**（见客户端 BotNames.sideOfBotName）。
+     */
+    private String nextName(Side side) {
+        java.util.Set<String> used = new java.util.HashSet<>();
+        for (Trooper t : troopers.values()) {
+            used.add(t.name);
+        }
+        String prefix = NAME_PREFIX + (side == Side.ATTACKER ? "A" : "D");
+        for (int n = 1; n < 100000; n++) {
+            String cand = prefix + n;
+            if (!used.contains(cand)) {
+                return cand;
+            }
+        }
+        return prefix + "X" + troopers.size();
     }
 
     /** 统一出装：游戏模式、100HP 满血、兵种装备、阵营标签。 */

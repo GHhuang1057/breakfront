@@ -28,9 +28,12 @@ JDK = r"J:\bfserver\jdk21"
 BUILD_BAT = r"""@echo off
 set JAVA_HOME=J:\bfserver\jdk21
 cd /d J:\bfbuild\breakfront
-call J:\bfbuild\gradle-9.5.0\bin\gradle.bat :core:build -x test > J:\bfbuild\build.log 2>&1
+call J:\bfbuild\gradle-9.5.0\bin\gradle.bat build -x test > J:\bfbuild\build.log 2>&1
 echo EXIT=%ERRORLEVEL% >> J:\bfbuild\build.log
 """
+# ⚠️ 用 `build`（全模块）而非 `:core:build`：只编 core 会漏掉 client 侧的改动
+# （客户端 HUD/mixin 全是 Java，编不过就得等 CI 才发现）。客户端产物仅用于「编译校验」，
+# 部署到服务端时仍只取 core 的 jar（见 cmd_deploy）。
 
 # 仓库里**没有 gradle wrapper**（无 gradlew/gradlew.bat），所以服务器端需自备 Gradle。
 # 版本对齐 CI（.github/workflows/build.yml 用 gradle-version: '9.5.0'）。
@@ -216,11 +219,85 @@ def cmd_updater(cli, on: bool) -> int:
     return 0
 
 
+def cmd_pull(cli) -> int:
+    """把编译机仓库同步到远端 main —— 编译前**必做**，否则编出来的是旧代码。
+
+    用 fetch + reset --hard 而非 pull：编译机上不该有本地改动，reset 能顺带清掉
+    上一次构建残留（例如手工改动），保证「编的就是远端那份」。
+    """
+    out = ps(cli, f"cd '{BUILD_DIR}'; "
+                  f"git fetch origin main 2>&1 | Select-Object -Last 3; "
+                  f"git reset --hard FETCH_HEAD 2>&1 | Select-Object -Last 2; "
+                  f"Write-Output '--- HEAD ---'; git log --oneline -1")
+    print(out.strip())
+    ok = "--- HEAD ---" in out
+    print("[✓] 已同步" if ok else "[✗] 同步失败（检查编译机的 GitHub 凭据）")
+    return 0 if ok else 1
+
+
+# ---------------------------------------------------------------------------
+# squaremap：管理台「真实 2D 俯瞰图」的数据源
+# ---------------------------------------------------------------------------
+# 版本由 pack/tools/mod_pins.json 钉住（slug=squaremap, env=server, expect=1.3.2）。
+# 服务器自带外网 + 可直连 Modrinth CDN，故让服务器自己下载（8.4MB，不走本地转存）。
+# 依赖 cloud / adventure-platform-fabric 已全部 JiJ 内嵌在 jar 里（已核 fabric.mod.json
+# 的 jars 段），无需额外补依赖。
+SQM_JAR = "squaremap-fabric-mc1.21.1-1.3.2.jar"
+SQM_URL = ("https://cdn.modrinth.com/data/PFb7ZqK6/versions/RerxbGKf/"
+           "squaremap-fabric-mc1.21.1-1.3.2.jar")
+SQM_SIZE = 8462749
+SQM_CFG = r"J:\bfserver\server\config\squaremap\config.yml"
+
+
+def cmd_squaremap(cli) -> int:
+    """安装 squaremap 到服务端 mods（按体积校验）。"""
+    dst = f"{MODS}\\{SQM_JAR}"
+    ps(cli, f"if (Test-Path '{dst}') {{ Remove-Item '{dst}' -Force }}")
+    print("[*] 从 Modrinth CDN 下载 squaremap …")
+    out = ps(cli, f"curl.exe -sL --retry 3 -o '{dst}' '{SQM_URL}'; "
+                  f"if (Test-Path '{dst}') {{ (Get-Item '{dst}').Length }} else {{ 0 }}")
+    try:
+        size = int(out.strip().splitlines()[-1])
+    except Exception:  # noqa: BLE001
+        size = 0
+    if size != SQM_SIZE:
+        print(f"[✗] 体积不符：{size} != {SQM_SIZE}（下载失败或 CDN 变更）")
+        return 1
+    print(f"[✓] squaremap 已就位（{size} 字节）")
+    return 0
+
+
+def cmd_squaremap_config(cli, bind: str = "127.0.0.1", port: int = 8080) -> int:
+    """把 squaremap 的 web 监听改到 内网地址:端口。
+
+    先决条件：服务端**至少启动过一次**（squaremap 才会生成 config.yml）。
+    只改 web 段的 bind / port 两行，其余保持默认，避免猜错 schema。
+    """
+    if not ps(cli, f"Test-Path '{SQM_CFG}'").strip().lower().startswith("true"):
+        print(f"[✗] 未找到 {SQM_CFG} —— 先启动一次服务端让它生成默认配置")
+        return 1
+    ps(cli, f"$p='{SQM_CFG}'; $c=Get-Content $p -Raw -Encoding UTF8; "
+            f"$c=$c -replace '(?m)^(\\s*)bind:.*$',  ('$1bind: ' + '{bind}'); "
+            f"$c=$c -replace '(?m)^(\\s*)port:.*$',  ('$1port: ' + '{port}'); "
+            f"[IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding($false))); "
+            f"Write-Output 'patched'")
+    print("--- 现行 web 相关行 ---")
+    print(ps(cli, f"Select-String -Path '{SQM_CFG}' -Pattern 'bind|port|enabled' | "
+                  f"Select-Object -First 14 | ForEach-Object {{ $_.Line }}"))
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
     mode = args[0] if args else "status"
     cli = connect()
     try:
+        if mode == "squaremap":
+            return cmd_squaremap(cli)
+        if mode == "squaremap-config":
+            return cmd_squaremap_config(cli)
+        if mode == "pull":
+            return cmd_pull(cli)
         if mode == "build":
             return cmd_build(cli)
         if mode == "fetch-gradle":

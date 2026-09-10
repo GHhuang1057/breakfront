@@ -268,22 +268,10 @@ public final class ServerMatch {
                             zoneOrder.get(idx), anchor.x(), anchor.z(), anchor.radius())), true);
                 }
             }
-            // NPC 增援计入圈内人数（zombie + 阵营 tag）
-            double r = anchor.radius() + 1;
-            for (net.minecraft.entity.LivingEntity le : overworld.getEntitiesByClass(
-                    net.minecraft.entity.LivingEntity.class,
-                    new net.minecraft.util.math.Box(anchor.x() - r, -64, anchor.z() - r,
-                            anchor.x() + r, 320, anchor.z() + r),
-                    e -> e.getCommandTags().contains("breakfront.npc"))) {
-                if (!anchor.contains(le.getX(), le.getZ())) {
-                    continue;
-                }
-                if (le.getCommandTags().contains("bf.side.att")) {
-                    attackers++;
-                } else if (le.getCommandTags().contains("bf.side.def")) {
-                    defenders++;
-                }
-            }
+            // 注：此处原有一段「僵尸壳 NPC 计入圈内人数」的实体扫描（tag=breakfront.npc）。
+            // 僵尸壳已整体移除，AI 假玩家本身就是 ServerPlayerEntity，已在上面的玩家循环里
+            // 按 sideOfEntity 计入，无需重复扫描 —— 且那段是「每个据点每 tick 一次
+            // getEntitiesByClass(AABB)」，属于纯粹的每 tick 浪费。
             game.applyZonePresence(idx, attackers, defenders, 0.05);
         }
     }
@@ -781,6 +769,14 @@ public final class ServerMatch {
     /** 玩家进服：套用 100HP 战斗模型、自动补位；战局中直接部署到出生区并钉重生点。 */
     public void onPlayerJoin(MinecraftServer server, ServerPlayerEntity player) {
         applyCombatModel(player);
+        // ⚠️⚠️ AI 假玩家也是「玩家连接」，会走同一个 JOIN 事件。这里必须**早返回**：
+        //   对账会生成新 BOT，新 BOT 又触发 JOIN → 对账 → …… 无限递归。
+        //   实测后果：一次 /bf bot trial 3 打出 804 次生成 / 817 次 join / 799 次移除，
+        //   服务端 tick 落后 40+，RCON 直接超时。
+        //   假玩家的出装/站位由 BotSquad.spawn/applyLoadout 自己负责，无需走真人流程。
+        if (BotPlayerFactory.isBot(player)) {
+            return;
+        }
         if (teams.sideOf(player.getUuid()) == null) {
             teams.assignLeast(player.getUuid());
         }
