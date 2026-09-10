@@ -313,18 +313,22 @@ public final class ServerMatch {
      * - autoFill 关 → 沿用旧规则：双真实阵营就绪自动开（/bf autostart on）或 /bf start 手动开
      */
     private void tickAutoPlay(MinecraftServer server) {
+        // 只统计**真人**：假玩家（AI bot）也在玩家列表里，若不排除会让填充逻辑
+        // 误判"人已满"从而不再补员，且会把旧壳 NPC 又加回来与假玩家小队叠加。
+        int humans = humanCount(server);
+
+        // 空服自愈：一个真人都没有 → 复位到大厅初始状态（停局 / 清 BOT / 复位据点）。
+        // 否则上一局的残局（倒计时、据点进度、票数、满地 BOT）会一直挂在那儿，
+        // 下一个真人进来看到的是个进行中的残局而不是干净大厅。
+        if (humans == 0) {
+            resetWhenEmpty(server);
+            return;
+        }
+
         if (game.phase() != MatchPhase.LOBBY) {
             return; // 局中/倒计时/结算均不干预
         }
-        // 只统计**真人**：假玩家（AI bot）也在玩家列表里，若不排除会让填充逻辑
-        // 误判"人已满"从而不再补员，且会把旧壳 NPC 又加回来与假玩家小队叠加。
-        int humans = 0;
-        for (ServerPlayerEntity hp : server.getPlayerManager().getPlayerList()) {
-            if (!BotPlayerFactory.isBot(hp)) {
-                humans++;
-            }
-        }
-        if (autoFill && humans > 0) {
+        if (autoFill) {
             if (!autoArmed) {
                 desiredPerSide = pickFillTarget(server);
                 applyFillTarget(server, desiredPerSide);
@@ -364,6 +368,47 @@ public final class ServerMatch {
         if (!autoFill) {
             tickAutoStartLegacy(server);
         }
+    }
+
+    /** 当前**真人**数量（排除 AI 假玩家——它们同样出现在玩家列表里）。 */
+    private int humanCount(MinecraftServer server) {
+        int n = 0;
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (!BotPlayerFactory.isBot(p)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * 空服自愈：没有真人时把对局复位到大厅初始状态。
+     *
+     * <p>用户诉求（2026-09-10）：「服务器中无真人的时候自动重置到初始状态，有真人再开始对局」。
+     * 复位内容 = 回大厅（清倒计时/票数/据点进度）+ 清空 AI 编制 + 清零填充目标 + 重置计时器。
+     * 幂等：已经干净时直接返回，不会每 tick 反复刷日志。
+     */
+    private void resetWhenEmpty(MinecraftServer server) {
+        boolean dirty = game.phase() != MatchPhase.LOBBY
+                || bots.alive() > 0
+                || autoArmed
+                || desiredPerSide != 0
+                || lobbyTimer >= 0;
+        if (!dirty) {
+            return;
+        }
+        game.returnToLobby();          // 复位据点进度 / 票数 / 倒计时
+        score.reset();
+        autoArmed = false;
+        autoTimer = -1;
+        lobbyTimer = -1;
+        desiredPerSide = 0;
+        bots.setTarget(Side.ATTACKER, 0);
+        bots.setTarget(Side.DEFENDER, 0);
+        bots.clearAll(server);
+        visualsPlaced = false;
+        broadcastState(server);
+        BreakfrontServer.LOGGER.info("[Breakfront] 空服自愈：已复位到大厅初始状态（等真人进服再开局）");
     }
 
     /** 按当前 TPS 决定每边目标总人数：负载好趋上限，负载差保底。 */
@@ -650,6 +695,14 @@ public final class ServerMatch {
         MinecraftServer server = BreakfrontServer.server();
         bots.clearAll(server);          // 新回合：AI 编制归零，随后按对账在新出生点重建
         if (server != null) {
+            // ⚠️ 开赛前**必须**把填充目标落实一遍：`/bf start` 手动开局不会走
+            //    tickAutoPlay 的 applyFillTarget 分支，目标人数还停在 0 →
+            //    结果新回合里一个 BOT 都没有（用户反馈「开局后 AI BOT 没出现」即此路径）。
+            if (autoFill && humanCount(server) > 0) {
+                desiredPerSide = pickFillTarget(server);
+                bots.setTarget(Side.ATTACKER, desiredPerSide);
+                bots.setTarget(Side.DEFENDER, desiredPerSide);
+            }
             bots.reconcile(this, server);
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                 kitPlayer(server, p);

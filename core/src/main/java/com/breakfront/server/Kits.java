@@ -1,6 +1,7 @@
 package com.breakfront.server;
 
 import com.breakfront.weapon.WeaponCatalog;
+import com.breakfront.weapon.WeaponSpec;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.NbtComponent;
 import net.minecraft.entity.EquipmentSlot;
@@ -14,6 +15,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -34,24 +36,41 @@ public final class Kits {
     public record KitSpec(String gunId, String ammoId, int magSize, int spareAmmo) {
     }
 
+    /**
+     * 单枪 → 发放规格。**备弹量以 {@link WeaponCatalog} 的 {@code reserveAmmo} 为唯一真源**，
+     * 按武器族区分（用户 2026-09-10 指定）：突击步枪 180 / 霰弹枪 80 / 狙击步枪与
+     * 精确射手步枪 50；轻机枪 300、冲锋枪 150、手枪 68 维持原值。
+     * 这里只写「弹匣容量 + 弹药 id」，备弹数从目录里查，避免两处硬编码对不上。
+     */
+    private static final Map<String, KitSpec> GUNS = buildGuns();
+
+    private static Map<String, KitSpec> buildGuns() {
+        Map<String, Integer> mags = Map.of(
+                "hk416d", 30, "m4a1", 30,
+                "aa12", 8, "m590", 6,
+                "m249", 75, "kar98", 4,
+                "mk14", 20, "ump45", 25, "glock17", 17);
+        Map<String, String> ammos = Map.of(
+                "hk416d", "556x45", "m4a1", "556x45",
+                "aa12", "12g", "m590", "12g",
+                "m249", "556x45", "kar98", "792x57",
+                "mk14", "762x39", "ump45", "45acp", "glock17", "9mm");
+        Map<String, KitSpec> m = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> e : mags.entrySet()) {
+            String gun = e.getKey();
+            int reserve = WeaponCatalog.byId(gun)
+                    .map(WeaponSpec::reserveAmmo).orElse(120);
+            m.put(gun, new KitSpec(gun, ammos.get(gun), e.getValue(), reserve));
+        }
+        return Map.copyOf(m);
+    }
+
     /** 兵种 → 默认主武器（与 WeaponCatalog.CLASS_GUNS 首把保持一致）。 */
     private static final Map<String, KitSpec> KITS = Map.of(
-            "assault", new KitSpec("hk416d", "556x45", 30, 180),
-            "engineer", new KitSpec("aa12", "12g", 8, 48),
-            "support", new KitSpec("m249", "556x45", 75, 300),
-            "recon", new KitSpec("kar98", "792x57", 4, 40));
-
-    /** 单枪 → 发放规格（覆盖所有兵种白名单内的枪 + 若干额外枪）。 */
-    private static final Map<String, KitSpec> GUNS = Map.of(
-            "hk416d", new KitSpec("hk416d", "556x45", 30, 180),
-            "m4a1", new KitSpec("m4a1", "556x45", 30, 180),
-            "aa12", new KitSpec("aa12", "12g", 8, 48),
-            "m590", new KitSpec("m590", "12g", 6, 36),
-            "m249", new KitSpec("m249", "556x45", 75, 300),
-            "kar98", new KitSpec("kar98", "792x57", 4, 40),
-            "mk14", new KitSpec("mk14", "762x39", 20, 80),
-            "ump45", new KitSpec("ump45", "45acp", 25, 150),
-            "glock17", new KitSpec("glock17", "9mm", 17, 68));
+            "assault", GUNS.get("hk416d"),
+            "engineer", GUNS.get("aa12"),
+            "support", GUNS.get("m249"),
+            "recon", GUNS.get("kar98"));
 
     /** 兵种轮转顺序（bot 与真人共用同一套）。 */
     public static final String[] CLASSES = {"assault", "engineer", "support", "recon"};
@@ -107,7 +126,18 @@ public final class Kits {
         le.equipStack(EquipmentSlot.MAINHAND, st);
     }
 
-    /** 备弹入背包（按物品堆叠上限拆分，背包满则丢弃不阻塞）。 */
+    /**
+     * 备弹入背包（按 TaCZ 弹药的真实每堆上限拆分，背包满则掉落不阻塞）。
+     *
+     * <p>⚠️ **不能用 {@code Item.getMaxCount()}**：TaCZ 的 {@code tacz:ammo} 物品本体是
+     * {@code new Properties().stacksTo(1)}，真正的每堆上限由
+     * {@code tacz$getMaxStackSize(stack)} 从弹药 index JSON 的 {@code stack_size} 给出
+     * （实测 12g = 36）。早先按 getMaxCount() 拆分 → 180 发被拆成 180 个**单发堆** →
+     * 背包瞬间塞满、其余全部掉地上（用户反馈「子弹不能叠加」的根因）。
+     *
+     * <p>这里反射读 TaCZ 的上限，并同步写进原版 {@code MAX_STACK_SIZE} 组件，
+     * 让原版背包合并与 TaCZ 换弹逻辑口径一致；TaCZ 缺席/改名时回退 64。
+     */
     public static void giveAmmo(ServerPlayerEntity player, KitSpec spec) {
         if (player == null || spec == null || spec.spareAmmo() <= 0) {
             return;
@@ -116,17 +146,34 @@ public final class Kits {
         if (ammo == null || ammo == Items.AIR) {
             return;
         }
+        NbtCompound ac = new NbtCompound();
+        ac.putString("AmmoId", "tacz:" + spec.ammoId());
+        int max = ammoStackLimit(ammo, ac);
         int left = spec.spareAmmo();
-        int max = Math.max(1, Math.min(64, ammo.getMaxCount()));
         while (left > 0) {
             int n = Math.min(max, left);
             ItemStack a = new ItemStack(ammo, n);
-            NbtCompound ac = new NbtCompound();
-            ac.putString("AmmoId", "tacz:" + spec.ammoId());
             a.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(ac));
+            a.set(DataComponentTypes.MAX_STACK_SIZE, max);
             player.getInventory().offerOrDrop(a);
             left -= n;
         }
+    }
+
+    /** 读 TaCZ 弹药的真实每堆上限（反射，保持零 TaCZ 编译期依赖）；取不到回退 64。 */
+    private static int ammoStackLimit(Item ammo, NbtCompound ammoNbt) {
+        try {
+            ItemStack probe = new ItemStack(ammo);
+            probe.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(ammoNbt));
+            var m = ammo.getClass().getMethod("tacz$getMaxStackSize", ItemStack.class);
+            Object v = m.invoke(ammo, probe);
+            if (v instanceof Integer n && n > 1) {
+                return Math.min(64, n);
+            }
+        } catch (Throwable ignored) {
+            // TaCZ 未装载或方法改名 → 用回退值
+        }
+        return 64;
     }
 
     /** 服务端指令执行（与 ServerMatch.exec 同实现，避免跨类私有访问）。 */

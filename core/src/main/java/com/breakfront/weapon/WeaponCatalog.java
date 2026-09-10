@@ -56,19 +56,19 @@ public final class WeaponCatalog {
 
         // ---- 精确射手步枪 DMR：2-3 发，中远距压制 ----
         register(new WeaponSpec("mk14", "MK14 EBR", WeaponClass.DMR, AmmoType.CAL_762X39,
-                FireMode.SEMI, 20, 80, 50, 1, 1.8, 30, 110, 0.7, 380, 3.0));
+                FireMode.SEMI, 20, 50, 50, 1, 1.8, 30, 110, 0.7, 380, 3.0));
 
         // ---- 狙击枪 SR：躯干一枪致死（105>100），爆头必杀 ----
         register(new WeaponSpec("kar98", "Kar98k", WeaponClass.SR, AmmoType.CAL_792X57,
-                FireMode.BOLT, 4, 40, 105, 1, 2.0, 60, 200, 0.85, 45, 6.0));
+                FireMode.BOLT, 4, 50, 105, 1, 2.0, 60, 200, 0.85, 45, 6.0));
 
         // ---- 霰弹枪 SG：近距 1 壳致死，远距急剧衰减（falloffEnd 后按丸分摊几乎无效）----
         // aa12：全自动，12m 满伤区内 1 壳必杀（射速换致死距离）
         register(new WeaponSpec("aa12", "AA-12", WeaponClass.SG, AmmoType.CAL_12GAUGE,
-                FireMode.AUTO, 8, 48, 104, 8, 1.3, 12, 24, 0.40, 300, 1.2));
+                FireMode.AUTO, 8, 80, 104, 8, 1.3, 12, 24, 0.40, 300, 1.2));
         // m590：泵动，18m 内 1 壳必杀（低射速换更远致死距离与更高单壳伤）
         register(new WeaponSpec("m590", "M590A1", WeaponClass.SG, AmmoType.CAL_12GAUGE,
-                FireMode.PUMP, 6, 36, 130, 10, 1.3, 18, 30, 0.40, 90, 1.2));
+                FireMode.PUMP, 6, 80, 130, 10, 1.3, 18, 30, 0.40, 90, 1.2));
 
         // ---- 手枪 PISTOL：副武器，近距 5 发、有爆头回报 ----
         register(new WeaponSpec("glock17", "Glock 17", WeaponClass.PISTOL, AmmoType.CAL_9MM,
@@ -84,9 +84,9 @@ public final class WeaponCatalog {
     /** 与服务器 Kits.CLASSES 同序的兵种套件表。 */
     public static final List<KitSpec> KITS = List.of(
             new KitSpec("assault", "突击兵", "hk416d", "hk416d", "556x45", 180),
-            new KitSpec("engineer", "工程兵", "aa12", "aa12", "12g", 48),
+            new KitSpec("engineer", "工程兵", "aa12", "aa12", "12g", 80),
             new KitSpec("support", "支援兵", "m249", "m249", "556x45", 300),
-            new KitSpec("recon", "侦察兵", "kar98", "kar98", "792x57", 40));
+            new KitSpec("recon", "侦察兵", "kar98", "kar98", "792x57", 50));
 
     private static void register(WeaponSpec spec) {
         SPECS.put(spec.id(), spec);
