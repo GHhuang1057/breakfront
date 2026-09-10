@@ -391,7 +391,47 @@ root = root.then(literal("team")
                 });
         return node.then(literal("set")
                 .then(ovNode("attacker", Side.ATTACKER))
-                .then(ovNode("defender", Side.DEFENDER)));
+                .then(ovNode("defender", Side.DEFENDER)))
+                // /bf spawns lobby [x z]：不带坐标=把出生点设为你当前站的位置；clear=恢复世界出生点
+                .then(literal("lobby")
+                        .executes(ctx -> {
+                            var match = BreakfrontServer.match();
+                            if (match == null) {
+                                ctx.getSource().sendError(Text.literal("对局尚未初始化"));
+                                return 0;
+                            }
+                            var src = ctx.getSource();
+                            var pos = src.getPosition();
+                            match.setLobbySpawn(pos.x, pos.z);
+                            match.forceLoadSpawnChunks(BreakfrontServer.server(), 48);
+                            send(src, String.format("BF 出生点已设为当前位置 (%.1f, %.1f) 并常驻加载",
+                                    pos.x, pos.z));
+                            return 1;
+                        })
+                        .then(CommandManager.argument("x", DoubleArgumentType.doubleArg())
+                                .then(CommandManager.argument("z", DoubleArgumentType.doubleArg())
+                                        .executes(ctx -> {
+                                            var match = BreakfrontServer.match();
+                                            if (match == null) {
+                                                return 0;
+                                            }
+                                            double x = DoubleArgumentType.getDouble(ctx, "x");
+                                            double z = DoubleArgumentType.getDouble(ctx, "z");
+                                            match.setLobbySpawn(x, z);
+                                            match.forceLoadSpawnChunks(BreakfrontServer.server(), 48);
+                                            send(ctx.getSource(), String.format(
+                                                    "BF 出生点已设为 (%.1f, %.1f) 并常驻加载", x, z));
+                                            return 1;
+                                        }))))
+                .then(literal("lobbyclear").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        return 0;
+                    }
+                    match.setLobbySpawn(Double.NaN, Double.NaN);
+                    send(ctx.getSource(), "BF 出生点已恢复为世界出生点");
+                    return 1;
+                }));
     }
 
     private static LiteralArgumentBuilder<ServerCommandSource> ovNode(String label, Side side) {

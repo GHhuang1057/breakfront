@@ -44,6 +44,13 @@ public final class BreakfrontServer {
             updateServer = ModUpdateServer.start(server.getRunDirectory());
             LOGGER.info("[Breakfront] server match ready ({} zones, {} sectors)",
                     match.game().zoneCount(), match.game().sectors().size());
+            // 常驻加载出生点区块：保证玩家进服时出生点地形一定已生成/已加载，
+            // 否则 columnTopY 为 NaN，出生点会被兜底逻辑推到几十格开外（2026-09-10 实测）。
+            try {
+                match.forceLoadSpawnChunks(server, 48);
+            } catch (Exception e) {
+                LOGGER.warn("[Breakfront] forceLoadSpawnChunks failed: {}", e.toString());
+            }
         });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {

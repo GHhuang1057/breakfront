@@ -137,8 +137,57 @@ def cmd_status(cli) -> int:
     return 0
 
 
+def _mcsm_bf_uuid(cli) -> str:
+    """在 MCSM 面板里找到 Breakfront 实例的 uuid；找不到返回空串。"""
+    try:
+        from mcsm_setup_bf import inst_list, find_by_nick, NICKNAME
+        bf = find_by_nick(inst_list(cli), NICKNAME)
+        return bf["instanceUuid"] if bf else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _mcsm_action(cli, action: str) -> bool:
+    """经 MCSM 面板对 Breakfront 实例执行 open/stop/restart/kill。"""
+    uuid = _mcsm_bf_uuid(cli)
+    if not uuid:
+        return False
+    try:
+        from mcsm_setup_bf import inst_action
+        h, _b = inst_action(cli, action, uuid)
+        return " 200" in (h.splitlines()[0] if h else "")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _mcsm_start() -> bool:
+    """独立建一条 SSH 连接去面板点「启动」（避免复用可能已僵死的 cli）。"""
+    try:
+        from mc_remote import connect
+        from mcsm_setup_bf import inst_list, find_by_nick, NICKNAME, inst_action
+        c = connect()
+        try:
+            bf = find_by_nick(inst_list(c), NICKNAME)
+            if not bf:
+                print("  [!] 面板里没有 Breakfront 实例")
+                return False
+            h, _b = inst_action(c, "open", bf["instanceUuid"])
+            ok = " 200" in (h.splitlines()[0] if h else "")
+            print("  面板 open:", "OK" if ok else (h.splitlines()[0] if h else "无响应"))
+            return ok
+        finally:
+            c.close()
+    except Exception as e:  # noqa: BLE001
+        print("  [!] 面板启动失败:", type(e).__name__, e)
+        return False
+
+
 def cmd_deploy(cli, resume_updater: bool = False) -> int:
-    """把编译产物部署到服务端并重启（开发模式的完整热重启）。"""
+    """把编译产物部署到服务端并重启（开发模式的完整热重启）。
+
+    ⚠️ 2026-09-10 起服务端由 MCSM 面板托管，本命令的停/启都走面板，
+       不再自行拉进程（详见下方启动段注释）。
+    """
     from mc_remote import run_rcon
 
     jar = ps(cli, f"(Get-ChildItem '{BUILD_DIR}\\core\\build\\libs' -Filter 'breakfront-*.jar' | "
@@ -156,11 +205,14 @@ def cmd_deploy(cli, resume_updater: bool = False) -> int:
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
             "Write-Output 'updater stopped'")
 
-    print("[*] 停服务端（RCON stop 优先）…")
-    try:
-        run_rcon(cli, "stop")
-    except Exception as e:  # noqa: BLE001
-        print("  RCON stop 失败（继续强杀）:", e)
+    print("[*] 停服务端（走 MCSM 面板，保证面板状态与实际一致）…")
+    mcsm_ok = _mcsm_action(cli, "stop")
+    if not mcsm_ok:
+        print("  面板 stop 不可用，回退 RCON stop")
+        try:
+            run_rcon(cli, "stop")
+        except Exception as e:  # noqa: BLE001
+            print("  RCON stop 失败（继续强杀）:", e)
     killed = False
     for _ in range(12):
         time.sleep(5)
@@ -197,19 +249,12 @@ def cmd_deploy(cli, resume_updater: bool = False) -> int:
     print(ps(cli, script))
 
     print("[*] 启动服务端…")
-    # ⚠️ 启动服务端**必须**用「计划任务执行 start.bat」，两个坑都踩过：
-    #   ① Start-Process 直接启 java：其 stdin 连着 SSH 会话，exec 命令一返回 stdin 就 EOF，
-    #      而 Minecraft 服务端读到 stdin EOF 会**自行停止** → 表现为"启动后约 1 分钟又没了"。
-    #   ② 经 `cmd /c start.bat -WindowStyle Hidden` 在本 SSH 会话下干脆起不来。
-    #   start.bat 末尾的 `pause` 让 cmd 持有 stdin，计划任务又独立于会话 → 稳定（实测 90s+ 存活）。
-    ps(cli, "Remove-ScheduledTask -TaskName 'BFServerOnce' -ErrorAction SilentlyContinue; "
-            "$a = New-ScheduledTaskAction -Execute 'J:\\bfserver\\server\\start.bat'; "
-            "$s = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew; "
-            "Register-ScheduledTask -TaskName 'BFServerOnce' -Action $a -Settings $s "
-            "-RunLevel Highest -Force | Out-Null; "
-            "Start-ScheduledTask -TaskName 'BFServerOnce'; "
-            "Start-Sleep -Seconds 2; "
-            "(Get-ScheduledTask -TaskName 'BFServerOnce').State")
+    # ⚠️ 2026-09-10 起服务端启停已交给 MCSM 面板托管（见 scripts/mcsm_takeover.py），
+    #    这里**必须**走面板 open，不能再自行 Start-Process / 计划任务拉 java：
+    #    · 自行启 java：stdin 连着 SSH 会话，exec 一返回 stdin 就 EOF，MC 读到 EOF 会自行停止；
+    #      且会与 MCSM 抢 25565 / 世界锁，还会让 MCSM 里的实例显示为「已停止」而实际在跑。
+    #    · MCSM 用 pty 持有 stdin，天然没有 EOF 问题，面板状态也才准。
+    started = _mcsm_start()
     t0 = time.time()
     up = False
     for _ in range(40):          # 最多等 200s（首次启动要大世界加载）
@@ -221,9 +266,9 @@ def cmd_deploy(cli, resume_updater: bool = False) -> int:
             break
     if not up:
         print("[!] 25565 未监听。诊断：")
-        print(ps(cli, "Get-ScheduledTask -TaskName 'BFServerOnce' | Select-Object -Expand State; "
-                      "Get-ScheduledTaskInfo -TaskName 'BFServerOnce' | "
-                      "Select-Object LastRunTime,LastTaskResult | Format-List | Out-String"))
+        print(ps(cli, "@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "
+                      "'fabric-server-launch' }).Count").strip() and "java 进程存在（可能仍在启动）"
+                      or "没有 java 进程（启动失败）"))
 
     if resume_updater:
         ps(cli, "Start-ScheduledTask -TaskName 'BreakfrontUpdater' -ErrorAction SilentlyContinue; 'updater resumed'")

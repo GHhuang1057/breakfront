@@ -89,6 +89,16 @@ public final class ServerMatch {
     private MatchPhase lastPhase = MatchPhase.LOBBY;
     private final double[] attackerSpawn = {Double.NaN, Double.NaN}; // override {x,z}
     private final double[] defenderSpawn = {Double.NaN, Double.NaN};
+    /**
+     * BF 出生点（大厅 / 进服落点）override {x,z}；NaN = 用世界出生点。
+     *
+     * <p>为什么需要它：据点（sectors.json）是**按地图**划的，换图后旧坐标全部落在
+     * 未生成区块 → {@link #spawnFor} 一路兜底往外扫，实测把玩家扔到世界出生点外
+     * 94 格、y=4 的深坑里（2026-09-10 崩溃日志："Level spawn (-2083,32,1371)
+     * vs 玩家 (-2177.28, 4.00, 1417.15)"）。
+     * 大厅阶段统一落 BF 出生点，可保证「进服即在出生点」，与据点配置是否过期无关。
+     */
+    private final double[] lobbySpawn = {Double.NaN, Double.NaN};
 
     // ---- AI 自动填充（人机对战 / 单机=一真人其余AI）----
     private boolean autoFill = true;    // 默认开：有真人即按负载填充并自动开局
@@ -920,7 +930,12 @@ public final class ServerMatch {
         if (side == null) {
             return;
         }
-        double[] sp = spawnFor(side, server.getOverworld());
+        // 大厅阶段：全员落在 BF 出生点（与世界出生点一致，除非 spawn.lobby 覆盖）。
+        // 战斗阶段才用阵营出生区 —— 这样即使 sectors.json 还是上一张图的坐标，
+        // 玩家进服也稳定在出生点，而不是被兜底逻辑扔到几十格外的深坑里。
+        double[] sp = game.phase() == MatchPhase.LOBBY
+                ? lobbySpawnPoint(server.getOverworld())
+                : spawnFor(side, server.getOverworld());
         exec(server, String.format("tp %s %.1f %.1f %.1f",
                 player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
         exec(server, String.format("spawnpoint %s %d %d %d",
@@ -971,6 +986,62 @@ public final class ServerMatch {
                 deployPlayer(server, p);
             }
         }
+    }
+
+    /**
+     * BF 出生点的实际落点 {x,y,z}（真实实体表面，y 已 +1）。
+     *
+     * <p>取 override（{@code spawn.lobby}），没有则用世界出生点；若该柱无地形
+     * （世界出生点可能落在未生成区块），由近及远找最近有地面的柱，绝不返回架空高度。
+     */
+    public double[] lobbySpawnPoint(ServerWorld world) {
+        double x, z;
+        if (!Double.isNaN(lobbySpawn[0])) {
+            x = lobbySpawn[0];
+            z = lobbySpawn[1];
+        } else {
+            var sp = world.getSpawnPos();
+            x = sp.getX() + 0.5;
+            z = sp.getZ() + 0.5;
+        }
+        double t = columnTopY(world, x, z);
+        if (!Double.isNaN(t)) {
+            return new double[]{x, t + 1, z};
+        }
+        // 出生点柱没有地形：由近及远四向找最近可站立柱（不然玩家会掉进虚空）
+        double[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}};
+        for (int d = 4; d <= 128; d += 4) {
+            for (double[] dir : dirs) {
+                double cx = x + dir[0] * d;
+                double cz = z + dir[1] * d;
+                double ct = columnTopY(world, cx, cz);
+                if (!Double.isNaN(ct)) {
+                    BreakfrontServer.LOGGER.warn(
+                            "[Breakfront] 出生点 ({}, {}) 无地形，已外移到 ({}, {})",
+                            (long) x, (long) z, (long) cx, (long) cz);
+                    return new double[]{cx, ct + 1, cz};
+                }
+            }
+        }
+        return new double[]{x, 80, z};
+    }
+
+    /**
+     * 预加载并常驻出生点周围区块（原版 {@code /forceload}）。
+     *
+     * <p>为什么必须做：出生点周边若没被加载/生成，{@code columnTopY} 返回 NaN，
+     * 出生逻辑就会被迫向外兜底 → 玩家不在出生点出生。常驻后出生点地形恒定可用。
+     */
+    public void forceLoadSpawnChunks(MinecraftServer server, int radiusBlocks) {
+        double[] sp = lobbySpawnPoint(server.getOverworld());
+        int x0 = (int) Math.floor(sp[0] - radiusBlocks);
+        int z0 = (int) Math.floor(sp[2] - radiusBlocks);
+        int x1 = (int) Math.floor(sp[0] + radiusBlocks);
+        int z1 = (int) Math.floor(sp[2] + radiusBlocks);
+        exec(server, String.format("forceload add %d %d %d %d", x0, z0, x1, z1));
+        BreakfrontServer.LOGGER.info(
+                "[Breakfront] 出生点 ({}, {}, {}) 已常驻加载 ±{} 格区块",
+                (long) sp[0], (long) sp[1], (long) sp[2], radiusBlocks);
     }
 
     /** 出生坐标（含 Y），攻/守默认锚定在首/末据点的阵营侧；可 /bf spawns set 覆盖。
@@ -1213,6 +1284,13 @@ public final class ServerMatch {
         return true;
     }
 
+    /** 设置 BF 出生点（大厅/进服落点）；传 NaN 恢复为世界出生点。持久化到 spawn.lobby。 */
+    public void setLobbySpawn(double x, double z) {
+        lobbySpawn[0] = x;
+        lobbySpawn[1] = z;
+        saveServerProps();
+    }
+
     /** props 键值：override 生效时 "x,z"，否则空（不写）。 */
     private static String spawnKey(double[] ov) {
         return Double.isNaN(ov[0]) ? "" : String.format("%.1f,%.1f", ov[0], ov[1]);
@@ -1328,6 +1406,16 @@ public final class ServerMatch {
                                 // 忽略坏值
                             }
                         }
+                    } else if (k.equals("spawn.lobby")) {
+                        int ci = v.indexOf(',');
+                        if (ci > 0) {
+                            try {
+                                lobbySpawn[0] = Double.parseDouble(v.substring(0, ci).trim());
+                                lobbySpawn[1] = Double.parseDouble(v.substring(ci + 1).trim());
+                            } catch (NumberFormatException ignored) {
+                                // 忽略坏值
+                            }
+                        }
                     }
                 }
             }
@@ -1370,7 +1458,9 @@ public final class ServerMatch {
                     "auth.endpoint=" + AuthBridge.endpoint,
                     "# 出生点覆盖（/bf spawns set 或 Web 管理端写）：x,z",
                     "spawn.attacker=" + spawnKey(attackerSpawn),
-                    "spawn.defender=" + spawnKey(defenderSpawn)) + "\n");
+                    "spawn.defender=" + spawnKey(defenderSpawn),
+                    "# BF 出生点（大厅/进服落点）：留空=用世界出生点",
+                    "spawn.lobby=" + spawnKey(lobbySpawn)) + "\n");
         } catch (IOException e) {
             BreakfrontServer.LOGGER.warn("[Breakfront] cannot save server props: {}", e.toString());
         }
