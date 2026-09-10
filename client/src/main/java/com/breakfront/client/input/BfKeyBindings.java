@@ -163,9 +163,9 @@ public final class BfKeyBindings {
         };
     }
 
-    /** 用 GLFW 码构造一个键盘 {@code InputUtil.Key}（translation key 仅用于显示）。 */
+    /** 用 GLFW 码构造一个键盘 {@code InputUtil.Key}（1.21 的 {@code InputUtil.Key} 构造器非 public，走工厂方法）。 */
     private static InputUtil.Key k(String trans, int glfw) {
-        return new InputUtil.Key(trans, InputUtil.Type.KEYSYM, glfw);
+        return InputUtil.fromGlfwKey(glfw);
     }
 
     private static Path flagFile() {
