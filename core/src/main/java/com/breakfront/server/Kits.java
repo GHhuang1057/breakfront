@@ -102,7 +102,7 @@ public final class Kits {
                 ? chosen : WeaponCatalog.defaultGun(classId);
         KitSpec spec = GUNS.getOrDefault(gunId, GUNS.get(WeaponCatalog.defaultGun(classId)));
         equipGun(player, spec);
-        giveAmmo(player, spec);
+        giveAmmo(server, player, spec);
     }
 
     /**
@@ -127,60 +127,26 @@ public final class Kits {
     }
 
     /**
-     * 备弹入背包（按 TaCZ 弹药的真实每堆上限拆分，背包满则掉落不阻塞）。
+     * 备弹入背包（走**指令文本**，由原版 /give 负责按每堆上限自动分堆）。
      *
-     * <p>⚠️ **不能用 {@code Item.getMaxCount()}**：TaCZ 的 {@code tacz:ammo} 物品本体是
-     * {@code new Properties().stacksTo(1)}，真正的每堆上限由
-     * {@code tacz$getMaxStackSize(stack)} 从弹药 index JSON 的 {@code stack_size} 给出
-     * （实测 12g = 36）。早先按 getMaxCount() 拆分 → 180 发被拆成 180 个**单发堆** →
-     * 背包瞬间塞满、其余全部掉地上（用户反馈「子弹不能叠加」的根因）。
+     * <p>为什么不在 Java 里 new ItemStack：TaCZ 用 mixin 把
+     * {@code ItemStack.getMaxStackSize()} 覆写成「按 stack 里的 AmmoId 查弹药 index 的
+     * stack_size」（实测 556x45=60、12g=36）。Java 路径下无论
+     * {@code new ItemStack(ammo, n)} 还是 {@code setCount(n)}，数量都会被夹成 1
+     * （组件 max_stack_size 写进去了、count 仍是 1），结果 180 发变成 180 个单发堆、
+     * 背包瞬间塞满、其余掉地上 —— 用户反馈「子弹不能叠加」。
      *
-     * <p>这里反射读 TaCZ 的上限，并同步写进原版 {@code MAX_STACK_SIZE} 组件，
-     * 让原版背包合并与 TaCZ 换弹逻辑口径一致；TaCZ 缺席/改名时回退 64。
+     * <p>1.21 的 {@code item[component=value]} 语法可用（旧式 {@code {NBT}} 已废弃），
+     * 实测 {@code give <p> tacz:ammo[minecraft:custom_data={AmmoId:"tacz:556x45"}] 180}
+     * 会正确给出 3 堆 ×60。故这里直接用指令发放，与「零 TaCZ 编译期依赖」的既定路线一致。
      */
-    public static void giveAmmo(ServerPlayerEntity player, KitSpec spec) {
-        if (player == null || spec == null || spec.spareAmmo() <= 0) {
+    public static void giveAmmo(MinecraftServer server, ServerPlayerEntity player, KitSpec spec) {
+        if (server == null || player == null || spec == null || spec.spareAmmo() <= 0) {
             return;
         }
-        Item ammo = Registries.ITEM.get(Identifier.tryParse("tacz:ammo"));
-        if (ammo == null || ammo == Items.AIR) {
-            return;
-        }
-        NbtCompound ac = new NbtCompound();
-        ac.putString("AmmoId", "tacz:" + spec.ammoId());
-        int max = ammoStackLimit(ammo, ac);
-        int left = spec.spareAmmo();
-        while (left > 0) {
-            int n = Math.min(max, left);
-            // ⚠️ 顺序很关键：TaCZ 用 mixin 把 ItemStack.getMaxStackSize() 覆写成
-            //    「按 stack 里的 AmmoId 查弹药 index 的 stack_size」，所以
-            //    ① 必须先把 AmmoId 写进 NBT，② 再设数量。
-            //    若照 `new ItemStack(ammo, n)` 那样在构造时带数量，此刻 NBT 还空着 →
-            //    TaCZ 查不到 stack_size → 返回 1 → 数量被夹成 1（实测踩过：
-            //    max_stack_size 写进去了，但每堆 count 还是 1）。
-            ItemStack a = new ItemStack(ammo);
-            a.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(ac.copy()));
-            a.set(DataComponentTypes.MAX_STACK_SIZE, max);
-            a.setCount(n);
-            player.getInventory().offerOrDrop(a);
-            left -= n;
-        }
-    }
-
-    /** 读 TaCZ 弹药的真实每堆上限（反射，保持零 TaCZ 编译期依赖）；取不到回退 64。 */
-    private static int ammoStackLimit(Item ammo, NbtCompound ammoNbt) {
-        try {
-            ItemStack probe = new ItemStack(ammo);
-            probe.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(ammoNbt));
-            var m = ammo.getClass().getMethod("tacz$getMaxStackSize", ItemStack.class);
-            Object v = m.invoke(ammo, probe);
-            if (v instanceof Integer n && n > 1) {
-                return Math.min(64, n);
-            }
-        } catch (Throwable ignored) {
-            // TaCZ 未装载或方法改名 → 用回退值
-        }
-        return 64;
+        exec(server, String.format(
+                "give %s tacz:ammo[minecraft:custom_data={AmmoId:\"tacz:%s\"}] %d",
+                player.getGameProfile().getName(), spec.ammoId(), spec.spareAmmo()));
     }
 
     /** 服务端指令执行（与 ServerMatch.exec 同实现，避免跨类私有访问）。 */
