@@ -56,6 +56,10 @@ public class BreakfrontHud {
     private float lastHp = 20f;
     private long dmgFlashUntil = 0;
 
+    // 氛围层状态：受击暗角脉冲计时 + 上一帧血量（用于检测掉血）
+    private long atmoDmgUntil = 0;
+    private float lastAtmoHp = 20f;
+
     public void render(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.options == null) {
@@ -108,6 +112,15 @@ public class BreakfrontHud {
         BfMinimap.render(context, font, LEFT_X, sh - miniSize - BOTTOM, miniSize, bobDx, bobDy);
         ZoneMarkers.render(context, font, sw, sh);
         ActiveZonePin.render(context, font, sw); // #40：进入领地→顶栏钉卡（平滑转移）
+
+        // 氛围层（暗角/低血量）与准星：仅"正在游玩、无全屏界面"时绘制
+        boolean screenOpen = client.currentScreen != null;
+        if (!screenOpen && BfHudPrefs.isVignetteEnabled()) {
+            renderAtmosphere(context, font, sw, sh, client);
+        }
+        if (!screenOpen && BfHudPrefs.isCrosshairEnabled()) {
+            renderCrosshair(context, font, sw, sh);
+        }
     }
 
     // ---- W5：HitMarker 命中反馈（准星四角斜线） ----
@@ -123,7 +136,7 @@ public class BreakfrontHud {
         // 仅在开镜/准星未隐藏场景也显示（BF 风格命中提示始终显示）
         for (ClientMatchState.HitEvent m : marks) {
             long ageMs = now - m.at();
-            if (ageMs < 0 || ageMs > 420) {
+            if (ageMs < 0 || ageMs > 520) {
                 continue;
             }
             // 缩放出场 70ms → 停留 → 最后 120ms 淡出
@@ -150,7 +163,102 @@ public class BreakfrontHud {
             // 左 / 右
             BfDraw.fill(ctx, cx - r1, cy - 1, cx - r0, cy + 1, c);
             BfDraw.fill(ctx, cx + r0, cy - 1, cx + r1, cy + 1, c);
+            // 击杀/爆头：叠加 GD656 风格扩张环
+            if (m.kind() >= 2) {
+                int rgb = m.kind() == 3 ? BfTheme.GREEN : BfTheme.RED;
+                renderKillRing(ctx, cx, cy, ageMs, rgb, m.kind() == 3);
+            }
         }
+    }
+
+    // 击杀反馈环（对标 GD656 IconRingEffect）：延迟 100ms 后 300ms 内由 ~10px 扩张到 ~42px，
+    // 透明度 (1-t)^2 衰减；爆头（kind 3）叠加第二圈（再延迟 100ms、更粗）。
+    private void renderKillRing(DrawContext ctx, int cx, int cy, long ageMs, int rgb, boolean doubleRing) {
+        final long DELAY = 100, DUR = 300;
+        long e1 = ageMs - DELAY;
+        if (e1 >= 0 && e1 <= DUR) {
+            float t = (float) e1 / DUR;
+            float ease = 1f - (float) Math.pow(1f - t, 3); // easeOutCubic
+            float alpha = (1f - t) * (1f - t);
+            float radius = 10f + 32f * ease;
+            float thick = 3f * (1f - t);
+            BfDraw.ring(ctx, cx, cy, radius, thick, argb(rgb, (int) (alpha * 215)));
+        }
+        if (doubleRing) {
+            long e2 = ageMs - DELAY - DELAY;
+            if (e2 >= 0 && e2 <= DUR) {
+                float t = (float) e2 / DUR;
+                float ease = 1f - (float) Math.pow(1f - t, 3);
+                float alpha = (1f - t) * (1f - t);
+                float radius = 10f + 32f * ease + 6f; // 外圈略大
+                float thick = 3f * 1.8f * (1f - t);
+                BfDraw.ring(ctx, cx, cy, radius, thick, argb(rgb, (int) (alpha * 165)));
+            }
+        }
+    }
+
+    // ---- W6：BF2042 风格准星（中心青点 + 四向细线，间隙随移动张开） ----
+
+    private void renderCrosshair(DrawContext ctx, TextRenderer font, int sw, int sh) {
+        var player = MinecraftClient.getInstance().player;
+        if (player == null) {
+            return;
+        }
+        int cx = sw / 2;
+        int cy = sh / 2 - 1;
+        // 水平移动速度 → 张开量（静立 ~3px，全速 ~10px）近似精度反馈
+        var v = player.getVelocity();
+        double hSpeed = Math.hypot(v.x, v.z);
+        double move = Math.min(1.0, hSpeed / 0.16);
+        int gap = (int) (3 + move * 7);
+        int len = 5;
+        int thick = 1;
+        int col = (225 << 24) | 0xF2F4F8; // 近白
+        int dot = BfTheme.TEAL;
+        // 中心青点
+        BfDraw.fill(ctx, cx - 1, cy - 1, 2, 2, dot);
+        // 上
+        BfDraw.fill(ctx, cx, cy - gap - len, thick, len, col);
+        // 下
+        BfDraw.fill(ctx, cx, cy + gap, thick, len, col);
+        // 左
+        BfDraw.fill(ctx, cx - gap - len, cy, len, thick, col);
+        // 右
+        BfDraw.fill(ctx, cx + gap, cy, len, thick, col);
+    }
+
+    // ---- W6：氛围层（受击暗角脉冲 + 低血量呼吸） ----
+
+    private void renderAtmosphere(DrawContext ctx, TextRenderer font, int sw, int sh, MinecraftClient client) {
+        var player = client.player;
+        if (player == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        float hp = player.getHealth();
+        float max = Math.max(1f, player.getMaxHealth());
+        float ratio = Math.max(0f, Math.min(1f, hp / max));
+        if (hp < lastAtmoHp - 0.01f) {
+            atmoDmgUntil = now + 460; // 掉血触发暗角脉冲
+        }
+        lastAtmoHp = hp;
+
+        float flash = now < atmoDmgUntil ? (float) (atmoDmgUntil - now) / 460f : 0f;
+        float low = ratio <= 0.25f ? (0.22f + 0.16f * (float) Math.sin(now / 280.0)) : 0f;
+        float a = Math.max(flash, low);
+        if (a <= 0.01f) {
+            return;
+        }
+        int band = (int) (Math.min(sw, sh) * 0.16);
+        int edge = argb(BfTheme.RED, (int) (a * 200));
+        int edgeH = argb(BfTheme.RED, (int) (a * 140)); // 左右带半强度，避免四角过曝
+        int clear = 0x00000000;
+        // 上 / 下（纵向渐变）
+        BfDraw.gradientV(ctx, 0, 0, sw, band, edge, clear);
+        BfDraw.gradientV(ctx, 0, sh - band, sw, band, clear, edge);
+        // 左 / 右（横向渐变）
+        BfDraw.gradientH(ctx, 0, 0, band, sh, edgeH, clear);
+        BfDraw.gradientH(ctx, sw - band, 0, band, sh, clear, edgeH);
     }
 
     private static boolean isTabHeld(MinecraftClient client) {

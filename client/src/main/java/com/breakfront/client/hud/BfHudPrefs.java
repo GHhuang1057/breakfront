@@ -24,6 +24,8 @@ public final class BfHudPrefs {
     private static volatile boolean bobEnabled = true;
     private static volatile boolean shakeEnabled = true;
     private static volatile double shakeStrength = 1.0;
+    private static volatile boolean crosshairEnabled = true;
+    private static volatile boolean vignetteEnabled = true;
     private static volatile long loadedAt = 0;
 
     private BfHudPrefs() {
@@ -54,6 +56,8 @@ public final class BfHudPrefs {
             // 读不到：保留默认
         }
         bobEnabled = parseBool(kv.get("hud.bob"), false); // 默认关：晃动易晕，需在配置显式开启
+        crosshairEnabled = parseBool(kv.get("hud.crosshair"), true);
+        vignetteEnabled = parseBool(kv.get("hud.vignette"), true);
         String sh = kv.get("hud.shake");
         if (sh == null) {
             shakeEnabled = true;
@@ -83,6 +87,18 @@ public final class BfHudPrefs {
     public static double getShake() {
         reloadIfStale();
         return shakeStrength;
+    }
+
+    /** 自定义 BF 准星是否启用（hud.crosshair=false 时回退到无准星/原版风格）。默认 true。 */
+    public static boolean isCrosshairEnabled() {
+        reloadIfStale();
+        return crosshairEnabled;
+    }
+
+    /** 受击暗角/低血量氛围是否启用（hud.vignette=false 关闭）。默认 true。 */
+    public static boolean isVignetteEnabled() {
+        reloadIfStale();
+        return vignetteEnabled;
     }
 
     private static boolean parseBool(String v, boolean def) {

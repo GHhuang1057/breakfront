@@ -44,6 +44,24 @@ public final class BfDraw {
         }
     }
 
+    /** 横向平滑渐变（逐列插值）。用于氛围暗角（左/右缘）。 */
+    public static void gradientH(DrawContext ctx, int x, int y, int w, int h,
+                                 int left, int right) {
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        int[] a = BfTheme.rgba(left);
+        int[] b = BfTheme.rgba(right);
+        for (int i = 0; i < w; i++) {
+            double t = (double) i / w;
+            int r = (int) (a[0] + (b[0] - a[0]) * t);
+            int g = (int) (a[1] + (b[1] - a[1]) * t);
+            int bl = (int) (a[2] + (b[2] - a[2]) * t);
+            int al = (int) (a[3] + (b[3] - a[3]) * t);
+            ctx.fill(x + i, y, 1, h, (al << 24) | (r << 16) | (g << 8) | bl);
+        }
+    }
+
     /** 斜切平行四边形（BF 面板语言）：上边相对下边右移 slant 像素。 */
     public static void parallelogram(DrawContext ctx, int x, int y, int w, int h, int slant, int argb) {
         quad(ctx,
@@ -74,6 +92,44 @@ public final class BfDraw {
 
     public static void diamond(DrawContext ctx, double cx, double cy, double half, int argb) {
         quad(ctx, cx, cy - half, cx + half, cy, cx, cy + half, cx - half, cy, argb);
+    }
+
+    /**
+     * 矢量圆环（环形带，无贴图）：以 TRIANGLE_STRIP 画 64 段的环。
+     * 用于击杀反馈环（对标 GD656 IconRingEffect 的三角带环 + 发光/插值动效）。
+     *
+     * @param radius    环中心半径（px）
+     * @param thickness 环带厚度（px），<=0 跳过
+     * @param argb      含 alpha 的颜色
+     */
+    public static void ring(DrawContext ctx, double cx, double cy, double radius, double thickness, int argb) {
+        if (radius <= 0 || thickness <= 0) {
+            return;
+        }
+        int[] c = BfTheme.rgba(argb);
+        if (c[3] <= 0) {
+            return;
+        }
+        float rOuter = (float) (radius + thickness * 0.5);
+        float rInner = (float) Math.max(0.0, radius - thickness * 0.5);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
+        Matrix4f m = ctx.getMatrices().peek().getPositionMatrix();
+        BufferBuilder buf = Tessellator.getInstance()
+                .begin(VertexFormat.DrawMode.TRIANGLE_STRIP, VertexFormats.POSITION_COLOR);
+        int SEG = 64;
+        for (int i = 0; i <= SEG; i++) {
+            double ang = Math.PI * 2.0 * i / SEG;
+            float cos = (float) Math.cos(ang);
+            float sin = (float) Math.sin(ang);
+            buf.vertex(m, (float) (cx + cos * rOuter), (float) (cy + sin * rOuter), 0)
+                    .color(c[0] / 255f, c[1] / 255f, c[2] / 255f, c[3] / 255f);
+            buf.vertex(m, (float) (cx + cos * rInner), (float) (cy + sin * rInner), 0)
+                    .color(c[0] / 255f, c[1] / 255f, c[2] / 255f, c[3] / 255f);
+        }
+        BufferRenderer.drawWithGlobalProgram(buf.end());
+        RenderSystem.disableBlend();
     }
 
     /** 1px 描边矩形（卡片边框语言）。 */
