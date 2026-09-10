@@ -715,6 +715,13 @@ public final class ServerMatch {
             }
             bots.reconcile(this, server);
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                // ⚠️ 必须跳过 AI 假玩家：它们不在 TeamManager 里，giveKit 会走
+                //    classOf/gunIdOf 的兜底分支 → 被强行发成**突击兵默认套件**
+                //    （hk416d + 556x45），把 BOT 自己的兵种枪覆盖掉，还配上不匹配的弹药。
+                //    BOT 的装备由 BotSquad.applyLoadout 负责（含备弹）。
+                if (BotPlayerFactory.isBot(p)) {
+                    continue;
+                }
                 kitPlayer(server, p);
             }
         }

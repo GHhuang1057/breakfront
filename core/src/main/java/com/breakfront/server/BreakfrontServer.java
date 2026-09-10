@@ -77,6 +77,11 @@ public final class BreakfrontServer {
         // S2（M2）：玩家重生（死亡后复活）→ 重发兵种装备（死亡默认清包）
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
             if (match != null) {
+                // AI 假玩家的复活发装由 BotSquad.respawn 负责 —— 它们不在 TeamManager 里，
+                // 走这里会被发成突击兵默认套件（覆盖兵种枪 + 弹药不匹配）。
+                if (BotPlayerFactory.isBot(newPlayer)) {
+                    return;
+                }
                 match.clearDeployChoice(newPlayer.getUuid());
                 MinecraftServer srv = newPlayer.getServer();
                 if (srv != null) {

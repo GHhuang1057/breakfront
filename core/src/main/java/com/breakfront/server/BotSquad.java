@@ -316,7 +316,7 @@ public final class BotSquad {
             BreakfrontServer.LOGGER.warn("[BF-Bot] 生成 {} 失败（工厂返回 null）", name);
             return;
         }
-        applyLoadout(bot, side, cls);
+        applyLoadout(server, bot, side, cls);
 
         Trooper t = new Trooper();
         t.id = bot.getUuid();
@@ -358,14 +358,16 @@ public final class BotSquad {
     }
 
     /** 统一出装：游戏模式、100HP 满血、兵种装备、阵营标签。 */
-    private void applyLoadout(ServerPlayerEntity bot, Side side, String cls) {
+    private void applyLoadout(MinecraftServer server, ServerPlayerEntity bot, Side side, String cls) {
         // 生存模式才有正常的受伤与战斗语义
         bot.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
         // 玩家默认生命上限是 20（10 心），先抬到 100HP 体系再显式回满
         // （maintain 已不负责回血 —— 无条件回满会让 bot 无敌，见 BotMotor.maintain 注释）
         BotMotor.maintain(bot, 100.0);
         bot.setHealth(100.0f);
-        Kits.equipGun(bot, Kits.spec(cls));   // 主手挂兵种枪（玩家物品栏会同步给客户端）
+        Kits.KitSpec spec = Kits.spec(cls);
+        Kits.equipGun(bot, spec);             // 主手挂兵种枪（玩家物品栏会同步给客户端）
+        Kits.giveAmmo(server, bot, spec);     // 备弹也要给：否则 BOT 只有空弹匣可用
         // bot 标签（breakfront.bot）由 BotPlayerFactory 统一打上，此处只补阵营标签
         bot.addCommandTag("bf.side." + (side == Side.ATTACKER ? "att" : "def"));
     }
@@ -386,7 +388,7 @@ public final class BotSquad {
             BreakfrontServer.LOGGER.warn("[BF-Bot] 重生 {} 失败（工厂返回 null）", t.name);
             return;
         }
-        applyLoadout(bot, t.side, t.cls);
+        applyLoadout(server, bot, t.side, t.cls);
         // 离线 UUID 由名字派生 → 重建后 UUID 相同，但登记表仍需刷新键值以防万一
         troopers.remove(t.id);
         t.id = bot.getUuid();
