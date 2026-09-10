@@ -123,10 +123,8 @@ public final class BfKeyBindings {
             if (newKey == null) {
                 continue;
             }
-            if (!kb.getBoundKey().equals(newKey)) {
-                kb.setBoundKey(newKey);
-                changed++;
-            }
+            kb.setBoundKey(newKey);
+            changed++;
         }
         KeyBinding.updateKeysByCode();
         client.options.write();
@@ -141,9 +139,8 @@ public final class BfKeyBindings {
         // 把所有原版键位按代码反查默认：直接清空我们改过的，让游戏下次用其内置默认。
         // 简化做法：把被我们改成 unknown 的还原为常见默认，其余不动。
         for (KeyBinding kb : client.options.allKeys) {
-            String key = kb.getTranslationKey();
-            InputUtil.Key def = defaultFor(key);
-            if (def != null && !kb.getBoundKey().equals(def)) {
+            InputUtil.Key def = defaultFor(kb.getTranslationKey());
+            if (def != null) {
                 kb.setBoundKey(def);
             }
         }
@@ -166,9 +163,9 @@ public final class BfKeyBindings {
         };
     }
 
-    /** 用 GLFW 码构造一个 {@code InputUtil.Key}（translation key 仅用于显示）。 */
+    /** 用 GLFW 码构造一个键盘 {@code InputUtil.Key}（translation key 仅用于显示）。 */
     private static InputUtil.Key k(String trans, int glfw) {
-        return new InputUtil.Key(trans, glfw);
+        return new InputUtil.Key(trans, InputUtil.Type.KEYSYM, glfw);
     }
 
     private static Path flagFile() {
