@@ -18,9 +18,13 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
+import net.fabricmc.fabric.api.resource.ResourcePackActivationType;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.gui.screen.GameMenuScreen;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.TitleScreen;
+import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,9 +44,35 @@ public class BreakfrontClient implements ClientModInitializer {
     /** 本进程只在「进入游戏后」提示一次 Geekhonize 登录（关闭 = 稍后再说，本次不再弹）。 */
     private static volatile boolean loginPrompted = false;
 
+    /**
+     * 注册 BREAKFRONT 专属 UI 材质包（内置资源包，始终启用）。
+     *
+     * <p>贴图由 {@code scripts/gen_bf_ui_pack.py} 生成到 mod jar 内的
+     * {@code resourcepacks/bf_ui/}，设计令牌与 {@link com.breakfront.client.bf.BfTheme} 同源：
+     * 深空冷底 #070B12 / 面板 #131E2C / 描边 #22364A / 荧光青 #35E6D2。只改 GUI
+     * （按钮/滑块/输入框/页签/勾选/滚动条/平铺底/分隔线），**不动任何方块贴图**。
+     *
+     * <p>为什么走「内置资源包」而不是把 {@code assets/minecraft/...} 直接放进模组根：
+     * 后者依赖「模组资源包能否覆盖原版命名空间」这一实现细节；前者是 Fabric 官方 API，
+     * 资源包由 {@code ResourcePackManager} 排在原版包之后应用，覆盖关系是确定的。
+     */
+    private static void registerUiPack() {
+        Identifier id = Identifier.of(MOD_ID, "bf_ui");
+        FabricLoader.getInstance().getModContainer(MOD_ID).ifPresentOrElse(
+                container -> {
+                    boolean ok = ResourceManagerHelper.registerBuiltinResourcePack(
+                            id, container, "resourcepacks/bf_ui",
+                            ResourcePackActivationType.ALWAYS_ENABLED);
+                    LOGGER.info("[Breakfront] UI 材质包（bf_ui）注册{}", ok ? "成功" : "失败");
+                },
+                () -> LOGGER.warn("[Breakfront] 未找到自身 ModContainer，UI 材质包未注册"));
+    }
+
     @Override
     public void onInitializeClient() {
         LOGGER.info("[Breakfront] client initialized (BF2042 UI)");
+
+        registerUiPack();
 
         // 注意：GeoAuth payload（AuthLoginPayload/AuthResultPayload）已在 core 的 Net.java
         // 公共入口注册过——客户端进程里 core 同样会执行该注册，此处不可重复注册，
