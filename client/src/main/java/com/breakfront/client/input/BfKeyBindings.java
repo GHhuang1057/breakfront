@@ -63,18 +63,18 @@ public final class BfKeyBindings {
             PLUS_MENU, VOIP, WEAPON_1, WEAPON_2, WEAPON_3, WEAPON_4, SWAP_SEAT
     };
 
-    /** 原版键位 → BF2042 目标键（translation key 形式，如 {@code key.keyboard.left.shift}）。 */
-    private static final Map<String, String> VANILLA_REMAP = new LinkedHashMap<>();
+    /** 原版键位 → BF2042 目标键（直接构造 {@code InputUtil.Key}，避开 1.21 无 {@code fromName} 的坑）。 */
+    private static final Map<String, InputUtil.Key> VANILLA_REMAP = new LinkedHashMap<>();
     static {
-        VANILLA_REMAP.put("key.sprint",        "key.keyboard.left.shift");   // 原版默认 Left Control
-        VANILLA_REMAP.put("key.sneak",         "key.keyboard.left.control"); // 原版默认 Left Shift
-        VANILLA_REMAP.put("key.chat",          "key.keyboard.h");            // 原版默认 T
+        VANILLA_REMAP.put("key.sprint",        k("key.keyboard.left.shift",   GLFW.GLFW_KEY_LEFT_SHIFT));   // 原版默认 Left Control
+        VANILLA_REMAP.put("key.sneak",         k("key.keyboard.left.control", GLFW.GLFW_KEY_LEFT_CONTROL)); // 原版默认 Left Shift
+        VANILLA_REMAP.put("key.chat",          k("key.keyboard.h",            GLFW.GLFW_KEY_H));            // 原版默认 T
         // 以下原版绑定与 BF 动作键冲突 → 置为未绑定，腾出键位
-        VANILLA_REMAP.put("key.drop",          "key.keyboard.unknown");      // 原版 Q → 让给标记
-        VANILLA_REMAP.put("key.inventory",     "key.keyboard.unknown");      // 原版 E → 让给互动
-        VANILLA_REMAP.put("key.swapHands",     "key.keyboard.unknown");      // 原版 F → 让给近战
-        VANILLA_REMAP.put("key.hideHud",       "key.keyboard.unknown");      // 原版 F1 → 让给切座
-        VANILLA_REMAP.put("key.advancements",  "key.keyboard.unknown");      // 原版 L → 让给自由键
+        VANILLA_REMAP.put("key.drop",          InputUtil.UNKNOWN_KEY);      // 原版 Q → 让给标记
+        VANILLA_REMAP.put("key.inventory",     InputUtil.UNKNOWN_KEY);      // 原版 E → 让给互动
+        VANILLA_REMAP.put("key.swapHands",     InputUtil.UNKNOWN_KEY);      // 原版 F → 让给近战
+        VANILLA_REMAP.put("key.hideHud",       InputUtil.UNKNOWN_KEY);      // 原版 F1 → 让给切座
+        VANILLA_REMAP.put("key.advancements",  InputUtil.UNKNOWN_KEY);      // 原版 L → 让给自由键
     }
 
     private static KeyBinding mk(String id, int glfw, String zh) {
@@ -119,13 +119,10 @@ public final class BfKeyBindings {
         }
         int changed = 0;
         for (KeyBinding kb : client.options.allKeys) {
-            String target = VANILLA_REMAP.get(kb.getTranslationKey());
-            if (target == null) {
+            InputUtil.Key newKey = VANILLA_REMAP.get(kb.getTranslationKey());
+            if (newKey == null) {
                 continue;
             }
-            InputUtil.Key newKey = "key.keyboard.unknown".equals(target)
-                    ? InputUtil.UNKNOWN_KEY
-                    : InputUtil.fromName(target);
             if (!kb.getBoundKey().equals(newKey)) {
                 kb.setBoundKey(newKey);
                 changed++;
@@ -157,16 +154,21 @@ public final class BfKeyBindings {
 
     private static InputUtil.Key defaultFor(String translationKey) {
         return switch (translationKey) {
-            case "key.drop"         -> InputUtil.fromName("key.keyboard.q");
-            case "key.inventory"    -> InputUtil.fromName("key.keyboard.e");
-            case "key.swapHands"    -> InputUtil.fromName("key.keyboard.f");
-            case "key.hideHud"      -> InputUtil.fromName("key.keyboard.f1");
-            case "key.advancements" -> InputUtil.fromName("key.keyboard.l");
-            case "key.chat"         -> InputUtil.fromName("key.keyboard.t");
-            case "key.sprint"       -> InputUtil.fromName("key.keyboard.left.control");
-            case "key.sneak"        -> InputUtil.fromName("key.keyboard.left.shift");
+            case "key.drop"         -> k("key.keyboard.q",            GLFW.GLFW_KEY_Q);
+            case "key.inventory"    -> k("key.keyboard.e",            GLFW.GLFW_KEY_E);
+            case "key.swapHands"    -> k("key.keyboard.f",            GLFW.GLFW_KEY_F);
+            case "key.hideHud"      -> k("key.keyboard.f1",           GLFW.GLFW_KEY_F1);
+            case "key.advancements" -> k("key.keyboard.l",            GLFW.GLFW_KEY_L);
+            case "key.chat"         -> k("key.keyboard.t",            GLFW.GLFW_KEY_T);
+            case "key.sprint"       -> k("key.keyboard.left.control", GLFW.GLFW_KEY_LEFT_CONTROL);
+            case "key.sneak"       -> k("key.keyboard.left.shift",    GLFW.GLFW_KEY_LEFT_SHIFT);
             default                 -> null;
         };
+    }
+
+    /** 用 GLFW 码构造一个 {@code InputUtil.Key}（translation key 仅用于显示）。 */
+    private static InputUtil.Key k(String trans, int glfw) {
+        return new InputUtil.Key(trans, glfw);
     }
 
     private static Path flagFile() {
