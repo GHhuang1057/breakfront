@@ -150,8 +150,15 @@ public final class WebAdminConsole {
     /** Geekhonize 账号登录（管理台代理）：Auth /login → roles 含 admin 才发管理会话。 */
     private static void authLogin(HttpExchange ex) throws IOException {
         String body = readBody(ex);
-        String user = quoted(body, "username");
-        String pw = quoted(body, "password");
+        Map<String, Object> o;
+        try {
+            o = Json.parseObject(body);
+        } catch (Json.JsonException e) {
+            json(ex, 400, "{\"ok\":false,\"msg\":\"请求体解析失败\"}");
+            return;
+        }
+        String user = Json.str(o, "username");
+        String pw = Json.str(o, "password");
         if (user == null || pw == null) {
             json(ex, 400, "{\"ok\":false,\"msg\":\"缺少用户名或密码\"}");
             return;
@@ -171,7 +178,12 @@ public final class WebAdminConsole {
 
     private static void login(HttpExchange ex) throws IOException {
         String body = readBody(ex);
-        String pw = quoted(body, "pw");
+        String pw;
+        try {
+            pw = Json.str(Json.parseObject(body), "pw");
+        } catch (Json.JsonException e) {
+            pw = null;
+        }
         boolean ok = pw != null && AdminService.password != null && pw.equals(AdminService.password);
         String token = null;
         if (ok) {
@@ -410,13 +422,26 @@ public final class WebAdminConsole {
             return;
         }
         String body = readBody(ex);
-        String op = quoted(body, "op");
-        String id = quoted(body, "id");
-        double x = num(body, "x", 0);
-        double z = num(body, "z", 0);
-        double r = num(body, "r", 6);
-        String name = quoted(body, "name");
-        String sideS = quoted(body, "side");
+        // 2026-09-10：改用真正的 JSON 解析（原 indexOf 键匹配在出现同名键/平铺+嵌套时会取错字段，
+        // 是地图编辑器失效的地基性缺陷）。兼容两种载荷：平铺顶层字段，或 {payload:{...}} 嵌套。
+        Map<String, Object> root;
+        try {
+            root = Json.parseObject(body);
+        } catch (Json.JsonException e) {
+            json(ex, 400, "{\"ok\":false,\"msg\":\"请求体解析失败：" + esc(e.getMessage()) + "\"}");
+            return;
+        }
+        Map<String, Object> p = Json.obj(root, "payload");
+        final Map<String, Object> f = p != null ? p : root;
+
+        String op = firstNonNull(Json.str(root, "op"), Json.str(f, "op"));
+        // id 优先取 payload 内的（嵌套载荷更精确），再回落顶层
+        String id = firstNonNull(Json.str(f, "id"), Json.str(root, "id"));
+        double x = Json.dbl(f, "x", Json.dbl(root, "x", 0));
+        double z = Json.dbl(f, "z", Json.dbl(root, "z", 0));
+        double r = Json.dbl(f, "r", Json.dbl(root, "r", 6));
+        String name = firstNonNull(Json.str(f, "name"), Json.str(root, "name"));
+        String sideS = firstNonNull(Json.str(f, "side"), Json.str(root, "side"));
         MinecraftServer server = BreakfrontServer.server();
         ServerMatch match = BreakfrontServer.match();
         if (server == null || match == null) {
@@ -424,6 +449,7 @@ public final class WebAdminConsole {
             return;
         }
         String msg;
+        boolean ok = true;
         try {
             msg = switch (op == null ? "" : op) {
                 case "add" -> match.editorAdd(server, x, z, r);
@@ -438,41 +464,30 @@ public final class WebAdminConsole {
                 case "spawn" -> sideS != null && sideS.equalsIgnoreCase("defender")
                         ? (match.setSpawnOverride(Side.DEFENDER, x, z) ? "守方出生点已设为 " + fmt(x) + "," + fmt(z) : "设置失败")
                         : (match.setSpawnOverride(Side.ATTACKER, x, z) ? "攻方出生点已设为 " + fmt(x) + "," + fmt(z) : "设置失败");
-                default -> "未知操作: " + op;
+                default -> {
+                    ok = false;
+                    yield "未知操作: " + op;
+                }
             };
         } catch (Exception e) {
+            ok = false;
             msg = "执行失败: " + e;
         }
+        // 操作失败时把 ok 置 false，前端据此提示（原先恒为 true，错误被吞）
+        if (msg != null && (msg.startsWith("缺少") || msg.startsWith("未知") || msg.startsWith("执行失败")
+                || msg.endsWith("失败") || msg.contains("失败："))) {
+            ok = false;
+        }
         Breakfront.LOGGER.info("[BF-Admin] mapedit {} -> {}", op, msg);
-        json(ex, 200, "{\"ok\":true,\"msg\":\"" + esc(msg) + "\"}");
+        json(ex, 200, "{\"ok\":" + ok + ",\"msg\":\"" + esc(msg) + "\"}");
+    }
+
+    private static String firstNonNull(String a, String b) {
+        return a != null ? a : b;
     }
 
     private static String fmt(double v) {
         return String.format("%.1f", v);
-    }
-
-    private static double num(String body, String key, double dflt) {
-        int k = body.indexOf('"' + key + '"');
-        if (k < 0) {
-            return dflt;
-        }
-        int c = body.indexOf(':', k);
-        if (c < 0) {
-            return dflt;
-        }
-        int e = body.length();
-        for (int i = c + 1; i < body.length(); i++) {
-            char ch = body.charAt(i);
-            if (ch == ',' || ch == '}' || ch == ' ') {
-                e = i;
-                break;
-            }
-        }
-        try {
-            return Double.parseDouble(body.substring(c + 1, e).trim());
-        } catch (NumberFormatException ex2) {
-            return dflt;
-        }
     }
 
     private static void cmd(HttpExchange ex) throws IOException {
@@ -481,7 +496,13 @@ public final class WebAdminConsole {
             return;
         }
         String body = readBody(ex);
-        String name = quoted(body, "name");
+        String name;
+        try {
+            name = Json.str(Json.parseObject(body), "name");
+        } catch (Json.JsonException e) {
+            json(ex, 400, "{\"ok\":false,\"msg\":\"请求体解析失败\"}");
+            return;
+        }
         MinecraftServer server = BreakfrontServer.server();
         if (server == null) {
             json(ex, 200, "{\"ok\":false,\"msg\":\"服务端未就绪\"}");
@@ -604,7 +625,7 @@ public final class WebAdminConsole {
         }
     }
 
-    /** 极简 JSON 取值（body 内 "key":"value" 形式，value 不含转义）。 */
+    /** 极简 JSON 取值（仅登录等极简场景；复杂解析统一走 {@link Json}）。 */
     private static String quoted(String body, String key) {
         int k = body.indexOf('"' + key + '"');
         if (k < 0) {

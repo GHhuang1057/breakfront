@@ -8,12 +8,19 @@ import java.util.Optional;
 /**
  * 武器库（骨架·静态目录）。
  *
- * <p>数值口径沿 100HP 调参批次（scripts/tune_tacz_pack.py 族参数）：
- * AR 20/17/13×1.6、LMG 15、SR 76×2.2、霰弹 aa12 70（8 丸分摊）等；
+ * <p>数值口径沿 100HP 调参批次（scripts/tune_tacz_pack.py 族参数）。
  * {@code damage} 一律为整发总伤，pellets&gt;1 运行时按丸分摊。
  *
- * <p>Kit 联动：{@link #KITS} 的 taczGun/taczAmmo 与服务器 Kits 发放使用的
- * 数据 id 保持一致（如 hk416d/556x45），供未来把 Kits 迁移到本目录驱动。
+ * <p><b>2026-09-10 TTK/BTK 重标</b>：原表全面偏弱（AR 近距 429ms、SMG 706ms、DMR 600ms、
+ * SR 两枪 1500ms），距 BF2042 基准 1.5–3 倍。本次按 BF2042 伤害模型重定，
+ * 基准（Game8 实测 + Sym 数据挖掘，TTK=(60/RPM)×(BTK−1)）：
+ * <pre>
+ *   顶级 200-223ms | 优秀 240-270ms | 中档 267-300ms | 偏低 356-401ms
+ *   AR 近距 4-5 发 / 中距 5 发 / 远距 5-6 发（有效射程内保持击杀数）
+ *   SMG 近距 5-6 发｜DMR 2-3 发｜SR 1 发（躯干即死）｜霰弹近距 1 壳
+ * </pre>
+ * 设计要点：AR 基础伤 26（近距 4 发=104）；SMG 高射速低单伤、衰减快；
+ * DMR 50（2 发）；SR 105（躯干一枪）；霰弹按壳计，全自动 12m 内 1 壳、泵动 18m 内 1 壳。
  */
 public final class WeaponCatalog {
 
@@ -33,24 +40,39 @@ public final class WeaponCatalog {
     }
 
     static {
+        // ---- 突击步枪 AR：全能主力，近距 4 发、远距 6 发 ----
         register(new WeaponSpec("hk416d", "HK416D", WeaponClass.AR, AmmoType.CAL_556X45,
-                FireMode.AUTO, 30, 180, 20, 1, 1.6, 8, 45, 0.65, 700, 1.5));
+                FireMode.AUTO, 30, 180, 26, 1, 1.55, 20, 70, 0.62, 750, 1.5));
         register(new WeaponSpec("m4a1", "M4A1", WeaponClass.AR, AmmoType.CAL_556X45,
-                FireMode.AUTO, 30, 180, 20, 1, 1.6, 8, 45, 0.65, 720, 1.5));
+                FireMode.AUTO, 30, 180, 25, 1, 1.55, 22, 72, 0.62, 800, 1.5));
+
+        // ---- 冲锋枪 SMG：近距霸主，高射速低单伤、30m 后迅速跌档 ----
         register(new WeaponSpec("ump45", "UMP45", WeaponClass.SMG, AmmoType.CAL_45ACP,
-                FireMode.AUTO, 25, 150, 14, 1, 1.6, 6, 30, 0.7, 680, 1.3));
+                FireMode.AUTO, 25, 150, 18, 1, 1.6, 12, 36, 0.5, 950, 1.3));
+
+        // ---- 轻机枪 LMG：持续火力，单发中等、远距衰减小 ----
         register(new WeaponSpec("m249", "M249", WeaponClass.LMG, AmmoType.CAL_556X45,
-                FireMode.AUTO, 75, 300, 15, 1, 1.5, 10, 55, 0.6, 750, 1.6));
+                FireMode.AUTO, 75, 300, 22, 1, 1.45, 25, 90, 0.68, 700, 1.6));
+
+        // ---- 精确射手步枪 DMR：2-3 发，中远距压制 ----
         register(new WeaponSpec("mk14", "MK14 EBR", WeaponClass.DMR, AmmoType.CAL_762X39,
-                FireMode.SEMI, 20, 80, 34, 1, 1.8, 12, 70, 0.6, 300, 3.0));
+                FireMode.SEMI, 20, 80, 50, 1, 1.8, 30, 110, 0.7, 380, 3.0));
+
+        // ---- 狙击枪 SR：躯干一枪致死（105>100），爆头必杀 ----
         register(new WeaponSpec("kar98", "Kar98k", WeaponClass.SR, AmmoType.CAL_792X57,
-                FireMode.BOLT, 4, 40, 76, 1, 2.2, 20, 120, 0.55, 40, 6.0));
+                FireMode.BOLT, 4, 40, 105, 1, 2.0, 60, 200, 0.85, 45, 6.0));
+
+        // ---- 霰弹枪 SG：近距 1 壳致死，远距急剧衰减（falloffEnd 后按丸分摊几乎无效）----
+        // aa12：全自动，12m 满伤区内 1 壳必杀（射速换致死距离）
         register(new WeaponSpec("aa12", "AA-12", WeaponClass.SG, AmmoType.CAL_12GAUGE,
-                FireMode.AUTO, 8, 48, 70, 8, 1.3, 4, 16, 0.55, 240, 1.2));
+                FireMode.AUTO, 8, 48, 104, 8, 1.3, 12, 24, 0.40, 300, 1.2));
+        // m590：泵动，18m 内 1 壳必杀（低射速换更远致死距离与更高单壳伤）
         register(new WeaponSpec("m590", "M590A1", WeaponClass.SG, AmmoType.CAL_12GAUGE,
-                FireMode.PUMP, 6, 36, 110, 10, 1.3, 3, 14, 0.5, 60, 1.2));
+                FireMode.PUMP, 6, 36, 130, 10, 1.3, 18, 30, 0.40, 90, 1.2));
+
+        // ---- 手枪 PISTOL：副武器，近距 5 发、有爆头回报 ----
         register(new WeaponSpec("glock17", "Glock 17", WeaponClass.PISTOL, AmmoType.CAL_9MM,
-                FireMode.SEMI, 17, 68, 20, 1, 1.7, 6, 25, 0.75, 420, 1.1));
+                FireMode.SEMI, 17, 68, 22, 1, 1.7, 12, 45, 0.6, 500, 1.1));
     }
 
     /** 兵种套件：weaponId 指向 {@link #SPECS}，taczGun/taczAmmo 供服务器发放指令使用。 */
