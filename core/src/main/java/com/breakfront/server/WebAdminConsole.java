@@ -54,12 +54,12 @@ public final class WebAdminConsole {
     /** 底色 / 默认色（无数据或未知方块）：低饱和蓝灰 55697E。 */
     private static final int[] TERRAIN_BASE = {0x55, 0x69, 0x7E};
     /**
-     * 未加载区块的颜色（2026-09-10）。管理台采样发生在无人在场的坐标，这些区块
-     * 往往从未被加载，此时 {@code getTopY} 返回世界底部 —— 若与"已加载但无方块"
-     * 同色，整幅底图就是一片纯色（表现即"什么都看不到"）。分开着色后，
-     * 运营能直观看出哪些区域需要先在游戏内靠近以生成/载入地形。
+     * 未生成/未加载区块的颜色（2026-09-10）。管理台采样的是无人在场的坐标，那里
+     * 常常从未生成过地形，此时 {@code getTopY} 返回世界底部 —— 若与"已加载但无方块"
+     * 同色，整幅底图就是一片纯色（表现即"什么都看不到"）。
+     * 特意选偏红棕色：与页面背景(#06080c)、常规底色(#55697E 系)都能一眼区分。
      */
-    private static final int[] TERRAIN_UNLOADED = {0x1A, 0x1F, 0x26};
+    private static final int[] TERRAIN_UNLOADED = {0x3A, 0x24, 0x22};
     /** 海拔亮度参考：topY 映射到 0.6~1.15（低海拔暗、高海拔亮）。 */
     private static final double TERRAIN_REF_LOW = -64.0, TERRAIN_REF_SPAN = 30.0;
 
@@ -134,6 +134,8 @@ public final class WebAdminConsole {
                 map(ex);
             } else if (path.equals("/bfadmin/api/mapterrain") && m.equalsIgnoreCase("GET")) {
                 mapTerrain(ex);
+            } else if (path.equals("/bfadmin/api/worldinfo") && m.equalsIgnoreCase("GET")) {
+                worldInfo(ex);
             } else if (path.equals("/bfadmin/api/mapedit") && m.equalsIgnoreCase("POST")) {
                 mapEdit(ex);
             } else if (path.equals("/bfadmin/api/cmd") && m.equalsIgnoreCase("POST")) {
@@ -366,6 +368,77 @@ public final class WebAdminConsole {
     private static final int PRELOAD_CHUNK_CAP = 4096;
 
     /**
+     * 世界概况（2026-09-10）：出生点 + **已生成地形**的范围。
+     *
+     * <p>动机：地图编辑器的据点坐标可能落在「从未生成过区块」的坐标上（换图后坐标未同步
+     * 是最常见的情形）。此时俯瞰底图整片显示为未生成色，看起来像功能坏掉。
+     * 这里扫描存档的 region 文件（r.X.Z.mca，每个覆盖 32×32 区块 = 512×512 格）
+     * 得出世界实际已生成的范围，让运营一眼看出据点该划在哪、或需先去哪些区域。
+     */
+    private static void worldInfo(HttpExchange ex) throws IOException {
+        if (!auth(ex)) {
+            json(ex, 401, "{\"ok\":false,\"msg\":\"未授权\"}");
+            return;
+        }
+        MinecraftServer server = BreakfrontServer.server();
+        if (server == null) {
+            json(ex, 200, "{\"ok\":false,\"msg\":\"服务端未就绪\"}");
+            return;
+        }
+        ServerWorld world = server.getOverworld();
+        var spawnPos = world.getSpawnPos();
+        StringBuilder sb = new StringBuilder("{\"ok\":true");
+        sb.append(",\"spawn\":{\"x\":").append(spawnPos.getX())
+                .append(",\"z\":").append(spawnPos.getZ()).append('}');
+        long rx0 = Long.MAX_VALUE;
+        long rx1 = Long.MIN_VALUE;
+        long rz0 = Long.MAX_VALUE;
+        long rz1 = Long.MIN_VALUE;
+        int regions = 0;
+        try {
+            java.nio.file.Path dir = server.getSavePath(net.minecraft.util.WorldSavePath.REGIONS);
+            if (java.nio.file.Files.isDirectory(dir)) {
+                try (var stream = java.nio.file.Files.list(dir)) {
+                    for (java.nio.file.Path f : (Iterable<java.nio.file.Path>) stream::iterator) {
+                        String n = f.getFileName().toString();
+                        if (!n.startsWith("r.") || !n.endsWith(".mca")) {
+                            continue;
+                        }
+                        String[] parts = n.substring(2, n.length() - 4).split("\\.");
+                        if (parts.length != 2) {
+                            continue;
+                        }
+                        try {
+                            long rx = Long.parseLong(parts[0]);
+                            long rz = Long.parseLong(parts[1]);
+                            rx0 = Math.min(rx0, rx);
+                            rx1 = Math.max(rx1, rx);
+                            rz0 = Math.min(rz0, rz);
+                            rz1 = Math.max(rz1, rz);
+                            regions++;
+                        } catch (NumberFormatException ignored) {
+                            // 非法文件名跳过
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Breakfront.LOGGER.warn("[BF-Admin] region 扫描失败: {}", t.toString());
+        }
+        if (regions > 0) {
+            sb.append(",\"generated\":{\"x0\":").append(rx0 * 512)
+                    .append(",\"z0\":").append(rz0 * 512)
+                    .append(",\"x1\":").append((rx1 + 1) * 512)
+                    .append(",\"z1\":").append((rz1 + 1) * 512)
+                    .append(",\"regions\":").append(regions).append('}');
+        } else {
+            sb.append(",\"generated\":null");
+        }
+        sb.append('}');
+        json(ex, 200, sb.toString());
+    }
+
+    /**
      * 载入范围内**已存在**的区块（不触发生成）。
      *
      * <p>管理台采样点通常无人在场，区块未加载时 {@code getTopY} 一律返回世界底部，
@@ -413,6 +486,12 @@ public final class WebAdminConsole {
         }
         if (id.contains("sand")) {
             return new int[]{0xBF, 0xB6, 0x8C};
+        }
+        // 泥土系（含 coarse_dirt / rooted_dirt / podzol / mud / farmland / dirt_path）：
+        // 这是最常见的自然地表之一，此前漏配 → 大片区域退化成默认底色，看起来像"没地形"。
+        if (id.contains("dirt") || id.contains("podzol") || id.contains("mud")
+                || id.contains("farmland") || id.contains("path") || id.contains("soil")) {
+            return new int[]{0x8B, 0x6F, 0x4E};
         }
         if (id.contains("grass") || id.contains("moss") || id.contains("mycel")) {
             return new int[]{0x6F, 0x9E, 0x68};

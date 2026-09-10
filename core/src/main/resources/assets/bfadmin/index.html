@@ -178,6 +178,7 @@
             <button class="btn" onclick="mapOp('sectorNext')">下一扇区 ▸</button>
             <button class="btn" onclick="mapOp('sectorPrev')">◂ 上一扇区</button>
             <button class="btn" onclick="lfFit()">适配视角</button>
+            <button class="btn" onclick="lfWorld()">世界范围</button>
             <button class="btn" onclick="toggleTerrain()" id="btn-terrain">地形底图 ON</button>
             <button class="btn" onclick="doUndo()">撤销 ⌘Z</button>
             <span id="maphint" class="hint"></span>
@@ -738,6 +739,44 @@ function scheduleTerrain(){
   if(mapState._terrainTimer) clearTimeout(mapState._terrainTimer);
   mapState._terrainTimer=setTimeout(()=>{ mapState._terrainTimer=null; loadTerrain(); }, 650);
 }
+
+/**
+ * 取景到「世界已生成地形」的范围。
+ * 据点坐标若落在从未生成过区块的位置（换图后坐标未同步的典型情形），
+ * 俯瞰底图会整片是未生成色 —— 此按钮直接带运营去看地形实际在哪。
+ */
+async function lfWorld(){
+  if(!lfInit()) return;
+  const r=await api('/bfadmin/api/worldinfo');
+  if(!r||!r.ok){ setMapHint('世界信息不可用：'+(r&&r.msg?r.msg:'-')); return; }
+  const g=r.generated;
+  if(!g){
+    setMapHint('存档中未找到已生成区域（region 目录为空）——若世界尚未生成，请先在游戏内加载');
+    return;
+  }
+  mapState.lf.fitBounds(L.latLngBounds([[g.x0,g.z0],[g.x1,g.z1]]).pad(0.05));
+  mapState._terrainKey='';
+  setMapHint('世界已生成范围 x['+g.x0+','+g.x1+'] z['+g.z0+','+g.z1+']（'
+    +g.regions+' 个 region）· 出生点 ('+r.spawn.x+','+r.spawn.z+')');
+}
+
+/**
+ * 核对「当前编辑扇区的据点」是否落在世界已生成范围内。
+ * 若多数落在范围外，底图会是未生成色（暗红棕），需要明确告知原因，
+ * 否则很容易被误判成"地图功能坏了"。
+ */
+async function checkZoneVsWorld(){
+  const m=mapState.model; if(!m) return;
+  const s=m.sectors[m.editorSectorIdx]; if(!s||!s.zones.length) return;
+  const r=await api('/bfadmin/api/worldinfo');
+  if(!r||!r.ok||!r.generated) return;
+  const g=r.generated;
+  const outside=s.zones.filter(z=>z.x<g.x0||z.x>g.x1||z.z<g.z0||z.z>g.z1).length;
+  if(outside>0){
+    setMapHint('⚠ 本扇区有 '+outside+'/'+s.zones.length+' 个据点落在未生成区域，底图会显示为暗红棕色。'
+      +'世界已生成范围 x['+g.x0+','+g.x1+'] z['+g.z0+','+g.z1+']；点「世界范围」可跳转查看');
+  }
+}
 function toggleTerrain(){
   mapState.terrainOn=!mapState.terrainOn;
   const b=$('btn-terrain'); if(b) b.textContent='地形底图 '+(mapState.terrainOn?'ON':'OFF');
@@ -770,6 +809,7 @@ async function mapLoad(keepUndo){
   lfRender(); lfDrawGrid(); showZoneInfo();
   mapState._terrainKey='';        // 视图可能已被 lfFit 改变 → 强制重新采样
   loadTerrain();
+  checkZoneVsWorld();             // 据点若落在未生成区域，明确告知原因（避免误判为功能故障）
 }
 
 /* ---- 侧栏扇区列表 ---- */
