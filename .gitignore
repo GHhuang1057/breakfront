@@ -53,3 +53,6 @@ scripts/_relay.bundle
 scripts/_vanilla_png/
 scripts/_vanilla_gui_*.txt
 scripts/_gui_dump.txt
+
+# MCSM 调试临时产物（含 daemonId/uuid 探测输出，勿入库）
+_mcsm_*
