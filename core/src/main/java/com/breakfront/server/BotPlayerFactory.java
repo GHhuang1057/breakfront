@@ -67,7 +67,9 @@ public final class BotPlayerFactory {
         try {
             GameProfile profile = new GameProfile(offlineUuid(name), name);
             // 离线 UUID 与名字绑定，保证同名 bot 重启后身份稳定（计分板/回合记录可延续）
-            ConnectedClientData clientData = ConnectedClientData.createDefault(profile);
+            // 第二参数 transferred：是否为「跨服转移」会话（1.21.1 起 createDefault 需要），
+            // 假玩家非转移 → false。签名核对自 yarn 1.21.1 API 文档。
+            ConnectedClientData clientData = ConnectedClientData.createDefault(profile, false);
             ServerPlayerEntity player = new ServerPlayerEntity(
                     server, world, profile, clientData.syncedOptions());
 
