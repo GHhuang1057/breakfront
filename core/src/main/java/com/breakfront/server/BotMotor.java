@@ -99,9 +99,11 @@ public final class BotMotor {
      * <p>处理玩家实体特有、会被环境拖垮的几项：
      * <ul>
      *   <li><b>生命上限</b>：玩家默认 20（10 心），需按 BREAKFRONT 的 100HP 体系抬到
-     *       {@code maxHealth}，并在未受伤时回满（避免"半血 bot"长期存在）</li>
-     *   <li><b>饱食度</b>：饥饿会掉血并阻止自然回血 —— 持续补满</li>
-     *   <li><b>着火</b>：与僵尸不同玩家不会自燃，但可能被地图火源/爆炸点燃，统一熄灭</li>
+     *       {@code maxHealth}。⚠️ 本方法**不回血** —— 此前无条件回满会让 bot 实际无敌
+     *       （每 5 tick 抹掉一切伤害），战斗完全失效。满血只在出生时设置（见 BotSquad.spawn）。</li>
+     *   <li><b>饱食度</b>：饥饿会掉血且阻止自然回血（naturalRegeneration 已关）—— 持续补满</li>
+     *   <li><b>着火</b>：玩家不会像僵尸那样自燃，但可能被地图火源/爆炸点燃，统一熄灭</li>
+     *   <li><b>假连线排空</b>：丢弃 EmbeddedChannel 堆积的出站包，防内存泄漏</li>
      * </ul>
      */
     public static void maintain(ServerPlayerEntity bot, double maxHealth) {
@@ -109,15 +111,13 @@ public final class BotMotor {
         if (attr != null && attr.getBaseValue() != maxHealth) {
             attr.setBaseValue(maxHealth);
         }
-        if (bot.getHealth() < maxHealth) {
-            bot.setHealth((float) maxHealth);
-        }
         var hunger = bot.getHungerManager();
         hunger.setFoodLevel(20);
         hunger.setSaturationLevel(5.0f);
         if (bot.isOnFire()) {
             bot.setFireTicks(0);
         }
+        BotPlayerFactory.drainOutbound(bot);
     }
 
     /**

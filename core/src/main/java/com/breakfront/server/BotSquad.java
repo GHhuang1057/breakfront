@@ -62,6 +62,8 @@ public final class BotSquad {
     private static final double SHOT_DAMAGE = 26.0;
     /** 卡住判定：连续该 tick 数无有效位移则重掷目标点。 */
     private static final int STUCK_TICKS = 60;
+    /** 状态维持间隔（生命上限/饱食度/灭火/假连线排空）。20 tick = 1s。 */
+    private static final int MAINTAIN_EVERY_TICKS = 20;
 
     private final Map<UUID, Trooper> troopers = new HashMap<>();
     private int targetAttacker;
@@ -84,8 +86,8 @@ public final class BotSquad {
         int stalledTicks;
         long scanAtMs;
         long fireAtMs;
-        UUID foeId;
-        boolean foeIsBot;
+        /** 缓存的交战目标：每 DECIDE 节流刷新；坐标动态读取（目标会移动）。 */
+        LivingTarget foe;
     }
 
     // ---------- 对外接口（与 NpcSquad 对齐，便于将来互换） ----------
@@ -135,30 +137,60 @@ public final class BotSquad {
             return;
         }
         tickCounter++;
+        boolean upkeep = tickCounter % MAINTAIN_EVERY_TICKS == 0;
         // 每 20 tick：清扫阵亡并补员（真人死亡也是这个节奏被系统感知）
         if (tickCounter % 20 == 0) {
             sweepAndReinforce(match, server);
         }
         if (match.game().phase() != MatchPhase.BATTLE) {
-            return; // 非战斗阶段：不决策（保持站位、不下发移动）
-        }
-        if (tickCounter % DECIDE_EVERY_TICKS != 0) {
+            // 非战斗阶段：不下发移动，但仍做最低限度的状态维持，
+            // 否则大厅里受伤/着火的 bot 会长期残血（maintain 不回血，只做上限/饱食/灭火）。
+            if (upkeep) {
+                for (Trooper t : new ArrayList<>(troopers.values())) {
+                    ServerPlayerEntity bot = entity(server, t);
+                    if (bot != null) {
+                        BotMotor.maintain(bot, 100.0);
+                    }
+                }
+            }
             return;
         }
         long now = System.currentTimeMillis();
+        boolean decide = tickCounter % DECIDE_EVERY_TICKS == 0;
         for (Trooper t : new ArrayList<>(troopers.values())) {
             ServerPlayerEntity bot = entity(server, t);
             if (bot == null) {
                 continue;
             }
-            BotMotor.maintain(bot, 100.0);
-            LivingTarget foe = resolveFoe(match, server, t, now);
+            if (upkeep) {
+                BotMotor.maintain(bot, 100.0);
+            }
+            // ⚠️ 索敌（较贵）按 DECIDE 节流，但**移动每 tick 都要跑**：
+            // 二者此前共用同一个 5 tick 节流，导致 bot 每 5 tick 才挪 0.25 格
+            // = 1 格/秒（真人步行 4.3 格/秒），观感像幻灯片 —— 这是"bot 不动"的直接原因。
+            if (decide || t.foe == null) {
+                t.foe = resolveFoe(match, server, t, now);
+            }
+            LivingTarget foe = validFoe(t);
             if (foe != null) {
                 engage(server, t, bot, foe, now);
             } else {
                 advance(match, server, t, bot);
             }
         }
+    }
+
+    /** 取缓存的交战目标；已死亡/移除则弃用（下个决策 tick 会重新索敌）。 */
+    private LivingTarget validFoe(Trooper t) {
+        LivingTarget f = t.foe;
+        if (f == null) {
+            return null;
+        }
+        if (!f.entity.isAlive() || f.entity.isRemoved()) {
+            t.foe = null;
+            return null;
+        }
+        return f;
     }
 
     // ---------- 生成 / 移除 ----------
@@ -177,8 +209,10 @@ public final class BotSquad {
         }
         // 游戏模式与状态：生存模式下才有正常的受伤与战斗语义
         bot.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
-        // 玩家默认生命上限是 20（10 心），必须先抬到 100HP 体系再回满，否则会被截断
+        // 玩家默认生命上限是 20（10 心），先抬到 100HP 体系再显式回满
+        // （maintain 已不再负责回血 —— 无条件回满会让 bot 无敌，见 BotMotor.maintain 注释）
         BotMotor.maintain(bot, 100.0);
+        bot.setHealth(100.0f);
         Kits.equipGun(bot, Kits.spec(cls));   // 主手挂兵种枪（玩家物品栏会同步给客户端）
         // bot 标签（breakfront.bot）由 BotPlayerFactory 统一打上，此处只补阵营标签
         bot.addCommandTag("bf.side." + (side == Side.ATTACKER ? "att" : "def"));
@@ -255,11 +289,11 @@ public final class BotSquad {
     /** 交战：超出交战距离则逼近，进入则停步、转向、周期开火。 */
     private void engage(MinecraftServer server, Trooper t, ServerPlayerEntity bot,
                         LivingTarget foe, long now) {
-        double dist = BotMotor.distXZ(bot, foe.x, foe.z);
-        BotMotor.faceTo(bot, foe.x, foe.z);
+        double dist = BotMotor.distXZ(bot, foe.x(), foe.z());
+        BotMotor.faceTo(bot, foe.x(), foe.z());
         if (dist > ENGAGE_RANGE) {
             // 逼近途中保持不开火（先进入有效射程，避免"隔街互射"观感）
-            BotMotor.stepToward(bot, foe.x, foe.z, BotMotor.DEFAULT_SPEED);
+            BotMotor.stepToward(bot, foe.x(), foe.z(), BotMotor.DEFAULT_SPEED);
             return;
         }
         if (now < t.fireAtMs) {
@@ -278,30 +312,45 @@ public final class BotSquad {
     /** 目标抽象：真人玩家与敌方 bot 统一成「有坐标、可受伤」。 */
     private static final class LivingTarget {
         final net.minecraft.entity.LivingEntity entity;
-        final double x;
-        final double z;
         final boolean isBot;
 
         LivingTarget(net.minecraft.entity.LivingEntity e, boolean isBot) {
             this.entity = e;
-            this.x = e.getX();
-            this.z = e.getZ();
             this.isBot = isBot;
+        }
+
+        /**
+         * 坐标**动态读取**而非构造时快照：目标每 tick 都在移动，快照会让
+         * 每 tick 驱动的移动/瞄准一直追着旧位置（尤其在 engage 改为每 tick 调用之后）。
+         */
+        double x() {
+            return entity.getX();
+        }
+
+        double z() {
+            return entity.getZ();
         }
     }
 
+    /** 索敌：取最近敌方（真人按阵营匹配；敌方 bot 从本队名册取）。无则 null。 */
     private LivingTarget resolveFoe(ServerMatch match, MinecraftServer server, Trooper t, long now) {
-        LivingTarget cached = fetchFoe(server, t);
-        if (cached != null && cached.entity.isAlive()) {
-            return cached;
+        LivingTarget cached = t.foe;
+        if (cached != null && cached.entity.isAlive() && !cached.entity.isRemoved()) {
+            return cached;                    // 沿用上一轮目标，避免来回切换
         }
         if (now < t.scanAtMs) {
-            return null;
+            return null;                      // 扫描节流窗口内不做全量搜索
         }
         t.scanAtMs = now + SCAN_MS;
+
+        ServerPlayerEntity self = entity(server, t);
+        if (self == null) {
+            return null;
+        }
+        double sx = self.getX();
+        double sz = self.getZ();
         LivingTarget best = null;
         double bestD = SCAN_RANGE * SCAN_RANGE;
-        ServerWorld world = server.getOverworld();
 
         // 真人玩家
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
@@ -312,7 +361,7 @@ public final class BotSquad {
             if (s == null || s == t.side) {
                 continue;
             }
-            double d = sq(t.lastX, t.lastZ, p.getX(), p.getZ());
+            double d = sq(sx, sz, p.getX(), p.getZ());
             if (d < bestD) {
                 bestD = d;
                 best = new LivingTarget(p, false);
@@ -327,35 +376,13 @@ public final class BotSquad {
             if (e == null || !e.isAlive()) {
                 continue;
             }
-            double d = sq(t.lastX, t.lastZ, e.getX(), e.getZ());
+            double d = sq(sx, sz, e.getX(), e.getZ());
             if (d < bestD) {
                 bestD = d;
                 best = new LivingTarget(e, true);
             }
         }
-        if (best != null) {
-            t.foeId = best.entity.getUuid();
-            t.foeIsBot = best.isBot;
-        } else {
-            t.foeId = null;
-        }
         return best;
-    }
-
-    private LivingTarget fetchFoe(MinecraftServer server, Trooper t) {
-        if (t.foeId == null) {
-            return null;
-        }
-        if (t.foeIsBot) {
-            Trooper o = troopers.get(t.foeId);
-            if (o == null) {
-                return null;
-            }
-            ServerPlayerEntity e = entity(server, o);
-            return e == null ? null : new LivingTarget(e, true);
-        }
-        ServerPlayerEntity p = server.getPlayerManager().getPlayer(t.foeId);
-        return p == null ? null : new LivingTarget(p, false);
     }
 
     private boolean isBotPlayer(ServerPlayerEntity p) {
@@ -374,7 +401,7 @@ public final class BotSquad {
         if (hit.getType() == net.minecraft.util.hit.HitResult.Type.MISS) {
             return true;
         }
-        double d = Math.sqrt(sq(bot.getX(), bot.getZ(), foe.x, foe.z));
+        double d = Math.sqrt(sq(bot.getX(), bot.getZ(), foe.x(), foe.z()));
         return hit.getPos().squaredDistanceTo(from) > d * d * 0.96;
     }
 

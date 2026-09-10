@@ -638,10 +638,21 @@ public final class ServerMatch {
     /** 每玩家宽限起点（绑定后移除；退服清理）。 */
     private final java.util.Map<java.util.UUID, Long> loginGrace = new java.util.HashMap<>();
 
-    /** 每 1s 巡检：未绑定者 actionbar 倒计时；到期 disconnect。op(≥2 级) 豁免。 */
+    /** 每 1s 巡检：未绑定者 actionbar 倒计时；到期 disconnect。op(≥2 级) 与 AI 假玩家豁免。 */
     private void loginGateTick(MinecraftServer server) {
         long now = System.currentTimeMillis();
-        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+        // ⚠️ 必须用**快照**迭代：下面的 disconnect → PlayerManager.remove 会改写
+        // playerList，直接 for-each 该列表会抛 ConcurrentModificationException 并打崩
+        // 整个 server tick 循环（表现为服务端崩溃重启、场上实体全清）。
+        // 实测崩溃：crash-2026-09-10_13.33.49-server.txt，栈顶即本方法第 644 行。
+        List<ServerPlayerEntity> snapshot = new ArrayList<>(server.getPlayerManager().getPlayerList());
+        for (ServerPlayerEntity p : snapshot) {
+            // AI 假玩家豁免：它们没有真实客户端，无法完成 Geekhonize 登录；
+            // 不豁免则会在 90s 宽限到期后被集体踢出（并触发上述崩溃 → bot 全部消失）。
+            if (BotPlayerFactory.isBot(p)) {
+                loginGrace.remove(p.getUuid());
+                continue;
+            }
             if (geoBinds.containsKey(p.getUuid())) {
                 loginGrace.remove(p.getUuid());
                 continue;
@@ -1210,11 +1221,30 @@ public final class ServerMatch {
         }
     }
 
+    /**
+     * 安全落盘文本文件（自动创建父目录）。
+     *
+     * <p>⚠️ {@code runDir} 可能是**空路径** —— 服务端以工作目录为运行目录启动时
+     * {@code MinecraftServer.getRunDirectory()} 返回空 Path。此时
+     * {@code runDir.resolve("x.properties")} 的 {@code getParent()} 为 <b>null</b>，
+     * 直接 {@code Files.createDirectories(null)} 会抛
+     * {@code NPE: Cannot invoke "java.nio.file.Path.getFileSystem()" because "path" is null}。
+     * 这正是 Web 管理台「设置出生点」长期失败的原因（子目录型路径如
+     * {@code breakfront/sectors.json} 的 parent 非 null，所以保存布局正常 —— 掩盖了问题）。
+     */
+    private static void writeText(Path file, String content) throws IOException {
+        Path abs = file.toAbsolutePath();
+        Path parent = abs.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Files.writeString(abs, content, StandardCharsets.UTF_8);
+    }
+
     private void saveServerProps() {
         try {
             Path file = runDir.resolve("breakfront-server.properties");
-            Files.createDirectories(file.getParent());
-            Files.writeString(file, String.join("\n",
+            writeText(file, String.join("\n",
                     "# BREAKFRONT 服务端运行开关",
                     "fill=" + (autoFill ? "on" : "off"),
                     "autostart=" + (autostart ? "on" : "off"),
@@ -1225,8 +1255,7 @@ public final class ServerMatch {
                     "auth.endpoint=" + AuthBridge.endpoint,
                     "# 出生点覆盖（/bf spawns set 或 Web 管理端写）：x,z",
                     "spawn.attacker=" + spawnKey(attackerSpawn),
-                    "spawn.defender=" + spawnKey(defenderSpawn)) + "\n",
-                    StandardCharsets.UTF_8);
+                    "spawn.defender=" + spawnKey(defenderSpawn)) + "\n");
         } catch (IOException e) {
             BreakfrontServer.LOGGER.warn("[Breakfront] cannot save server props: {}", e.toString());
         }
@@ -1420,8 +1449,7 @@ public final class ServerMatch {
         }
         try {
             Path file = runDir.resolve("breakfront/sectors.json");
-            Files.createDirectories(file.getParent());
-            Files.writeString(file, layout.toJson(), StandardCharsets.UTF_8);
+            writeText(file, layout.toJson());
             return "扇区布局已保存 → breakfront/sectors.json（" + layout.zoneCount() + " 据点）";
         } catch (IOException e) {
             return "保存失败：" + e;

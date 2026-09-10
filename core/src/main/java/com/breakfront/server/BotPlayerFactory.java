@@ -11,7 +11,9 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 战场 AI 的「真人实体壳」工厂（2026-09-10 v1）。
@@ -57,6 +59,16 @@ public final class BotPlayerFactory {
      */
     public static final String BOT_TAG = "breakfront.bot";
 
+    /**
+     * bot → 其假连线的 Netty channel。
+     *
+     * <p>假连线用 {@link EmbeddedChannel} 背书：它吸收所有出站包，使
+     * {@code connection.send(...)} 不 NPE。但 EmbeddedChannel 的**出站队列无界**
+     * 且没有真实对端消费 —— 实体/位置/计分板包会持续堆积，长时间运行必然 OOM。
+     * 故保留引用，配合 {@link #drainOutbound} 定期排空。
+     */
+    private static final Map<UUID, EmbeddedChannel> CHANNELS = new ConcurrentHashMap<>();
+
     private BotPlayerFactory() {
     }
 
@@ -85,9 +97,10 @@ public final class BotPlayerFactory {
             ServerPlayerEntity player = new ServerPlayerEntity(
                     server, world, profile, clientData.syncedOptions());
 
-            // 假连线：EmbeddedChannel 吸收所有出站包，避免 send(...) NPE
+            // 假连线：EmbeddedChannel 吸收所有出站包，避免 send(...) NPE。
+            // 保留 channel 引用供周期性排空（见 CHANNELS 注释）。
             ClientConnection connection = new ClientConnection(NetworkSide.SERVERBOUND);
-            new EmbeddedChannel(connection);
+            EmbeddedChannel channel = new EmbeddedChannel(connection);
 
             server.getPlayerManager().onPlayerConnect(connection, player, clientData);
 
@@ -97,6 +110,7 @@ public final class BotPlayerFactory {
             player.setCustomNameVisible(false);
             // 打上 bot 标签（工厂负责，保证任何创建路径都带标记；阵营标签由调用方补）
             player.addCommandTag(BOT_TAG);
+            CHANNELS.put(player.getUuid(), channel);
             return player;
         } catch (Throwable t) {
             BreakfrontServer.LOGGER.error("[BF-Bot] 创建假玩家 {} 失败: {}", name, t.toString());
@@ -112,11 +126,34 @@ public final class BotPlayerFactory {
         if (bot == null) {
             return;
         }
+        CHANNELS.remove(bot.getUuid());
         try {
             server.getPlayerManager().remove(bot);
         } catch (Throwable t) {
             BreakfrontServer.LOGGER.warn("[BF-Bot] 移除假玩家 {} 异常: {}",
                     bot.getGameProfile().getName(), t.toString());
+        }
+    }
+
+    /**
+     * 排空假连线的出站缓冲。
+     *
+     * <p>{@link EmbeddedChannel} 没有真实对端，出站包会在队列里无限堆积
+     * （实体生成/位置/计分板等），长时间运行会耗尽堆内存。周期性调用本方法丢弃即可。
+     * 单次上限 4096 包，避免极端情况下长时间占用 server tick 线程。
+     */
+    public static void drainOutbound(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        EmbeddedChannel ch = CHANNELS.get(bot.getUuid());
+        if (ch == null) {
+            return;
+        }
+        for (int i = 0; i < 4096; i++) {
+            if (ch.readOutbound() == null) {
+                break;
+            }
         }
     }
 
