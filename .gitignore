@@ -35,3 +35,6 @@ pack/dist/
 
 # 模组 jar 体检缓存（check_mod_pins.py）
 pack/tools/.modjar_cache/
+
+# MC 主机 SSH 凭据（本地私密，勿入库）
+.bf_mc_secret
