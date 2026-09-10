@@ -67,7 +67,40 @@ git ls-remote https://github.com/GHhuang1057/breakfront.git HEAD
 | `git` 报 proxy 连接失败 | 同上；`gh_proxy_off.bat` 会清掉 git 代理 |
 | 想换链路 | 改 `gh_proxy_tunnel.bat` 里的 `HOST`（如内网 MC 主机经 frps 10022） |
 
+### ⚠️ `git push` 长时间「零输出」卡死（2026-09-10 实测根因）
+
+**症状**：`git push` 挂十几分钟，stdout/stderr 一个字节都没有，也不报错不退出；
+即使 `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` 也一样（所以**不是**在等输密码）。
+同时 `curl -x socks5h://127.0.0.1:1080 https://github.com/` 却是 **200 / 0.6s**。
+
+**根因**：Agent/沙箱环境会注入 `http_proxy` / `https_proxy` 环境变量（本项目沙箱为
+`http://127.0.0.1:51667`）。**环境变量优先级高于 `git config http.proxy`**，于是 git
+绕开了可用的 SOCKS 隧道、改走沙箱代理去连 github.com → 该链路对 github.com 不通 → 静默挂死。
+（同一条沙箱代理对 `api.github.com` 是放行的，所以 `gh api` / curl api 看着都正常，极易误判。）
+
+**正确姿势**：清掉代理环境变量 + 显式指定 socks5h。已封装为脚本：
+
+```bash
+scripts/git_push.sh          # 推当前分支
+scripts/git_push.sh main     # 推指定分支
+```
+
+等价的手工命令：
+
+```bash
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy \
+  git -c http.proxy=socks5h://127.0.0.1:1080 -c https.proxy=socks5h://127.0.0.1:1080 push origin main
+```
+
+**顺带结论**：`scripts/git_relay.py`（经编译机中转）只适用于**取代码**——编译机
+（`J:\bfbuild\breakfront`）虽然 `git fetch` 正常（有读凭据），但 `git push` 会卡在
+Git Credential Manager 的凭据提示上（该机没有可写凭据），推不上去。要推还是得本地走隧道。
+
 ## 其它通道（备选）
 
 - **CI / 拉 release 资产**：`bfupdate.geekhonize.top` 的 CF Worker 中转，无需代理。
-- **git 推送**：`scripts/push_via_relay.sh`（经 CF Worker），代理不可用时的兜底。
+- **git 远端本身就是中继**：本机 `origin` = `https://bfupdate.geekhonize.top/gh/bf-gh-relay-2026/GHhuang1057/breakfront.git`
+  （CF Worker 再转发到 github.com），`scripts/push_via_relay.sh` 是其直推封装。
+  即便如此，**仍要清掉代理环境变量**再推——否则请求会先被沙箱代理截走（见上一节的排障）。
+- **编译机**（`J:\bfbuild\breakfront`）的 `origin` 才是直连的 `github.com`，只读可用。
+
