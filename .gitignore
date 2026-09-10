@@ -32,3 +32,6 @@ desktop.ini
 # 本地发布产物
 pack/*/mods/*.jar
 pack/dist/
+
+# 模组 jar 体检缓存（check_mod_pins.py）
+pack/tools/.modjar_cache/
