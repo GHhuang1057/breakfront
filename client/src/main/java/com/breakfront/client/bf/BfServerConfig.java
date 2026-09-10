@@ -22,6 +22,11 @@ public final class BfServerConfig {
     public static final String DEFAULT_HOST = "mc.geekhonize.top";
     public static final int DEFAULT_PORT = 25565;
     public static final int DEFAULT_UPDATE_PORT = 25610;
+    /**
+     * 公测服更新/音乐通道（Cloudflare Worker geekhonize-bfupdate：自动取 GitHub 最新 dev release
+     * 并代理下载）。未备案域名 + 直连 25610 会被 ICP 合规拦截，故正式通道统一走 CF。
+     */
+    public static final String DEFAULT_UPDATE_BASE = "https://bfupdate.geekhonize.top";
 
     private static final String FILE_NAME = "breakfront-client.properties";
 
@@ -107,9 +112,13 @@ public final class BfServerConfig {
      * 说明：公测服走未备案域名 + HTTP 会被 ICP 合规拦截，正式通道改由 Cloudflare 前端转发。
      */
     public static String updateBase() {
-        return updateBase.isEmpty()
-                ? "http://" + host + ":" + updatePort
-                : updateBase;
+        if (!updateBase.isEmpty()) {
+            return updateBase;                       // 显式配置优先
+        }
+        if (!DEFAULT_HOST.equalsIgnoreCase(host)) {
+            return "http://" + host + ":" + updatePort; // 自建/本地服：就地取服务端更新源
+        }
+        return DEFAULT_UPDATE_BASE;                   // 公测服：Cloudflare 更新通道
     }
 
     public static String address() {
