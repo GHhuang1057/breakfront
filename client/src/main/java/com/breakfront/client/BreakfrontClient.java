@@ -87,6 +87,9 @@ public class BreakfrontClient implements ClientModInitializer {
         BfKeyBindings.register();
         registerKeybindCommands();
 
+        // 启动即静默续期：若本地令牌临近过期，趁早换新，避免进服才发觉绑不上
+        com.breakfront.client.geo.GeoSession.refreshIfNeeded(null);
+
         // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）+ 死亡替换为部署重生页
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             // 【进入游戏即提示登录】——是「进入游戏」而不是「加入服务器」：主菜单一出现
@@ -181,15 +184,21 @@ public class BreakfrontClient implements ClientModInitializer {
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register(
                 (handler, sender, client) -> {
                     com.breakfront.client.geo.GeoSession.load();
-                    String tok = com.breakfront.client.geo.GeoSession.token();
-                    if (!tok.isEmpty() && client.getNetworkHandler() != null) {
-                        client.execute(() -> {
-                            if (client.getNetworkHandler() != null) {
-                                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
-                                        .send(new com.breakfront.net.AuthLoginPayload(tok));
-                            }
-                        });
-                    }
+                    // 进服前先续期：令牌有效才发送绑定，过期且续期失败则不发送（回退游客）
+                    com.breakfront.client.geo.GeoSession.refreshIfNeeded(valid -> {
+                        if (!valid) {
+                            return;
+                        }
+                        String tok = com.breakfront.client.geo.GeoSession.token();
+                        if (!tok.isEmpty() && client.getNetworkHandler() != null) {
+                            client.execute(() -> {
+                                if (client.getNetworkHandler() != null) {
+                                    net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
+                                            .send(new com.breakfront.net.AuthLoginPayload(tok));
+                                }
+                            });
+                        }
+                    });
                 });
 
         // GeoAuth 命令：/geo login|register|sendcode|ui|logout|who

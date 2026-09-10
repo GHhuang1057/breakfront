@@ -4,249 +4,251 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#070B12">
-<meta name="description" content="BREAKFRONT 破阵前线 —— Minecraft 32v32 大战场整合包官方站。下载专属启动器，登录 Geekhonize 账号即玩。">
-<title>BREAKFRONT · 破阵前线 — Minecraft 大战场官方站</title>
+<meta name="description" content="BREAKFRONT 破阵前线 —— Minecraft Fabric 1.21.1 32v32 攻防 Breakthrough 大战场整合包。下载启动器，登录 Geekhonize 账号即玩。">
+<title>BREAKFRONT · 破阵前线</title>
 <style>
   :root{
-    --bg0:#070B12;--bg1:#0B131F;--panel:rgba(14,22,33,.92);--panel2:#0A111B;
-    --line:#22364A;--teal:#35E6D2;--teal-dim:#223f46;--text:#EAF2F8;--muted:#7E93A8;--faint:#506070;
-    --amber:#E8B93C;--red:#FF4A3C;--ok:#3EE88C;--yellow:#F5D44A;
+    --bg:#070B12;--bg2:#0A111B;--panel:#0E1621;--line:#22364A;--line2:#16283a;
+    --teal:#35E6D2;--teal-press:#2bc7b6;--text:#EAF2F8;--muted:#7E93A8;--faint:#506070;
+    --ok:#3EE88C;--err:#FF5A4D;--amber:#E8B93C;
+    --mono:"SF Mono",Consolas,Menlo,monospace;
+    --sans:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;
-    color:var(--text);background:#070B12;line-height:1.6;
-    background:
-      radial-gradient(1000px 560px at 12% -6%, #10324a 0%, transparent 55%),
-      radial-gradient(900px 560px at 108% 14%, #0b2636 0%, transparent 52%),
-      linear-gradient(180deg,var(--bg0),var(--bg1));
-  }
-  .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
-  header{position:sticky;top:0;z-index:20;background:rgba(7,11,18,.82);backdrop-filter:blur(8px);
-    border-bottom:1px solid rgba(255,255,255,.06)}
-  .bar{display:flex;align-items:center;gap:18px;height:58px}
-  .logo{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:1px;color:var(--teal);white-space:nowrap}
-  .logo b{color:var(--text);font-weight:300}
-  .logo .dia{width:10px;height:10px;background:var(--teal);transform:rotate(45deg);display:inline-block}
-  nav{margin-left:auto;display:flex;gap:4px}
-  nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:6px 12px;border-radius:3px;letter-spacing:1px}
-  nav a:hover{color:var(--teal)}
-  nav a.play{color:#06121a;background:var(--teal);font-weight:600}
-  main{overflow:hidden}
-  section{padding:64px 0}
-  .hero{min-height:78vh;display:flex;align-items:center;position:relative;padding:90px 0 60px}
-  .hero .clip{position:absolute;inset:0;overflow:hidden;pointer-events:none;opacity:.5}
-  .hero .skyline{position:absolute;bottom:0;left:0;right:0;height:120px;
-    background:linear-gradient(#0000 60%,#0a0d12 90%),repeating-linear-gradient(90deg,#12202e 0 26px,#0d1822 26px 54px,#101c29 54px 86px,#0a1520 86px 118px);opacity:.35;
-    -webkit-mask-image:linear-gradient(#000,transparent 70%);mask-image:linear-gradient(#000,transparent 70%)}
-  .h1{font-size:clamp(38px,7vw,86px);font-weight:800;letter-spacing:6px;line-height:1.05;
-    background:linear-gradient(180deg,#eaf7ff,var(--teal) 140%);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .h2{font-size:clamp(15px,2vw,20px);color:var(--muted);letter-spacing:8px;margin-top:6px}
-  .tagline{margin-top:22px;color:var(--text);max-width:640px;font-size:16px}
+  html{-webkit-text-size-adjust:100%}
+  body{font-family:var(--sans);color:var(--text);background:var(--bg);
+    line-height:1.62;font-size:15px;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+  /* 顶栏 */
+  header{position:sticky;top:0;z-index:30;background:rgba(7,11,18,.9);
+    border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+  .bar{display:flex;align-items:center;gap:16px;height:56px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:1.5px;white-space:nowrap}
+  .logo b{font-weight:300}
+  .logo .mk{width:11px;height:11px;background:var(--teal);transform:rotate(45deg);display:inline-block}
+  nav{margin-left:auto;display:flex;gap:2px;align-items:center;overflow-x:auto}
+  nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:7px 11px;white-space:nowrap;letter-spacing:.5px}
+  nav a:hover{color:var(--text)}
+  nav a.cta{background:var(--teal);color:#06121A;font-weight:600;margin-left:6px}
+  /* 区块 */
+  section{padding:60px 0;border-top:1px solid var(--line2)}
+  .eyebrow{font-size:12px;color:var(--teal);letter-spacing:3px;font-family:var(--mono);margin-bottom:10px}
+  h2.title{font-size:clamp(22px,3.2vw,32px);letter-spacing:1px;margin-bottom:24px;font-weight:700}
+  /* HERO */
+  .hero{padding:84px 0 56px;border-top:0}
+  .h1{font-size:clamp(40px,8vw,84px);font-weight:800;letter-spacing:8px;line-height:1;color:var(--text)}
+  .h2{font-size:clamp(14px,2vw,18px);color:var(--teal);letter-spacing:6px;margin-top:10px;font-family:var(--mono)}
+  .tagline{margin-top:22px;max-width:620px;color:var(--text);font-size:16px}
   .tagline em{color:var(--teal);font-style:normal}
-  .cta{display:flex;gap:14px;margin-top:34px;flex-wrap:wrap;align-items:center}
-  .btn{display:inline-flex;align-items:center;gap:10px;text-decoration:none;border-radius:4px;
-    padding:13px 26px;font-size:15px;font-weight:600;letter-spacing:1px;border:1px solid transparent}
-  .btn.teal{background:var(--teal);color:#06121a}
-  .btn.teal:hover{filter:brightness(1.1)}
+  .tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .tags span{border:1px solid var(--line);color:var(--muted);font-size:12px;padding:5px 12px;letter-spacing:.5px}
+  .cta-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;border:1px solid transparent;
+    padding:12px 24px;font-size:14px;font-weight:600;letter-spacing:1px;border-radius:2px;cursor:pointer}
+  .btn.teal{background:var(--teal);color:#06121A}
+  .btn.teal:hover{background:var(--teal-press)}
   .btn.ghost{border-color:var(--teal);color:var(--teal)}
   .btn.ghost:hover{background:rgba(53,230,210,.08)}
-  .btn.gray{border-color:var(--line);color:var(--muted)}
-  .btn:disabled{opacity:.45;cursor:not-allowed}
-  .live{display:inline-flex;align-items:center;gap:8px;background:rgba(62,232,140,.10);border:1px solid rgba(62,232,140,.4);
-    color:var(--ok);padding:7px 14px;border-radius:20px;font-size:13px;margin-top:26px}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pulse 1.6s infinite}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
-  h3.sec{font-size:13px;color:var(--teal);letter-spacing:4px;margin-bottom:8px}
-  h2.title{font-size:clamp(24px,3.4vw,34px);letter-spacing:2px;margin-bottom:26px}
-  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
-  .card{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--teal);
-    border-radius:8px;padding:24px}
-  .card h4{color:var(--teal);font-size:15px;letter-spacing:1px;margin-bottom:10px}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .status{display:inline-flex;align-items:center;gap:8px;margin-top:26px;font-size:13px;
+    border:1px solid var(--line);padding:7px 14px;border-radius:2px;color:var(--muted);font-family:var(--mono)}
+  .status .dot{width:8px;height:8px;background:var(--faint);border-radius:50%}
+  .status.ok{border-color:rgba(62,232,140,.4);color:var(--ok)}
+  .status.ok .dot{background:var(--ok)}
+  .status.bad{border-color:rgba(255,90,77,.4);color:var(--err)}
+  .status.bad .dot{background:var(--err)}
+  /* 网格卡片 */
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-top:2px solid var(--teal);
+    padding:22px;border-radius:2px}
+  .card h4{color:var(--text);font-size:15px;letter-spacing:.5px;margin-bottom:8px}
+  .card .num{font-size:24px;font-weight:700;color:var(--teal);font-family:var(--mono);margin-bottom:2px}
   .card p{color:var(--muted);font-size:13.5px}
-  .card .big{font-size:26px;color:var(--text);font-weight:700;margin:6px 0 2px}
-  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;counter-reset:st}
-  .step{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:22px;position:relative}
-  .step::before{counter-increment:st;content:counter(st,decimal-leading-zero);position:absolute;top:-14px;left:20px;
-    background:var(--teal);color:#06121a;font-weight:800;font-size:13px;padding:3px 10px;border-radius:4px;letter-spacing:1px}
-  .step h4{margin-top:8px;color:var(--text);font-size:15px}
+  /* 步骤 */
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;counter-reset:s}
+  .step{background:var(--panel);border:1px solid var(--line);padding:22px 20px 18px;border-radius:2px;position:relative}
+  .step::before{counter-increment:s;content:counter(s,decimal-leading-zero);position:absolute;top:-13px;left:18px;
+    background:var(--teal);color:#06121A;font-weight:800;font-size:12px;font-family:var(--mono);padding:3px 9px;border-radius:2px}
+  .step h4{margin-top:6px;color:var(--text);font-size:14.5px}
   .step p{color:var(--muted);font-size:13px;margin-top:6px}
-  .step code{color:var(--teal);font-size:12px;background:#0A111B;padding:2px 7px;border-radius:3px;border:1px solid var(--line)}
-  .dl-table{width:100%;border-collapse:collapse;font-size:14px}
-  .dl-table th,.dl-table td{text-align:left;padding:13px 10px;border-bottom:1px solid #1a2a3c;vertical-align:middle}
-  .dl-table th{color:var(--muted);font-weight:500;font-size:12px;letter-spacing:2px}
-  .dl-table td b{font-size:15px}
-  .dl-table .ver{color:var(--faint);font-size:12px;margin-left:8px}
-  .dl-table a.btn{padding:8px 18px;font-size:13px}
-  .badge{display:inline-block;font-size:11px;padding:2px 9px;border-radius:3px;border:1px solid var(--line);color:var(--muted)}
+  .step code{color:var(--teal);font-family:var(--mono);font-size:12px;background:var(--bg2);
+    padding:2px 6px;border:1px solid var(--line);border-radius:2px}
+  /* 下载表 */
+  table.dl{width:100%;border-collapse:collapse;font-size:14px}
+  table.dl th,table.dl td{text-align:left;padding:13px 10px;border-bottom:1px solid var(--line2);vertical-align:middle}
+  table.dl th{color:var(--muted);font-weight:500;font-size:11px;letter-spacing:2px;font-family:var(--mono)}
+  table.dl td b{font-size:15px}
+  table.dl .ver{color:var(--faint);font-size:12px;margin-left:8px}
+  .badge{display:inline-block;font-size:11px;padding:2px 9px;border:1px solid var(--line);color:var(--muted);border-radius:2px}
   .badge.ok{color:var(--ok);border-color:rgba(62,232,140,.5)}
-  .split{display:grid;grid-template-columns:1.1fr .9fr;gap:26px;align-items:start}
-  @media (max-width:860px){.split{grid-template-columns:1fr}}
-  .form label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
-  .form input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    padding:11px 12px;font-size:14px;border-radius:4px;outline:none}
-  .form input:focus{border-color:var(--teal)}
-  .form button{margin-top:16px;width:100%;padding:12px;border:0;background:var(--teal);color:#06121a;
-    font-size:14px;font-weight:600;letter-spacing:2px;border-radius:4px;cursor:pointer}
-  .form button:hover{filter:brightness(1.1)}
-  .row2{display:flex;gap:8px}.row2 .grow{flex:1}
-  .form button.small{width:auto;margin-top:0;padding:9px 13px;font-size:12px;background:transparent;border:1px solid var(--teal);color:var(--teal)}
-  .form button.small:disabled{opacity:.5}
-  .msg{min-height:18px;font-size:13px;margin-top:8px;word-break:break-all}
-  .msg.err{color:var(--red)}.msg.ok{color:var(--ok)}
+  table.dl a.btn{padding:8px 16px;font-size:13px}
+  .note{color:var(--faint);font-size:12px;margin-top:14px}
+  .mono{font-family:var(--mono);background:var(--bg2);border:1px solid var(--line);color:var(--teal);padding:2px 8px;border-radius:2px;font-size:13px}
+  /* 账号 */
+  .split{display:grid;grid-template-columns:1.05fr .95fr;gap:24px;align-items:start}
+  .lead{color:var(--muted);font-size:14.5px;margin-bottom:16px;max-width:520px}
+  .info{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--amber);padding:16px 18px;border-radius:2px}
+  .info h4{color:var(--amber);font-size:14px;margin-bottom:8px}
+  .info p{color:var(--muted);font-size:13.5px}
+  .form{background:var(--panel);border:1px solid var(--line);padding:20px;border-radius:2px}
   .tabs{display:flex;gap:4px;margin-bottom:14px}
-  .tabs button{flex:1;padding:10px;background:transparent;border:1px solid var(--line);color:var(--muted);
-    cursor:pointer;font-size:13px;border-radius:4px;letter-spacing:2px}
-  .tabs button.on{background:var(--teal);color:#06121a;border-color:var(--teal);font-weight:600}
-  .link{background:none;border:none;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:12px;margin-top:8px}
+  .tabs button{flex:1;padding:9px;background:transparent;border:1px solid var(--line);color:var(--muted);
+    cursor:pointer;font-size:13px;letter-spacing:2px;border-radius:2px}
+  .tabs button.on{background:var(--teal);color:#06121A;border-color:var(--teal);font-weight:600}
+  .form label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+  .form input{width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--text);
+    padding:11px 12px;font-size:14px;border-radius:2px;outline:none;font-family:var(--sans)}
+  .form input:focus{border-color:var(--teal)}
+  .form button.primary{margin-top:16px;width:100%;padding:12px;border:0;background:var(--teal);color:#06121A;
+    font-size:14px;font-weight:600;letter-spacing:2px;border-radius:2px;cursor:pointer}
+  .form button.primary:hover{background:var(--teal-press)}
+  .row2{display:flex;gap:8px;align-items:flex-start}
+  .row2 .grow{flex:1}
+  .form button.small{padding:11px 13px;font-size:12px;background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:2px;cursor:pointer;white-space:nowrap}
+  .form button.small:disabled{opacity:.5;cursor:not-allowed}
+  .link{background:none;border:none;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:12px;margin-top:10px;padding:0}
   .link:hover{color:var(--teal)}
-  .mono{font-family:Consolas,Menlo,monospace;background:#0A111B;border:1px solid var(--line);color:var(--teal);
-    padding:2px 8px;border-radius:3px;font-size:13px}
-  footer{border-top:1px solid rgba(255,255,255,.06);padding:30px 0 44px;color:var(--faint);font-size:12px}
-  .feat{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
-  .feat span{border:1px solid var(--line);color:var(--muted);font-size:12px;padding:5px 12px;border-radius:20px}
+  .msg{min-height:18px;font-size:13px;margin-top:10px;word-break:break-all}
+  .msg.err{color:var(--err)}.msg.ok{color:var(--ok)}
+  /* FAQ */
   ul.faq{list-style:none}
-  ul.faq li{border-bottom:1px solid #182636;padding:14px 0}
-  ul.faq b{color:var(--text)}
-  ul.faq p{color:var(--muted);font-size:13px;margin-top:4px}
+  ul.faq li{border-bottom:1px solid var(--line2);padding:14px 0}
+  ul.faq b{color:var(--text);font-size:14.5px}
+  ul.faq p{color:var(--muted);font-size:13px;margin-top:5px}
+  footer{border-top:1px solid var(--line);padding:28px 0 40px;color:var(--faint);font-size:12px;font-family:var(--mono)}
+  @media (max-width:760px){
+    .split{grid-template-columns:1fr}
+    nav a:not(.cta){display:none}
+    .hero{padding:60px 0 44px}
+  }
 </style>
 </head>
 <body>
 <header><div class="wrap bar">
-  <div class="logo"><span class="dia"></span>BREAKFRONT <b>破阵前线</b></div>
+  <div class="logo"><span class="mk"></span>BREAKFRONT <b>破阵前线</b></div>
   <nav>
     <a href="#intro">简介</a>
     <a href="#download">下载</a>
-    <a href="#steps">怎么玩</a>
+    <a href="#play">玩法</a>
     <a href="#account">账号</a>
     <a href="#faq">FAQ</a>
-    <a class="play" href="#download">下载启动器</a>
+    <a class="cta" href="#download">下载启动器</a>
   </nav>
 </div></header>
 
 <main>
-<!-- HERO -->
-<div class="hero">
-  <div class="clip"><div class="skyline"></div></div>
-  <div class="wrap" style="position:relative">
-    <div class="h1">BREAKFRONT</div>
-    <div class="h2">破 阵 前 线 · MC 大 战 场</div>
-    <div class="tagline">Minecraft 版 <em>32v32 攻防 Breakthrough</em> 大战场整合包 —— 现代战争枪械、载具与据点拉锯，
-      战场由 AI 自动补位，人少也能开打。Fabric 1.21.1 客户端。</div>
-    <div class="feat">
-      <span>攻防 Breakthrough</span><span>TaCZ 现代枪械</span><span>载具载具载具</span>
-      <span>AI 自动补位</span><span>BF2042 风格界面</span><span>Geekhonize 统一账号</span>
-    </div>
-    <div class="cta">
-      <a class="btn teal" href="#download">下载专属启动器</a>
-      <a class="btn ghost" href="#account">登录 / 注册账号</a>
-    </div>
-    <div class="live" id="live"><span class="dot"></span><span id="liveText">正在检测服务器状态…</span></div>
+<section class="hero"><div class="wrap">
+  <div class="h1">BREAKFRONT</div>
+  <div class="h2">破阵前线 · MC 大战场</div>
+  <p class="tagline">Minecraft Fabric 1.21.1 上的 <em>32v32 攻防 Breakthrough</em> 整合包：现代枪械、载具与据点拉锯，
+    战场由 AI 士兵自动补位，人少也能开打。</p>
+  <div class="tags">
+    <span>攻防 Breakthrough</span><span>TaCZ 现代枪械</span><span>载具协同</span>
+    <span>AI 补位</span><span>BF2042 风格界面</span><span>Geekhonize 统一账号</span>
   </div>
-</div>
+  <div class="cta-row">
+    <a class="btn teal" href="#download">下载启动器</a>
+    <a class="btn ghost" href="#account">登录 / 注册</a>
+  </div>
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">正在检测服务器状态</span></div>
+</div></section>
 
-<!-- 简介 -->
 <section id="intro"><div class="wrap">
-  <h3 class="sec">GAMEPLAY</h3>
+  <div class="eyebrow">GAMEPLAY</div>
   <h2 class="title">占领 · 突破 · 拉锯到最后一秒</h2>
   <div class="grid3">
-    <div class="card"><h4>攻防突破 BREAKTHROUGH</h4>
-      <div class="big">32 v 32</div><p>攻方逐区推进占领据点，守方阵地反击；票数与时间双重压力，每回合都是拉锯战。</p></div>
-    <div class="card"><h4>现代军械与载具</h4>
-      <div class="big">TaCZ</div><p>突击步枪 / SMG / DMR / 狙击 / 霰弹 与载具同台；枪械数值按 100HP 体系独立调参，手感向现代射击靠拢。</p></div>
-    <div class="card"><h4>无人也能开战</h4>
-      <div class="big">AI 补位</div><p>服务器内置 AI 士兵自动补满战线，缺员随时填充；一个人也能进服体验完整的攻防节奏。</p></div>
+    <div class="card"><div class="num">32v32</div><h4>攻防突破</h4>
+      <p>攻方逐区推进占领据点，守方阵地反击；票数与时间双重压力，每一回合都是拉锯战。</p></div>
+    <div class="card"><div class="num">TaCZ</div><h4>现代军械</h4>
+      <p>突击步枪 / SMG / DMR / 狙击 / 霰弹与载具同台，数值按 100HP 体系独立调参，手感向现代射击靠拢。</p></div>
+    <div class="card"><div class="num">AI</div><h4>自动补位</h4>
+      <p>服务器内置 AI 士兵自动补满战线，缺员随时填充；一个人进服也能体验完整的攻防节奏。</p></div>
   </div>
 </div></section>
 
-<!-- 下载 -->
-<section id="download" style="background:rgba(10,17,27,.6)"><div class="wrap">
-  <h3 class="sec">DOWNLOAD</h3>
-  <h2 class="title">下载专属启动器</h2>
-  <p style="color:var(--muted);margin-bottom:22px;max-width:720px">启动器内置 <b style="color:var(--text)">Geekhonize 账号登录</b>：
-    登录后会自动把账号写进游戏配置，打开 Minecraft 即是该账号（服务器自动绑定，防冒名）。
-    无需手动开服器与版本管理，下载即玩。</p>
-  <table class="dl-table">
-    <tr><th>平台</th><th>版本</th><th>说明</th><th></th></tr>
-    <tr><td><b>Windows</b> <span class="ver">x64 · Win10/11</span></td><td><span class="badge ok">可用</span></td>
+<section id="download"><div class="wrap">
+  <div class="eyebrow">DOWNLOAD</div>
+  <h2 class="title">下载启动器</h2>
+  <p class="lead">启动器内置 Geekhonize 账号登录：登录后会话写入游戏配置，打开 Minecraft 即是该账号（服务器自动绑定，防冒名）。
+    无需手动管理版本与模组，下载即玩。</p>
+  <table class="dl">
+    <tr><th>平台</th><th>状态</th><th>说明</th><th></th></tr>
+    <tr><td><b>Windows</b><span class="ver">x64 · Win10/11</span></td><td><span class="badge ok">可用</span></td>
       <td style="color:var(--muted)">解压后运行 GeekhonizeLauncher.exe</td>
       <td><a class="btn teal" href="/download/geekhonize-launcher-win-x64.zip">下载</a></td></tr>
-    <tr><td><b>Linux</b> <span class="ver">x64</span></td><td><span class="badge ok">可用</span></td>
+    <tr><td><b>Linux</b><span class="ver">x64</span></td><td><span class="badge ok">可用</span></td>
       <td style="color:var(--muted)">解压后运行 ./GeekhonizeLauncher</td>
       <td><a class="btn teal" href="/download/geekhonize-launcher-linux-x64.zip">下载</a></td></tr>
-    <tr><td><b>Android</b> <span class="ver">APK · ARM64</span></td><td><span class="badge ok">可用</span></td>
+    <tr><td><b>Android</b><span class="ver">APK · ARM64</span></td><td><span class="badge ok">可用</span></td>
       <td style="color:var(--muted)">安装后登录账号即可使用（Android 7+ / ARM64）</td>
       <td><a class="btn teal" href="/download/geekhonize-launcher-android.apk">下载 APK</a></td></tr>
   </table>
-  <p style="color:var(--faint);font-size:12px;margin-top:14px">* 启动器免安装自包含运行；游戏本体（Java + Fabric 1.21.1 + 整合包）由后续版本自动装配。当前版本登录与会话写入已可用。</p>
+  <p class="note">启动器免安装自包含；游戏本体（Java + Fabric 1.21.1 + 整合包）由后续版本自动装配。当前版本登录与会话写入已可用。</p>
 </div></section>
 
-<!-- 怎么玩 -->
-<section id="steps"><div class="wrap">
-  <h3 class="sec">HOW TO PLAY</h3>
+<section id="play"><div class="wrap">
+  <div class="eyebrow">HOW TO PLAY</div>
   <h2 class="title">三步开战</h2>
   <div class="steps">
     <div class="step"><h4>下载并运行启动器</h4>
-      <p>按你的平台下载上方启动器，解压运行，填入游戏实例目录（默认 <code>.minecraft</code>）。</p></div>
-    <div class="step"><h4>注册 / 登录 Geekhonize 账号</h4>
-      <p>在启动器内用邮箱验证码注册（或网页注册），然后登录。也可以先在网页 <code>auth.geekhonize.top</code> 注册。</p></div>
+      <p>按平台下载启动器，解压运行，填入游戏实例目录（默认 <code>.minecraft</code>）。</p></div>
+    <div class="step"><h4>注册 / 登录账号</h4>
+      <p>在启动器内用邮箱验证码注册（或先在网页注册），然后登录。也可在 <code>auth.geekhonize.top</code> 注册。</p></div>
     <div class="step"><h4>打开游戏 = 你的账号</h4>
-      <p>启动器把登录写进客户端配置；进入服务器后自动完成账号绑定，防自报名冒名，角色与进度随账号走。</p></div>
+      <p>启动器把登录写进客户端配置；进入服务器后自动完成账号绑定，角色与进度随账号走。</p></div>
   </div>
-  <p style="color:var(--muted);font-size:13.5px;margin-top:26px">服务器地址：<span class="mono">mc.geekhonize.top:25565</span>（游戏内主菜单一键直连）</p>
+  <p style="color:var(--muted);font-size:13.5px;margin-top:24px">服务器地址：<span class="mono">mc.geekhonize.top:25565</span>（游戏内主菜单一键直连）</p>
 </div></section>
 
-<!-- 账号 -->
-<section id="account" style="background:rgba(10,17,27,.6)"><div class="wrap">
-  <h3 class="sec">ACCOUNT</h3>
+<section id="account"><div class="wrap">
+  <div class="eyebrow">ACCOUNT</div>
   <h2 class="title">Geekhonize 统一账号</h2>
   <div class="split">
     <div>
-      <p style="color:var(--muted);margin-bottom:16px">一个账号通行全部作品（BREAKFRONT / 账号中心 / 未来其它）。
-        在此处注册或登录后，启动器与网页登录互通；忘记密码可在账号中心用邮箱验证码找回。</p>
-      <div class="card" style="border-top-color:var(--amber)">
-        <h4 style="color:var(--amber)">已登录会怎样？</h4>
-        <p>启动器登录 → 会话写入实例配置 → 客户端进服自动绑定：
-        游戏内聊天会显示 <span class="mono">[Geekhonize] 绑定：用户名（player, admin…）</span>。
-        管理身份也由该账号的角色决定。</p>
+      <p class="lead">一个账号通行全部作品（BREAKFRONT / 账号中心 / 后续内容）。在此注册或登录后，
+        启动器与网页登录互通；忘记密码可在账号中心用邮箱验证码找回。</p>
+      <div class="info">
+        <h4>登录后会发生什么</h4>
+        <p>启动器登录 → 会话写入实例配置 → 客户端进服自动绑定。游戏内聊天显示
+          <span class="mono">[Geekhonize] 绑定：用户名（player / admin…）</span>，管理身份由该账号角色决定。</p>
       </div>
     </div>
-    <div class="card form" id="acctCard">
+    <div class="form" id="acctForm">
       <div class="tabs">
-        <button id="tabLogin" class="on" onclick="showTab('login')">登 录</button>
-        <button id="tabReg" onclick="showTab('reg')">注 册</button>
+        <button id="tabLogin" class="on" onclick="showTab('login')">登录</button>
+        <button id="tabReg" onclick="showTab('reg')">注册</button>
       </div>
       <div id="pLogin">
-        <label>用户名</label><input id="lu" autocomplete="username">
-        <label>密码</label><input id="lp" type="password" autocomplete="current-password">
-        <button onclick="doLogin()">登 录</button>
+        <label>用户名</label><input id="lu" autocomplete="username" placeholder="Geekhonize 用户名">
+        <label>密码</label><input id="lp" type="password" autocomplete="current-password" placeholder="密码">
+        <button class="primary" onclick="doLogin()">登录</button>
         <button class="link" onclick="window.open('https://auth.geekhonize.top/#forgot','_blank')">忘记密码？去账号中心找回</button>
         <div class="msg" id="mLogin"></div>
       </div>
       <div id="pReg" style="display:none">
-        <label>用户名（3-32 位字母/数字/_- .）</label><input id="ru">
+        <label>用户名（3-32 位，字母/数字/_-.）</label><input id="ru" placeholder="用户名">
         <label>邮箱（接收验证码）</label>
-        <div class="row2"><input id="re" style="flex:1" placeholder="you@example.com">
+        <div class="row2"><input id="re" class="grow" placeholder="you@example.com">
           <button class="small" id="bSend" onclick="doSend()">发送验证码</button></div>
-        <label>邮箱验证码</label><input id="rc">
-        <label>密码（6-128 位）</label><input id="rp" type="password">
-        <button onclick="doReg()">注册并登录</button>
+        <label>邮箱验证码</label><input id="rc" placeholder="6 位验证码">
+        <label>密码（6-128 位）</label><input id="rp" type="password" placeholder="密码">
+        <button class="primary" onclick="doReg()">注册并登录</button>
         <div class="msg" id="mReg"></div>
       </div>
     </div>
   </div>
 </div></section>
 
-<!-- FAQ -->
 <section id="faq"><div class="wrap">
-  <h3 class="sec">FAQ</h3>
+  <div class="eyebrow">FAQ</div>
   <h2 class="title">常见问题</h2>
   <ul class="faq">
-    <li><b>为什么必须有账号？</b><p>离线服无法靠正版 ID 识别身份，账号用于绑定身份与防冒名，也是将来战绩/角色的载体。</p></li>
-    <li><b>注册要邮箱吗？</b><p>要。注册时通过邮箱验证码验证归属，并可用它找回密码 / 换绑邮箱。</p></li>
+    <li><b>为什么必须有账号？</b><p>离线服无法靠正版 ID 识别身份，账号用于绑定身份与防冒名，也是战绩与角色的载体。</p></li>
+    <li><b>注册要邮箱吗？</b><p>要。注册时通过邮箱验证码验证归属，并可用它找回密码或换绑邮箱。</p></li>
     <li><b>启动器登录后游戏里就是该账号吗？</b><p>是的。登录会话写入客户端配置，进服自动与服务器绑定，游戏内显示你登录的 Geekhonize 用户名。</p></li>
-    <li><b>Android 什么时候支持？</b><p>启动器已按 Win / Linux / Android 一套代码开发，桌面版先发，Android APK 将在下一版本随官网开放。</p></li>
-    <li><b>进不去服 / 卡连接怎么办？</b><p>确认已从官网启动器更新客户端；仍失败可在游戏内或官网提交问题描述给管理员。</p></li>
+    <li><b>Android 支持吗？</b><p>启动器已按 Win / Linux / Android 一套代码开发，桌面版先发，Android APK 随官网开放。</p></li>
+    <li><b>进不去服 / 卡连接怎么办？</b><p>确认已从官网更新客户端；仍失败可在游戏内或官网提交问题描述给管理员。</p></li>
   </ul>
 </div></section>
 </main>
@@ -260,17 +262,17 @@
 const AUTH='https://auth.geekhonize.top';
 let sendCd=0, sendTimer=null;
 
-// 服务器状态（经本站 /server/ 反代到 frps 更新源）
-(async function(){
-  try{
-    const r=await fetch('/server/manifest.json',{cache:'no-store'});
-    if(!r.ok) throw 0;
-    const j=await r.json();
-    const files=(j.files||[]).map(f=>f.role+':'+f.sha256.slice(0,7)).join(' ');
-    document.getElementById('liveText').textContent='服务器在线 · 客户端清单正常（'+files.slice(0,60)+'…）';
-  }catch(e){
-    document.getElementById('liveText').textContent='状态暂不可达（服务器可能维护中）';
-  }
+// 服务器状态：经本站 /server/manifest.json 反代到更新源
+(function(){
+  const el=document.getElementById('status'), txt=document.getElementById('statusText');
+  fetch('/server/manifest.json',{cache:'no-store'})
+    .then(r=>{if(!r.ok)throw 0;return r.json();})
+    .then(j=>{
+      const n=(j.files||[]).length;
+      el.className='status ok';
+      txt.textContent='服务器在线 · 清单 '+n+' 项正常';
+    })
+    .catch(()=>{el.className='status bad';txt.textContent='状态暂不可达（服务器可能维护中）';});
 })();
 
 function showTab(t){
@@ -279,44 +281,42 @@ function showTab(t){
   document.getElementById('pLogin').style.display=t==='login'?'':'none';
   document.getElementById('pReg').style.display=t==='reg'?'':'none';
 }
-async function api(path,body){
-  const r=await fetch(AUTH+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-  const j=await r.json().catch(()=>({ok:false,msg:'响应解析失败 '+r.status}));
-  return j;
+function api(path,body){
+  return fetch(AUTH+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})
+    .then(r=>r.json().catch(()=>({ok:false,msg:'响应解析失败 ('+r.status+')'})));
 }
-const m=(id,t,cls)=>{const e=document.getElementById(id);e.className='msg '+(cls||'');e.textContent=t;};
+function msg(id,text,cls){const e=document.getElementById(id);e.className='msg '+(cls||'');e.textContent=text;}
 async function doLogin(){
   const u=document.getElementById('lu').value.trim(),p=document.getElementById('lp').value;
-  if(!u||!p)return m('mLogin','请输入用户名与密码','err');
+  if(!u||!p)return msg('mLogin','请输入用户名与密码','err');
   try{
     const j=await api('/api/v1/auth/login',{username:u,password:p,app:'breakfront'});
-    if(!j.ok)return m('mLogin',j.msg||'登录失败','err');
-    m('mLogin','✓ 登录成功：'+j.user.username+'。启动器/游戏内登录同账号即互通','ok');
-  }catch(e){m('mLogin','网络错误：'+e.message,'err');}
+    if(!j.ok)return msg('mLogin',j.msg||'登录失败','err');
+    msg('mLogin','登录成功：'+j.user.username+'（启动器 / 游戏内同账号互通）','ok');
+  }catch(e){msg('mLogin','网络错误：'+e.message,'err');}
 }
 async function doSend(){
   const e=document.getElementById('re').value.trim();
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))return m('mReg','请填写有效邮箱','err');
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))return msg('mReg','请填写有效邮箱','err');
   const b=document.getElementById('bSend');b.disabled=true;
   try{
     const j=await api('/api/v1/auth/send_code',{email:e,purpose:'register'});
-    if(!j.ok){m('mReg',j.msg||'发送失败','err');b.disabled=false;return;}
-    if(j.data&&j.data.dev_code){document.getElementById('rc').value=j.data.dev_code;m('mReg','验证码已发送（联调自动填入）','ok');}
-    else m('mReg','验证码已发送，请查收邮箱','ok');
-    sendCd=60;
-    clearInterval(sendTimer);
+    if(!j.ok){msg('mReg',j.msg||'发送失败','err');b.disabled=false;return;}
+    if(j.data&&j.data.dev_code){document.getElementById('rc').value=j.data.dev_code;msg('mReg','验证码已发送（联调自动填入）','ok');}
+    else msg('mReg','验证码已发送，请查收邮箱','ok');
+    sendCd=60;clearInterval(sendTimer);
     sendTimer=setInterval(()=>{b.textContent=(--sendCd<=0?(b.disabled=false,'重新发送'):sendCd+'s');},1000);
-  }catch(e){b.disabled=false;m('mReg','网络错误：'+e.message,'err');}
+  }catch(e){b.disabled=false;msg('mReg','网络错误：'+e.message,'err');}
 }
 async function doReg(){
   const u=document.getElementById('ru').value.trim(),e=document.getElementById('re').value.trim(),
         c=document.getElementById('rc').value.trim(),p=document.getElementById('rp').value;
-  if(!u||!e||!c||!p)return m('mReg','请填写完整信息','err');
+  if(!u||!e||!c||!p)return msg('mReg','请填写完整信息','err');
   try{
     const j=await api('/api/v1/auth/register',{username:u,password:p,email:e,code:c,app:'breakfront'});
-    if(!j.ok)return m('mReg',j.msg||'注册失败','err');
-    m('mReg','✓ 注册并登录成功：'+j.user.username+'。启动器登录同账号即互通','ok');
-  }catch(err){m('mReg','网络错误：'+err.message,'err');}
+    if(!j.ok)return msg('mReg',j.msg||'注册失败','err');
+    msg('mReg','注册并登录成功：'+j.user.username+'（启动器登录同账号互通）','ok');
+  }catch(err){msg('mReg','网络错误：'+err.message,'err');}
 }
 </script>
 </body>

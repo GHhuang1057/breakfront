@@ -56,6 +56,41 @@ public final class GeoHttp {
      * 复制到游戏内粘贴即可完成绑定，无需输账号密码、也不用邮箱验证码往返。
      * 服务端 {@code AuthBridge.me} 校验的是同一个端点，故两边口径一致。
      */
+    /**
+     * 用当前令牌换取新令牌（{@code POST /api/v1/auth/refresh}，Bearer）。
+     * 成功时返回新 access_token（同时带回 username）；失败返回带可读原因的 Res。
+     */
+    public static Res refresh(String token) {
+        String tk = token == null ? "" : token.trim();
+        if (tk.isEmpty()) {
+            return new Res(false, "", "", "会话为空，请重新登录");
+        }
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(endpoint + "/api/v1/auth/refresh"))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Authorization", "Bearer " + tk)
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            String text = resp.body();
+            if (resp.statusCode() != 200) {
+                return new Res(false, "", "", msgOf(text, "刷新失败（HTTP " + resp.statusCode() + "）"));
+            }
+            boolean ok = text.contains("\"ok\":true");
+            String nt = quoted(text, "access_token");
+            if (nt == null || nt.isEmpty()) {
+                nt = quoted(text, "token");
+            }
+            String user = quoted(text, "username");
+            if (!ok || nt == null || nt.isEmpty()) {
+                return new Res(false, "", "", msgOf(text, "刷新失败"));
+            }
+            return new Res(true, nt, user == null ? "" : user, "ok");
+        } catch (Exception e) {
+            return new Res(false, "", "", "网络错误：" + e.getClass().getSimpleName());
+        }
+    }
+
     public static Res me(String token) {
         String tk = token == null ? "" : token.trim();
         if (tk.isEmpty()) {
@@ -152,7 +187,7 @@ public final class GeoHttp {
             HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
             String text = resp.body();
             if (resp.statusCode() != 200) {
-                return new Res(false, "", "", "服务返回 " + resp.statusCode(), "");
+                return new Res(false, "", "", msgOf(text, "服务返回 " + resp.statusCode()), "");
             }
             boolean ok = text.contains("\"ok\":true");
             String token = quoted(text, "access_token");
@@ -164,6 +199,15 @@ public final class GeoHttp {
         } catch (Exception e) {
             return new Res(false, "", "", "网络错误：" + e.getClass().getSimpleName(), "");
         }
+    }
+
+    /** 从 JSON 抽取 msg 字段；抽不到则用 fallback，确保任何失败都有可读原因。 */
+    private static String msgOf(String json, String fallback) {
+        String m = quoted(json, "msg");
+        if (m != null && !m.isEmpty()) {
+            return m;
+        }
+        return fallback;
     }
 
     private static String quoted(String json, String key) {

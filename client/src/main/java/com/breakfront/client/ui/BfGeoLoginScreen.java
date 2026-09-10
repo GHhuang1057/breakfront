@@ -300,6 +300,24 @@ public class BfGeoLoginScreen extends Screen {
                 Text.literal("网页端找回/改密/换绑邮箱：auth.geekhonize.top"),
                 ux, infoY + 14, BfTheme.FAINT, false);
 
+        // 会话有效期（令牌临近过期会自动续期，无需手动操作）
+        String validity;
+        long exp = GeoSession.expiresAt();
+        if (exp <= 0) {
+            validity = "会话有效期：未知";
+        } else {
+            long left = exp - System.currentTimeMillis() / 1000;
+            if (left <= 0) {
+                validity = "会话已过期，请退出后重新登录";
+            } else {
+                long d = left / 86400, h = (left % 86400) / 3600, m = (left % 3600) / 60;
+                String s = d > 0 ? (d + " 天 " + h + " 小时") : (h > 0 ? (h + " 小时 " + m + " 分") : (m + " 分"));
+                validity = "会话剩余 " + s + "（自动续期）";
+            }
+        }
+        ctx.drawText(this.textRenderer, Text.literal(validity),
+                ux, infoY + 30, GeoSession.isExpired() ? BfTheme.RED : BfTheme.FAINT, false);
+
         boolean lh = inRect(mouseX, mouseY, logoutX, logoutY, logoutW, logoutH);
         if (lh) {
             BfGlow.rect(ctx, logoutX - 2, logoutY - 2, logoutW + 4, logoutH + 4,
