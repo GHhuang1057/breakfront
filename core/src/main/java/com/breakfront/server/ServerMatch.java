@@ -1142,12 +1142,42 @@ public final class ServerMatch {
                 double tx = bx + dir[0] * d;
                 double tz = bz + dir[1] * d;
                 double t = columnTopY(world, tx, tz);
-                if (!Double.isNaN(t)) {
-                    return new double[]{tx, t + 1, tz};
+                if (Double.isNaN(t)) {
+                    continue;
+                }
+                // 优先与「世界出生点同层」的安全站位（fallback 本就是围着世界出生点找的），
+                // 其次才退到该柱高度图柱顶。否则在 Metro 这类多层地图上，
+                // 柱顶会落在出生点上方的屋顶（实测 y=78 vs 出生点 y=32）。
+                int y = safeYNear(world, tx, tz, sp.getY());
+                if (y != Integer.MIN_VALUE) {
+                    return new double[]{tx, y, tz};
                 }
             }
         }
         return surfaceLanding(world, bx, bz, null);
+    }
+
+    /**
+     * 在 (x, z) 找一个安全站位 y：先试 preferredY 及其 ±6 邻域，再退到该柱高度图柱顶。
+     * 返回 {@link Integer#MIN_VALUE} 表示该柱没有任何可站位置。
+     */
+    private static int safeYNear(ServerWorld world, double x, double z, int preferredY) {
+        for (int d = 0; d <= 6; d++) {
+            if (standableAt(world, x, preferredY + d, z)) {
+                return preferredY + d;
+            }
+            if (standableAt(world, x, preferredY - d, z)) {
+                return preferredY - d;
+            }
+        }
+        double t = columnTopY(world, x, z);
+        if (!Double.isNaN(t)) {
+            int ty = (int) Math.floor(t) + 1;
+            if (standableAt(world, x, ty, z)) {
+                return ty;
+            }
+        }
+        return Integer.MIN_VALUE;
     }
 
     /** 「实体表面落点」：依次取 目标柱顶 → 向锚点方向逐米最近有块柱 →
