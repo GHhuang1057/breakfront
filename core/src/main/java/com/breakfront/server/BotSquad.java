@@ -64,6 +64,15 @@ public final class BotSquad {
     private static final int STUCK_TICKS = 60;
     /** 状态维持间隔（生命上限/饱食度/灭火/假连线排空）。20 tick = 1s。 */
     private static final int MAINTAIN_EVERY_TICKS = 20;
+    /**
+     * 出生后的「部署保护期」（tick）：期间不索敌、不开火。
+     *
+     * <p>保险措施 —— 出生点若因地形限制无法分离（实测世界已生成范围有限时，
+     * 攻守双方可能落到同一点），bot 会一出生就在彼此脸上、立即互射 →
+     * 无限死亡重生（观感"忽隐忽现"）。保护期内它们先朝各自目标散开，
+     * 160 tick = 8 秒足够拉开距离。
+     */
+    private static final int DEPLOY_PROTECT_TICKS = 160;
 
     private final Map<UUID, Trooper> troopers = new HashMap<>();
     private int targetAttacker;
@@ -86,6 +95,8 @@ public final class BotSquad {
         int stalledTicks;
         long scanAtMs;
         long fireAtMs;
+        /** 出生 tick（用于部署保护期判定）。 */
+        int spawnTick;
         /** 缓存的交战目标：每 DECIDE 节流刷新；坐标动态读取（目标会移动）。 */
         LivingTarget foe;
     }
@@ -214,6 +225,7 @@ public final class BotSquad {
         t.name = name;
         t.side = side;
         t.cls = cls;
+        t.spawnTick = tickCounter;
         t.lastX = bot.getX();
         t.lastZ = bot.getZ();
         troopers.put(t.id, t);
@@ -259,6 +271,7 @@ public final class BotSquad {
         t.hasGoal = false;
         t.stalledTicks = 0;
         t.foe = null;
+        t.spawnTick = tickCounter;
         troopers.put(t.id, t);
     }
 
@@ -363,6 +376,11 @@ public final class BotSquad {
 
     /** 索敌：取最近敌方（真人按阵营匹配；敌方 bot 从本队名册取）。无则 null。 */
     private LivingTarget resolveFoe(ServerMatch match, MinecraftServer server, Trooper t, long now) {
+        // 部署保护期：刚出生不索敌，先朝目标散开（出生点无法分离时的保险）
+        if (tickCounter - t.spawnTick < DEPLOY_PROTECT_TICKS) {
+            t.foe = null;
+            return null;
+        }
         LivingTarget cached = t.foe;
         if (cached != null && cached.entity.isAlive() && !cached.entity.isRemoved()) {
             return cached;                    // 沿用上一轮目标，避免来回切换

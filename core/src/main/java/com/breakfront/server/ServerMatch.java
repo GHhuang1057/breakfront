@@ -929,9 +929,9 @@ public final class ServerMatch {
      *  出生/重生落点一律经 {@link #surfaceLanding}：优先目标柱顶实体表面，
      *  兜底逐级找锚点/世界出生「有实体的站面」——玩家重生直接落在实体表面上，
      *  不再有虚空/假高度/被拉回。（2026-09-05 v4 定案） */
-    /** 出生点兜底的水平分离距离（格）：攻方 -X、守方 +X。
-     *  必须大于索敌半径 34m 与射程 30m，否则出生即交火。 */
-    private static final double FALLBACK_SPAWN_SEPARATION = 128.0;
+    /** 出生点兜底分离距离的**起始**值（格）：由近及远扫描，攻方取负向、守方取正向。
+     *  只需保证攻守间距 > 索敌半径 34m，故 40 格起即可（实测世界已生成范围常很有限）。 */
+    private static final double FALLBACK_SPAWN_SEPARATION = 40.0;
 
     private double[] spawnFor(Side side, ServerWorld world) {
         double[] ov = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
@@ -967,12 +967,19 @@ public final class ServerMatch {
         var sp = world.getSpawnPos();
         double bx = sp.getX() + 0.5;
         double bz = sp.getZ() + 0.5;
-        double dir = side == Side.ATTACKER ? -1 : 1;
-        for (double d = FALLBACK_SPAWN_SEPARATION; d <= 512; d += 64) {
-            double tx = bx + dir * d;
-            double t = columnTopY(world, tx, bz);
-            if (!Double.isNaN(t)) {
-                return new double[]{tx, t + 1, bz};
+        double sign = side == Side.ATTACKER ? -1 : 1;
+        // 由近及远、多方向探测：世界**已生成范围可能很小**（实测 ±128 起扫到 512
+        // 全无地面 —— 出生点周边只有有限区块被生成），硬编码大距离起步会一路扫空
+        // 又退回重合点。故从 40 格起、步长 8，并依次试 ±X / ±Z / 对角方向。
+        double[][] dirs = {{sign, 0}, {0, sign}, {sign, sign}, {sign, -sign}};
+        for (double d = FALLBACK_SPAWN_SEPARATION; d <= 512; d += 8) {
+            for (double[] dir : dirs) {
+                double tx = bx + dir[0] * d;
+                double tz = bz + dir[1] * d;
+                double t = columnTopY(world, tx, tz);
+                if (!Double.isNaN(t)) {
+                    return new double[]{tx, t + 1, tz};
+                }
             }
         }
         return surfaceLanding(world, bx, bz, null);
