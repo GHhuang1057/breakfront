@@ -121,6 +121,23 @@ public final class WorldZoneRings {
         }
 
         refreshHeights(world, zones);
+
+        // ⚠️ 先数出真正要画的据点，一个都没有就直接返回。
+        //    原因：1.21.1 的 BufferBuilder.end() 在「零顶点」时会抛
+        //    IllegalStateException("BufferBuilder was empty")，这会让客户端一进服就崩。
+        //    典型触发场景：扇区坐标还是上一张图的 → 所有据点 valid=false →
+        //    下面三个 buffer 一个顶点都没写却照样 end()。
+        //    （2026-09-10 实测崩溃栈：WorldZoneRings.render:150）
+        int drawable = 0;
+        for (int i = 0; i < zones.size(); i++) {
+            if (isValidIdx(i)) {
+                drawable++;
+            }
+        }
+        if (drawable == 0) {
+            return;                             // 连 begin 都不要调
+        }
+
         Matrix4f m = context.positionMatrix();
         long t = System.currentTimeMillis();
 
