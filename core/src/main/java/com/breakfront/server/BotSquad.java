@@ -207,15 +207,7 @@ public final class BotSquad {
             BreakfrontServer.LOGGER.warn("[BF-Bot] 生成 {} 失败（工厂返回 null）", name);
             return;
         }
-        // 游戏模式与状态：生存模式下才有正常的受伤与战斗语义
-        bot.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
-        // 玩家默认生命上限是 20（10 心），先抬到 100HP 体系再显式回满
-        // （maintain 已不再负责回血 —— 无条件回满会让 bot 无敌，见 BotMotor.maintain 注释）
-        BotMotor.maintain(bot, 100.0);
-        bot.setHealth(100.0f);
-        Kits.equipGun(bot, Kits.spec(cls));   // 主手挂兵种枪（玩家物品栏会同步给客户端）
-        // bot 标签（breakfront.bot）由 BotPlayerFactory 统一打上，此处只补阵营标签
-        bot.addCommandTag("bf.side." + (side == Side.ATTACKER ? "att" : "def"));
+        applyLoadout(bot, side, cls);
 
         Trooper t = new Trooper();
         t.id = bot.getUuid();
@@ -229,6 +221,47 @@ public final class BotSquad {
                 name, side.labelCn, cls, troopers.size());
     }
 
+    /** 统一出装：游戏模式、100HP 满血、兵种装备、阵营标签。 */
+    private void applyLoadout(ServerPlayerEntity bot, Side side, String cls) {
+        // 生存模式才有正常的受伤与战斗语义
+        bot.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
+        // 玩家默认生命上限是 20（10 心），先抬到 100HP 体系再显式回满
+        // （maintain 已不负责回血 —— 无条件回满会让 bot 无敌，见 BotMotor.maintain 注释）
+        BotMotor.maintain(bot, 100.0);
+        bot.setHealth(100.0f);
+        Kits.equipGun(bot, Kits.spec(cls));   // 主手挂兵种枪（玩家物品栏会同步给客户端）
+        // bot 标签（breakfront.bot）由 BotPlayerFactory 统一打上，此处只补阵营标签
+        bot.addCommandTag("bf.side." + (side == Side.ATTACKER ? "att" : "def"));
+    }
+
+    /**
+     * 阵亡重生：用**同一名字与兵种**重建实体。
+     *
+     * <p>bot 属固定编制。若每次阵亡都分配新名字（旧实现 A1→A63…无限增长），
+     * 会带来三重噪音：玩家列表不断 join/leave、每次重生广播 "joined the game"、
+     * `world/playerdata` 无限累积玩家数据文件。同名重建（离线 UUID 由名字派生、
+     * 身份稳定）可完全避免。
+     */
+    private void respawn(ServerMatch match, MinecraftServer server, Trooper t) {
+        Vec3d p = spawnPos(match, server, t.side);
+        ServerPlayerEntity bot = BotPlayerFactory.create(
+                server, server.getOverworld(), t.name, p.x, p.y, p.z);
+        if (bot == null) {
+            BreakfrontServer.LOGGER.warn("[BF-Bot] 重生 {} 失败（工厂返回 null）", t.name);
+            return;
+        }
+        applyLoadout(bot, t.side, t.cls);
+        // 离线 UUID 由名字派生 → 重建后 UUID 相同，但登记表仍需刷新键值以防万一
+        troopers.remove(t.id);
+        t.id = bot.getUuid();
+        t.lastX = bot.getX();
+        t.lastZ = bot.getZ();
+        t.hasGoal = false;
+        t.stalledTicks = 0;
+        t.foe = null;
+        troopers.put(t.id, t);
+    }
+
     private void remove(MinecraftServer server, Trooper t) {
         ServerPlayerEntity bot = entity(server, t);
         if (bot != null) {
@@ -237,22 +270,18 @@ public final class BotSquad {
         troopers.remove(t.id);
     }
 
-    /** 清扫阵亡 bot 并补齐目标人数。 */
+    /** 清扫阵亡 bot 并**同名重生**（编制固定，不新增玩家身份）。 */
     private void sweepAndReinforce(ServerMatch match, MinecraftServer server) {
-        boolean changed = false;
         for (Trooper t : new ArrayList<>(troopers.values())) {
             ServerPlayerEntity bot = entity(server, t);
-            if (bot == null || !bot.isAlive()) {
-                // 玩家实体死亡后仍存在于列表（等待重生），必须显式摘除，否则会"幽灵在线"
-                if (bot != null) {
-                    BotPlayerFactory.remove(server, bot);
-                }
-                troopers.remove(t.id);
-                changed = true;
+            if (bot != null && bot.isAlive()) {
+                continue;
             }
-        }
-        if (changed) {
-            ensure(match, server);
+            if (bot != null) {
+                // 玩家实体死亡后仍留在玩家列表（等待重生），必须显式摘除，否则会"幽灵在线"
+                BotPlayerFactory.remove(server, bot);
+            }
+            respawn(match, server, t);
         }
     }
 

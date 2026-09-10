@@ -773,8 +773,8 @@ public final class ServerMatch {
         } else {
             sp = spawnFor(side, server.getOverworld());
         }
-        exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
-                player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+        exec(server, String.format("spawnpoint %s %d %d %d",
+                player.getGameProfile().getName(), (int) Math.floor(sp[0]), (int) Math.floor(sp[1]), (int) Math.floor(sp[2])));
     }
 
     // ================= 部署点选择（任务 A：/bf deploy） =================
@@ -807,8 +807,8 @@ public final class ServerMatch {
             if (sp == null) {
                 sp = spawnFor(side, server.getOverworld());
             }
-            exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
-                    player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+            exec(server, String.format("spawnpoint %s %d %d %d",
+                    player.getGameProfile().getName(), (int) Math.floor(sp[0]), (int) Math.floor(sp[1]), (int) Math.floor(sp[2])));
             deployChoices.remove(player.getUuid());
         }
     }
@@ -874,9 +874,9 @@ public final class ServerMatch {
         }
         double[] sp = spawnFor(side, server.getOverworld());
         exec(server, String.format("tp %s %.1f %.1f %.1f",
-                player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
-        exec(server, String.format("spawnpoint %s %.1f %.1f %.1f",
-                player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
+                player.getGameProfile().getName(), (int) Math.floor(sp[0]), (int) Math.floor(sp[1]), (int) Math.floor(sp[2])));
+        exec(server, String.format("spawnpoint %s %d %d %d",
+                player.getGameProfile().getName(), (int) Math.floor(sp[0]), (int) Math.floor(sp[1]), (int) Math.floor(sp[2])));
     }
 
     /** 玩家最后被救援时间戳（防抖，避免下坠途中反复瞬移）。 */
@@ -929,6 +929,10 @@ public final class ServerMatch {
      *  出生/重生落点一律经 {@link #surfaceLanding}：优先目标柱顶实体表面，
      *  兜底逐级找锚点/世界出生「有实体的站面」——玩家重生直接落在实体表面上，
      *  不再有虚空/假高度/被拉回。（2026-09-05 v4 定案） */
+    /** 出生点兜底的水平分离距离（格）：攻方 -X、守方 +X。
+     *  必须大于索敌半径 34m 与射程 30m，否则出生即交火。 */
+    private static final double FALLBACK_SPAWN_SEPARATION = 128.0;
+
     private double[] spawnFor(Side side, ServerWorld world) {
         double[] ov = side == Side.ATTACKER ? attackerSpawn : defenderSpawn;
         int idx = side == Side.ATTACKER ? 0 : Math.max(0, zoneOrder.size() - 1);
@@ -936,12 +940,42 @@ public final class ServerMatch {
         if (!Double.isNaN(ov[0])) {
             return surfaceLanding(world, ov[0], ov[1], a);
         }
-        if (a == null) {
-            return surfaceLanding(world, 8, 8, null);
+        if (a != null) {
+            double dir = side == Side.ATTACKER ? -1 : 1;
+            double sx = a.x() + dir * (a.radius() + 5);
+            // ⚠️ 先验证据点侧真有地面：sectors.json 的据点可能落在**未生成区块**，
+            // 此时 surfaceLanding 会逐级兜底到「世界出生点」→ 攻守双方落到同一点 →
+            // 出生即互相屠杀、无限死亡重生（实测表现即玩家看到的"AI 忽隐忽现"）。
+            if (!Double.isNaN(columnTopY(world, sx, a.z()))) {
+                return surfaceLanding(world, sx, a.z(), a);
+            }
+            BreakfrontServer.LOGGER.warn(
+                    "[Breakfront] {} 的锚点据点 {} 处无地面（坐标落在未生成区块？），改用阵营分离兜底出生点",
+                    side == Side.ATTACKER ? "攻方" : "守方", zoneOrder.get(idx));
         }
+        return fallbackSpawn(world, side);
+    }
+
+    /**
+     * 出生点兜底：以世界出生点为中心，**按阵营向两侧水平分离**。
+     *
+     * <p>修 2026-09-10 实测缺陷：攻守出生点若重合，bot 一出生就在彼此射程内，
+     * 开局即互屠 → 无限死亡重生（观感即"忽隐忽现"）。这里沿 X 轴逐级外扩寻找
+     * 有地面的柱（MOTION_BLOCKING 柱顶非 NaN），最多到 512 格；都找不到才退回世界出生点。
+     */
+    private double[] fallbackSpawn(ServerWorld world, Side side) {
+        var sp = world.getSpawnPos();
+        double bx = sp.getX() + 0.5;
+        double bz = sp.getZ() + 0.5;
         double dir = side == Side.ATTACKER ? -1 : 1;
-        double sx = a.x() + dir * (a.radius() + 5);
-        return surfaceLanding(world, sx, a.z(), a);
+        for (double d = FALLBACK_SPAWN_SEPARATION; d <= 512; d += 64) {
+            double tx = bx + dir * d;
+            double t = columnTopY(world, tx, bz);
+            if (!Double.isNaN(t)) {
+                return new double[]{tx, t + 1, bz};
+            }
+        }
+        return surfaceLanding(world, bx, bz, null);
     }
 
     /** 「实体表面落点」：依次取 目标柱顶 → 向锚点方向逐米最近有块柱 →
