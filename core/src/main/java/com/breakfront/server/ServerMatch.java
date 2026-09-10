@@ -874,7 +874,7 @@ public final class ServerMatch {
         }
         double[] sp = spawnFor(side, server.getOverworld());
         exec(server, String.format("tp %s %.1f %.1f %.1f",
-                player.getGameProfile().getName(), (int) Math.floor(sp[0]), (int) Math.floor(sp[1]), (int) Math.floor(sp[2])));
+                player.getGameProfile().getName(), sp[0], sp[1], sp[2]));
         exec(server, String.format("spawnpoint %s %d %d %d",
                 player.getGameProfile().getName(), (int) Math.floor(sp[0]), (int) Math.floor(sp[1]), (int) Math.floor(sp[2])));
     }
