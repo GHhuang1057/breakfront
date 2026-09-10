@@ -4,6 +4,7 @@ import com.breakfront.client.bf.BfServerConfig;
 import com.breakfront.client.hud.BreakfrontHud;
 import com.breakfront.client.hud.SectorPreviewRenderer;
 import com.breakfront.client.hud.WorldZoneRings;
+import com.breakfront.client.input.BfKeyBindings;
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.SectorEditState;
 import com.breakfront.client.ui.BfBootstrapScreen;
@@ -14,6 +15,8 @@ import com.breakfront.net.KillFeedPayload;
 import com.breakfront.net.MatchStatePayload;
 import com.breakfront.net.ScoreboardPayload;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
@@ -80,6 +83,10 @@ public class BreakfrontClient implements ClientModInitializer {
 
         BfServerConfig.load();
 
+        // BF2042 按键布局：注册一整套动作键位 + 首次进入游戏自动把原版键位重排成 BF2042
+        BfKeyBindings.register();
+        registerKeybindCommands();
+
         // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）+ 死亡替换为部署重生页
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             // 【进入游戏即提示登录】——是「进入游戏」而不是「加入服务器」：主菜单一出现
@@ -105,6 +112,9 @@ public class BreakfrontClient implements ClientModInitializer {
             if (client.player == null || client.world == null) {
                 return;
             }
+
+            // 首次进入游戏世界即自动套用 BF2042 按键布局（幂等：只做一次，详见 BfKeyBindings）
+            BfKeyBindings.ensureAppliedOnce(client);
 
             if (client.currentScreen != null) {
                 net.minecraft.client.gui.screen.Screen cur = client.currentScreen;
@@ -348,6 +358,36 @@ public class BreakfrontClient implements ClientModInitializer {
         }
         geoMsg(c, "§a" + (reg ? "注册并登录成功：" : "登录成功：")
                 + r.username() + "（已自动与服务器绑定）");
+    }
+
+    /**
+     * 客户端命令 {@code /bfkey}：一键套用 / 恢复按键布局。
+     * <ul>
+     *   <li>{@code /bfkey apply} —— 把原版键位重排成 BF2042 布局（保留已注册的 BF 动作键位）</li>
+     *   <li>{@code /bfkey reset} —— 恢复原版 Minecraft 默认键位</li>
+     * </ul>
+     * 按键是客户端概念，故走 Fabric 客户端命令（服务端无对应指令）。
+     */
+    private static void registerKeybindCommands() {
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
+                ClientCommandManager.literal("bfkey")
+                        .then(ClientCommandManager.literal("apply")
+                                .executes(ctx -> {
+                                    BfKeyBindings.applyBf2042Preset(ctx.getSource().getClient());
+                                    ctx.getSource().getClient().player.sendMessage(
+                                            net.minecraft.text.Text.literal("§a[Breakfront] 已套用 BF2042 按键布局"),
+                                            false);
+                                    return 1;
+                                }))
+                        .then(ClientCommandManager.literal("reset")
+                                .executes(ctx -> {
+                                    BfKeyBindings.resetVanilla(ctx.getSource().getClient());
+                                    ctx.getSource().getClient().player.sendMessage(
+                                            net.minecraft.text.Text.literal("§a[Breakfront] 已恢复原版 Minecraft 默认键位"),
+                                            false);
+                                    return 1;
+                                }))
+        ));
     }
 
     private static void geoMsg(MinecraftClient c, String text) {

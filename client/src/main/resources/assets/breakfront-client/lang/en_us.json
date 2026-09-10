@@ -1,4 +1,19 @@
 {
+  "key.categories.breakfront": "BREAKFRONT",
   "key.breakfront.admin": "Admin Access / Control Panel",
-  "key.categories.breakfront": "BREAKFRONT"
+  "breakfront.key.reload": "Reload",
+  "breakfront.key.melee": "Melee",
+  "breakfront.key.grenade": "Grenade / Throwable",
+  "breakfront.key.spot": "Spot / Ping",
+  "breakfront.key.interact": "Enter/Exit Vehicle / Interact",
+  "breakfront.key.prone": "Prone / Slide",
+  "breakfront.key.map": "Full Map",
+  "breakfront.key.callmenu": "Call-in Menu",
+  "breakfront.key.plusmenu": "Plus Menu",
+  "breakfront.key.voip": "Voice Chat",
+  "breakfront.key.weapon1": "Primary Weapon",
+  "breakfront.key.weapon2": "Secondary Weapon",
+  "breakfront.key.weapon3": "Specialty",
+  "breakfront.key.weapon4": "Gadget",
+  "breakfront.key.swapseat": "Swap Seat (Vehicle)"
 }

@@ -1,4 +1,19 @@
 {
+  "key.categories.breakfront": "破阵前线 BREAKFRONT",
   "key.breakfront.admin": "管理员面板（门禁/管控）",
-  "key.categories.breakfront": "破阵前线 BREAKFRONT"
+  "breakfront.key.reload": "换弹",
+  "breakfront.key.melee": "近战",
+  "breakfront.key.grenade": "投掷物",
+  "breakfront.key.spot": "标记 / Ping",
+  "breakfront.key.interact": "进入·离开载具 / 互动",
+  "breakfront.key.prone": "卧倒 / 滑铲",
+  "breakfront.key.map": "完整地图",
+  "breakfront.key.callmenu": "呼叫菜单",
+  "breakfront.key.plusmenu": "附加菜单",
+  "breakfront.key.voip": "语音通话",
+  "breakfront.key.weapon1": "主武器",
+  "breakfront.key.weapon2": "副武器",
+  "breakfront.key.weapon3": "专长",
+  "breakfront.key.weapon4": "配备 / 道具",
+  "breakfront.key.swapseat": "切换座位（载具）"
 }
