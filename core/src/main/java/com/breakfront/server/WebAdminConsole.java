@@ -53,6 +53,13 @@ public final class WebAdminConsole {
     private static volatile int terrainW = 0, terrainH = 0, terrainStep = 0, terrainX0 = 0, terrainZ0 = 0;
     /** 底色 / 默认色（无数据或未知方块）：低饱和蓝灰 55697E。 */
     private static final int[] TERRAIN_BASE = {0x55, 0x69, 0x7E};
+    /**
+     * 未加载区块的颜色（2026-09-10）。管理台采样发生在无人在场的坐标，这些区块
+     * 往往从未被加载，此时 {@code getTopY} 返回世界底部 —— 若与"已加载但无方块"
+     * 同色，整幅底图就是一片纯色（表现即"什么都看不到"）。分开着色后，
+     * 运营能直观看出哪些区域需要先在游戏内靠近以生成/载入地形。
+     */
+    private static final int[] TERRAIN_UNLOADED = {0x1A, 0x1F, 0x26};
     /** 海拔亮度参考：topY 映射到 0.6~1.15（低海拔暗、高海拔亮）。 */
     private static final double TERRAIN_REF_LOW = -64.0, TERRAIN_REF_SPAN = 30.0;
 
@@ -290,11 +297,13 @@ public final class WebAdminConsole {
         String q = ex.getRequestURI().getQuery();
         double cx = dq(q, "cx", 0);
         double cz = dq(q, "cz", 0);
-        double half = Math.max(24, Math.min(240, dq(q, "half", 96)));
-        int step = Math.max(1, Math.min(8, (int) Math.round(dq(q, "step", 2))));
+        // 地图跨度可达数千米，故 half 上限放宽到 1024；分辨率不足时自动加粗 step
+        // （像素数封顶 160×160：既控制响应体大小，也控制采样耗时）。
+        double half = Math.max(16, Math.min(1024, dq(q, "half", 96)));
+        int step = Math.max(1, Math.min(64, (int) Math.round(dq(q, "step", 2))));
         int n = (int) Math.floor(2 * half / step);
-        if (n > 150) {
-            step = (int) Math.ceil(2 * half / 150.0);
+        if (n > 160) {
+            step = (int) Math.ceil(2 * half / 160.0);
             n = (int) Math.floor(2 * half / step);
         }
         String key = ((int) cx) + "," + ((int) cz) + "," + half + "," + step;
@@ -307,6 +316,11 @@ public final class WebAdminConsole {
             ServerWorld world = server.getOverworld();
             int x0 = (int) Math.floor(cx - half);
             int z0 = (int) Math.floor(cz - half);
+            int x1 = x0 + n * step;
+            int z1 = z0 + n * step;
+            // 关键修复：先按需载入范围内**已存在**的区块（create=false，不触发生成）。
+            // 否则无人在场的坐标一片空白 —— 这正是"底图什么都看不到"的根因。
+            preloadExistingChunks(world, x0, z0, x1, z1);
             int bottom = world.getBottomY();
             byte[] rgb = new byte[n * n * 3];
             int p = 0;
@@ -314,6 +328,13 @@ public final class WebAdminConsole {
                 int bz = z0 + row * step;
                 for (int col = 0; col < n; col++) {
                     int bx = x0 + col * step;
+                    if (!world.isChunkLoaded(bx >> 4, bz >> 4)) {
+                        // 未加载：明确标出，便于运营判断需要预热的区域
+                        rgb[p++] = (byte) TERRAIN_UNLOADED[0];
+                        rgb[p++] = (byte) TERRAIN_UNLOADED[1];
+                        rgb[p++] = (byte) TERRAIN_UNLOADED[2];
+                        continue;
+                    }
                     int top = world.getTopY(Heightmap.Type.MOTION_BLOCKING, bx, bz);
                     BlockState bs = null;
                     if (top <= bottom) {
@@ -338,6 +359,40 @@ public final class WebAdminConsole {
             terrainX0 = x0;
             terrainZ0 = z0;
             respondTerrain(ex);
+        }
+    }
+
+    /** 区块预加载上限：视野拉到千米级时区块数以万计，逐个载入会长时间占住服务器线程。 */
+    private static final int PRELOAD_CHUNK_CAP = 4096;
+
+    /**
+     * 载入范围内**已存在**的区块（不触发生成）。
+     *
+     * <p>管理台采样点通常无人在场，区块未加载时 {@code getTopY} 一律返回世界底部，
+     * 底图退化为纯色。这里以 {@code create=false} 只把**磁盘上已有**的区块读入内存，
+     * 不会在管理台操作时生成新地形（避免卡服/写盘）。
+     */
+    private static void preloadExistingChunks(ServerWorld world, int x0, int z0, int x1, int z1) {
+        int cx0 = x0 >> 4;
+        int cz0 = z0 >> 4;
+        int cx1 = x1 >> 4;
+        int cz1 = z1 >> 4;
+        long total = (long) (cx1 - cx0 + 1) * (cz1 - cz0 + 1);
+        if (total <= 0 || total > PRELOAD_CHUNK_CAP) {
+            return;
+        }
+        var cm = world.getChunkManager();
+        for (int cx = cx0; cx <= cx1; cx++) {
+            for (int cz = cz0; cz <= cz1; cz++) {
+                if (world.isChunkLoaded(cx, cz)) {
+                    continue;
+                }
+                try {
+                    cm.getChunk(cx, cz, net.minecraft.world.chunk.ChunkStatus.FULL, false);
+                } catch (Throwable ignored) {
+                    // 单个区块失败不影响整幅底图
+                }
+            }
         }
     }
 

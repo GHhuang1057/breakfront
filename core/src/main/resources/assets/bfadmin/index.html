@@ -382,7 +382,7 @@ const mapState = {
   raw:null, model:null, selId:null,
   terrainOn:true, lf:null, layers:null,
   zoneLayer:new Map(),      // zoneId -> {rect, center, handles:[]}
-  _ready:false, _fitDone:false
+  _ready:false, _fitDone:false, _terrainKey:'', _terrainTimer:null
 };
 let undoStack = [];
 const SEC_COLORS = ['#4da6ff','#f5cd54','#6fe873','#ff5a52','#b78bff','#ff9d4d','#4dd0e1'];
@@ -456,7 +456,10 @@ function lfInit(){
     return false;
   }
   const lf=L.map('lfmap',{
-    crs:L.CRS.Simple, minZoom:-3, maxZoom:6, zoomSnap:0.25, zoomDelta:0.5,
+    // wheelPxPerZoomLevel 调大 → 滚轮每格缩放更平缓（默认 60 在 CRS.Simple 下过于跳跃）；
+    // minZoom 放到 -4：地图跨度可达数千米，需要更远的视野才能一眼看全
+    crs:L.CRS.Simple, minZoom:-4, maxZoom:5, zoomSnap:0.25, zoomDelta:0.5,
+    wheelPxPerZoomLevel:90, wheelDebounceTime:60,
     attributionControl:true, zoomControl:true, doubleClickZoom:false
   });
   lf.setView([0,0],0);
@@ -479,7 +482,7 @@ function lfInit(){
     spawn:L.layerGroup([],{pane:'pSpawn'}).addTo(lf),
     handles:L.layerGroup([],{pane:'pHandles'}).addTo(lf)
   };
-  lf.on('moveend zoomend', ()=>{ saveCam(); lfDrawGrid(); });
+  lf.on('moveend zoomend', ()=>{ saveCam(); lfDrawGrid(); scheduleTerrain(); });
   lf.on('click', ()=>{ mapState.selId=null; lfRender(); showZoneInfo(); });
   lf.on('dblclick', onLfDbl);
   mapState._ready=true;
@@ -493,8 +496,13 @@ function lfFit(){
   const pts=[];
   const s=m&&m.sectors?m.sectors[m.editorSectorIdx]:null;
   if(s) s.zones.forEach(z=>{ pts.push([z.x-z.r,z.z-z.r],[z.x+z.r,z.z+z.r]); });
-  if(m&&m.spawns.attacker) pts.push([m.spawns.attacker.x,m.spawns.attacker.z]);
-  if(m&&m.spawns.defender) pts.push([m.spawns.defender.x,m.spawns.defender.z]);
+  // 出生点只在「本扇区没有据点」时参与取景：出生点常与据点群相距千米级，
+  // 混在一起会把视野撑到数千米 → 采样步长被迫放大到十几格（看不出内容），
+  // 且涉及区块数超出预载上限（地形整片显示为"未加载"）。
+  if(!pts.length){
+    if(m&&m.spawns.attacker) pts.push([m.spawns.attacker.x,m.spawns.attacker.z]);
+    if(m&&m.spawns.defender) pts.push([m.spawns.defender.x,m.spawns.defender.z]);
+  }
   if(!pts.length){ lf.setView([0,0],0); saveCam(); return; }
   lf.fitBounds(L.latLngBounds(pts).pad(0.25),{maxZoom:2});
   saveCam();
@@ -674,7 +682,13 @@ function onLfDbl(e){
   applyEdit('add',{x:r1(e.latlng.lat), z:r1(e.latlng.lng), r:6});
 }
 
-/* ---- 地形底图 ---- */
+/* ---- 地形底图 ----
+ * 坐标映射（关键修正，2026-09-10）：
+ *   服务端采样：行(row)→z 轴、列(col)→x 轴，数据左上角 = (x0, z0)；
+ *   Leaflet 期望：图片左上角 = 西北角 = (maxLat, minLng)，而 CRS.Simple 下 lat=x、lng=z。
+ *   两者相差一次「转置 + 垂直翻转」，若直接贴图会导致地形与据点位置完全错乱
+ *   （表现为"看不出是地图"）。此处按像素重排对齐。
+ */
 async function loadTerrain(){
   if(!mapState.lf||!mapState.model||!mapState.terrainOn) return;
   const lf=mapState.lf;
@@ -682,33 +696,54 @@ async function loadTerrain(){
   if(!b.isValid()) return;
   const cx=Math.round((b.getNorth()+b.getSouth())/2);
   const cz=Math.round((b.getWest()+b.getEast())/2);
-  const half=Math.min(240, Math.max(64, Math.ceil(Math.max(
-    (b.getNorth()-b.getSouth())/2, (b.getEast()-b.getWest())/2)*1.25)));
+  // 地图跨度可达数千米，故放宽到与服务端一致的上限 1024
+  const half=Math.min(1024, Math.max(32, Math.ceil(Math.max(
+    (b.getNorth()-b.getSouth())/2, (b.getEast()-b.getWest())/2)*1.2)));
+  const key=cx+'|'+cz+'|'+half;
+  if(key===mapState._terrainKey) return;          // 视野未显著变化：复用现有底图
+  mapState._terrainKey=key;
   let r;
   try{ r=await api('/bfadmin/api/mapterrain?cx='+cx+'&cz='+cz+'&half='+half+'&step=2'); }
   catch(e){ return; }
   if(!r||!r.ok||!r.b64) return;
   try{
-    const w=r.w,h=r.h,step=r.step;
+    const N=r.w, step=r.step;                     // 服务端保证 w==h==N
     const bin=atob(r.b64);
-    const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+    const cv=document.createElement('canvas'); cv.width=N; cv.height=N;
     const c2=cv.getContext('2d');
-    const img=c2.createImageData(w,h); const d=img.data;
-    for(let i=0;i<w*h;i++){
-      d[i*4]=bin.charCodeAt(i*3); d[i*4+1]=bin.charCodeAt(i*3+1); d[i*4+2]=bin.charCodeAt(i*3+2); d[i*4+3]=255;
+    const img=c2.createImageData(N,N); const d=img.data;
+    for(let py=0; py<N; py++){                    // py：目标行 → lat(x) 由大到小
+      for(let px=0; px<N; px++){                  // px：目标列 → lng(z) 由小到大
+        const srcRow=px;                          // 源行 = z 索引
+        const srcCol=N-1-py;                      // 源列 = x 索引（顶部对应最大 x）
+        const si=(srcRow*N+srcCol)*3;
+        const di=(py*N+px)*4;
+        d[di]=bin.charCodeAt(si);
+        d[di+1]=bin.charCodeAt(si+1);
+        d[di+2]=bin.charCodeAt(si+2);
+        d[di+3]=255;
+      }
     }
     c2.putImageData(img,0,0);
     mapState.layers.terrain.clearLayers();
     L.imageOverlay(cv.toDataURL('image/png'),
-      [[r.x0, r.z0],[r.x0+w*step, r.z0+h*step]],
-      {opacity:0.9,interactive:false,pane:'pTerrain'}).addTo(mapState.layers.terrain);
+      [[r.x0, r.z0],[r.x0+N*step, r.z0+N*step]],
+      {opacity:0.92,interactive:false,pane:'pTerrain'}).addTo(mapState.layers.terrain);
   }catch(e){ /* 底图失败不影响编辑 */ }
+}
+
+/** 视野变化后的地形重采样（节流）：缩放/平移需要跟随，否则只有初始那一块有底图。 */
+function scheduleTerrain(){
+  if(!mapState.terrainOn) return;
+  if(mapState._terrainTimer) clearTimeout(mapState._terrainTimer);
+  mapState._terrainTimer=setTimeout(()=>{ mapState._terrainTimer=null; loadTerrain(); }, 650);
 }
 function toggleTerrain(){
   mapState.terrainOn=!mapState.terrainOn;
   const b=$('btn-terrain'); if(b) b.textContent='地形底图 '+(mapState.terrainOn?'ON':'OFF');
   if(mapState.layers&&mapState.layers.terrain){
-    if(mapState.terrainOn) loadTerrain(); else mapState.layers.terrain.clearLayers();
+    if(mapState.terrainOn){ mapState._terrainKey=''; loadTerrain(); }
+    else { mapState.layers.terrain.clearLayers(); }
   }
 }
 
@@ -732,7 +767,9 @@ async function mapLoad(keepUndo){
     mapState._fitDone=true;
     if(saved) mapState.lf.setView([saved.cx,saved.cz], saved.zoom); else lfFit();
   }
-  lfRender(); lfDrawGrid(); showZoneInfo(); loadTerrain();
+  lfRender(); lfDrawGrid(); showZoneInfo();
+  mapState._terrainKey='';        // 视图可能已被 lfFit 改变 → 强制重新采样
+  loadTerrain();
 }
 
 /* ---- 侧栏扇区列表 ---- */
