@@ -104,3 +104,30 @@ Git Credential Manager 的凭据提示上（该机没有可写凭据），推不
   即便如此，**仍要清掉代理环境变量**再推——否则请求会先被沙箱代理截走（见上一节的排障）。
 - **编译机**（`J:\bfbuild\breakfront`）的 `origin` 才是直连的 `github.com`，只读可用。
 
+
+## gh CLI 代理设置（2026-09-10 更新）
+
+**结论：gh 的凭据没问题，坏的是代理。** 之前 `gh auth status` 报「not logged into any
+GitHub hosts」是**误报** —— 沙箱注入的 `http_proxy/https_proxy = http://127.0.0.1:51667`
+会截走 github.com 的连接并失败，gh 把连接失败当成未登录。凭据其实一直在系统凭据库里
+（`gho_…`，scopes: `gist, read:org, repo, workflow`）。
+
+本机出网只有一条可用通道：**`ssh -N -D 1080` 起的 SOCKS5 隧道**
+（`scripts\gh_proxy_on.bat`）。所以**不要**把代理写进 gh 的全局配置（端口会变），
+统一用封装脚本在调用时注入：
+
+```bash
+scripts/gh.sh auth status
+scripts/gh.sh release list --repo GHhuang1057/breakfront --limit 5
+scripts/gh.sh release download dev-<sha> --repo GHhuang1057/breakfront --pattern "*.json" --dir out
+```
+
+`scripts/gh.sh` 做三件事（与 `git_push.sh` 同一套思路）：
+1. 探活 `127.0.0.1:1080`，没起隧道就明确报错；
+2. **unset** 沙箱注入的 `http_proxy/https_proxy/HTTP_PROXY/HTTPS_PROXY/all_proxy`；
+3. 显式 `export HTTPS_PROXY/HTTP_PROXY/ALL_PROXY=socks5://127.0.0.1:1080` 后 `exec gh`。
+
+可用 `GH_SOCKS` 覆盖隧道地址（默认 `socks5://127.0.0.1:1080`）。
+
+⚠️ 同一坑对 git 一样成立：**任何走网络的 git/gh 操作前都要清代理环境变量**，
+否则表现为「静默挂死、零输出、不报错」（git）或「误报未登录」（gh）。
