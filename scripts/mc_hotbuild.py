@@ -1,10 +1,16 @@
 """MC 主机本地编译通道（快速热重启）—— 绕开 CI + 客户端包下载。
 
 子命令：
-  build          在服务器上编译 core（后台写日志，前台轮询到结束）
+  pull           把编译机仓库同步到远端 main（编译前必做）
+  build          在服务器上编译 core+client（后台写日志，前台轮询到结束）
   log [n]        查看编译日志尾部
   deploy         用刚编译的 jar 替换服务端 mods 并重启服务端
   status         查看编译/部署状态
+  squaremap      下载/安装 squaremap 模组到服务端 mods
+  squaremap-config  改写 squaremap 的 internal-webserver bind/port
+  sqm-status     查看真实俯瞰图瓦片渲染进度
+  sqm-render     对主世界发起 fullrender 并轮询到结束
+  sqm-radius [半径]  只渲染战场周边（radiusrender，默认取 squaremap spawn）
 
 背景（为什么这样做）：现有热更每次都要从 GitHub Release 下载**整个客户端 mods 包**
 （update.log 实测 5.5 分钟），而只想验证一行服务端代码改动时完全没必要。
@@ -264,7 +270,12 @@ SQM_JAR = "squaremap-fabric-mc1.21.1-1.3.2.jar"
 SQM_URL = ("https://cdn.modrinth.com/data/PFb7ZqK6/versions/RerxbGKf/"
            "squaremap-fabric-mc1.21.1-1.3.2.jar")
 SQM_SIZE = 8462749
-SQM_CFG = r"J:\bfserver\server\config\squaremap\config.yml"
+# ⚠️ 实测路径是 **服务端根目录下的 squaremap/**，不是 config/squaremap/ ——
+#    写错会导致 cmd_squaremap_config 静默失败（Test-Path 为 False 时只是打印告警）。
+SQM_CFG = r"J:\bfserver\server\squaremap\config.yml"
+SQM_WEB = r"J:\bfserver\server\squaremap\web"
+SQM_TILES = SQM_WEB + r"\tiles"
+SQM_WORLD_ARG = "minecraft:overworld"   # squaremap 命令里世界用「标识符」，不是目录名 world
 
 
 def cmd_squaremap(cli) -> int:
@@ -285,24 +296,133 @@ def cmd_squaremap(cli) -> int:
     return 0
 
 
+SQM_CFG_PS = """$ErrorActionPreference='Stop'
+$p='{cfg}'
+$lines=Get-Content $p -Encoding UTF8
+$out=New-Object System.Collections.Generic.List[string]
+$base=-1; $done=$false
+foreach($l in $lines){{
+  if($base -lt 0){{
+    if($l -match '^(\\s*)internal-webserver:\\s*$'){{ $base=$matches[1].Length }}
+    $out.Add($l); continue
+  }}
+  if($l.Trim().Length -eq 0){{ $out.Add($l); continue }}
+  $ind=$l.Length - $l.TrimStart().Length
+  if($ind -le $base){{ $base=-1; $out.Add($l); continue }}   # 缩进回到块外 → 结束
+  if($l -match '^(\\s*)bind:.*'){{ $out.Add($matches[1]+'bind: {bind}'); $done=$true; continue }}
+  if($l -match '^(\\s*)port:.*'){{ $out.Add($matches[1]+'port: {port}'); continue }}
+  $out.Add($l)
+}}
+[IO.File]::WriteAllText($p, ($out -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+Write-Output ($(if($done){{'PATCHED'}}else{{'NOT-FOUND'}}))
+"""
+
+
 def cmd_squaremap_config(cli, bind: str = "127.0.0.1", port: int = 8080) -> int:
     """把 squaremap 的 web 监听改到 内网地址:端口。
 
     先决条件：服务端**至少启动过一次**（squaremap 才会生成 config.yml）。
-    只改 web 段的 bind / port 两行，其余保持默认，避免猜错 schema。
+
+    ⚠️ 只在 `settings.internal-webserver:` 块内替换 bind/port。
+    不能用「全局正则」或「遇到任意非空行就退出块」——配置里存在大量缩进相同的
+    同名键（`port:`/`enabled:` 在 mock 中随处可见），块边界必须按**缩进深度**判定。
+    改完需 `/squaremap reload` 或重启才生效（Jetty 是启动时绑定的），
+    所以这里默认只落盘、不强推 reload（避免把当前可用的监听弄挂）。
     """
     if not ps(cli, f"Test-Path '{SQM_CFG}'").strip().lower().startswith("true"):
         print(f"[✗] 未找到 {SQM_CFG} —— 先启动一次服务端让它生成默认配置")
         return 1
-    ps(cli, f"$p='{SQM_CFG}'; $c=Get-Content $p -Raw -Encoding UTF8; "
-            f"$c=$c -replace '(?m)^(\\s*)bind:.*$',  ('$1bind: ' + '{bind}'); "
-            f"$c=$c -replace '(?m)^(\\s*)port:.*$',  ('$1port: ' + '{port}'); "
-            f"[IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding($false))); "
-            f"Write-Output 'patched'")
-    print("--- 现行 web 相关行 ---")
-    print(ps(cli, f"Select-String -Path '{SQM_CFG}' -Pattern 'bind|port|enabled' | "
-                  f"Select-Object -First 14 | ForEach-Object {{ $_.Line }}"))
+    script = SQM_CFG_PS.format(cfg=SQM_CFG, bind=bind, port=port)
+    _write_remote(cli, r"J:\bfbuild\_sqm_cfg.ps1", script)
+    res = ps(cli, r"& 'J:\bfbuild\_sqm_cfg.ps1'")
+    print("[*] 结果:", res.strip())
+    print("--- 现行 internal-webserver 段 ---")
+    print(ps(cli, f"$lines=Get-Content '{SQM_CFG}' -Encoding UTF8; "
+                  f"$i=[array]::IndexOf($lines,'    internal-webserver:'); "
+                  f"if($i -lt 0){{$i=0}}; ($lines | Select-Object -Skip $i -First 5) -join \"`n\""))
+    print("[!] 下次重启服务端（或 `/squaremap reload`）后监听地址生效")
     return 0
+
+
+def _sqm_tile_stats(cli) -> str:
+    """返回瓦片数量与当前最大的缩放层级（用于判断渲染是否产出）。"""
+    return ps(cli, f"$png=Get-ChildItem '{SQM_TILES}' -Recurse -Filter *.png "
+                   f"-ErrorAction SilentlyContinue; "
+                   f"$n=($png | Measure-Object).Count; "
+                   f"$zs=($png | ForEach-Object {{ $_.DirectoryName }} | Sort-Object -Unique); "
+                   f"Write-Output ('TILES=' + $n); "
+                   f"foreach($z in $zs){{ Write-Output ('ZDIR=' + $z) }}")
+
+
+def cmd_squaremap_status(cli) -> int:
+    """看看 squaremap 渲染到什么程度了。
+
+    注：squaremap **没有** `progress` 子命令（只有 pauserender/progresslogging/
+    fullrender/cancelrender/radiusrender/reload/hide）。进度只能看日志
+    （config 里 render-progress-logging.enabled=true 会每秒打印一行）。
+    """
+    print(_sqm_tile_stats(cli).strip() or "(空)")
+    print("--- 渲染日志（尾部）---")
+    print(ps(cli, r"Select-String -Path 'J:\bfserver\server\logs\latest.log' "
+                  r"-Pattern 'squaremap|Rendering|render' | "
+                  r"Select-Object -Last 12 | ForEach-Object { $_.Line }").strip() or "(无)")
+    return 0
+
+
+def cmd_squaremap_radius(cli, radius: int = 512, center: str | None = None) -> int:
+    """只渲染战场周边（比 fullrender 快得多）：radiusrender <world> <半径> [中心]。
+
+    中心默认取 squaremap 元数据里的 spawn（= 地图导入点），那正是战场所在。
+    """
+    from mc_remote import run_rcon  # noqa: PLC0415
+    if center is None:
+        txt = ps(cli, f"Get-Content '{SQM_TILES}\\{SQM_WORLD_ARG.replace(':', '_')}"
+                      f"\\settings.json' -Raw")
+        import json as _json  # noqa: PLC0415
+        try:
+            sp = _json.loads(txt)["spawn"]
+            center = f"{sp['x']} {sp['z']}"
+        except Exception:  # noqa: BLE001
+            center = ""
+    cmd = f"squaremap radiusrender {SQM_WORLD_ARG} {radius}"
+    if center:
+        cmd += f" {center}"
+    print("[*]", cmd)
+    print(run_rcon(cli, cmd).strip() or "(已接受)")
+    return 0
+
+
+def cmd_squaremap_render(cli) -> int:
+    """对主世界发起 fullrender 并轮询到结束（管理台真实俯瞰图的数据来源）。
+
+    squaremap 的世界参数是**标识符**（minecraft:overworld），不是世界目录名 world。
+    渲染是异步的：这里轮询瓦片数量，直到连续若干轮不再增长。
+    """
+    from mc_remote import run_rcon  # noqa: PLC0415
+    print(f"[*] 对 {SQM_WORLD_ARG} 发起 fullrender …")
+    print(run_rcon(cli, f"squaremap fullrender {SQM_WORLD_ARG}").strip() or "(已接受)")
+    last = -1
+    stable = 0
+    for i in range(90):  # 最多 ~15 分钟
+        time.sleep(10)
+        n = 0
+        for line in _sqm_tile_stats(cli).splitlines():
+            if line.startswith("TILES="):
+                try:
+                    n = int(line.split("=", 1)[1].strip())
+                except ValueError:
+                    n = 0
+        print(f"  [{i * 10:>4}s] 瓦片 {n}")
+        if n == last:
+            stable += 1
+            if stable >= 3 and n > 0:
+                print("[✓] 渲染已收敛（连续 3 轮无新增）")
+                break
+        else:
+            stable = 0
+        last = n
+    print(_sqm_tile_stats(cli).strip())
+    return 0 if last > 0 else 1
 
 
 def main() -> int:
@@ -314,6 +434,12 @@ def main() -> int:
             return cmd_squaremap(cli)
         if mode == "squaremap-config":
             return cmd_squaremap_config(cli)
+        if mode == "sqm-status":
+            return cmd_squaremap_status(cli)
+        if mode == "sqm-render":
+            return cmd_squaremap_render(cli)
+        if mode == "sqm-radius":
+            return cmd_squaremap_radius(cli, int(args[1]) if len(args) > 1 else 512)
         if mode == "pull":
             return cmd_pull(cli)
         if mode == "build":

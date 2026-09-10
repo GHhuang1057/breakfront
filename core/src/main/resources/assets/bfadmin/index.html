@@ -178,6 +178,7 @@
             <button class="btn" onclick="mapOp('sectorNext')">下一扇区 ▸</button>
             <button class="btn" onclick="mapOp('sectorPrev')">◂ 上一扇区</button>
             <button class="btn" onclick="lfFit()">适配视角</button>
+            <button class="btn" onclick="sqmFocus()" id="btn-sqmfocus">定位真实战场</button>
             <button class="btn" onclick="lfWorld()">世界范围</button>
             <button class="btn" onclick="toggleSqm()" id="btn-sqm">真实地图 ON</button>
             <button class="btn" onclick="toggleTerrain()" id="btn-terrain">自采样底图 ON</button>
@@ -401,7 +402,7 @@ function setMapHint(s){ const e=$('maphint'); if(e) e.textContent=s; }
  * 约定：所有「方块坐标 <-> latlng」一律走 LL() / pt()，其余地方不要手写换算。
  */
 let SQM_SCALE = 1 / 256;                       // 默认 1/2^8；拿到 squaremap 元数据后按其实 maxZoom 覆写
-let SQM_INFO  = {ok:false, world:'world', max:8, extra:2};
+let SQM_INFO  = {ok:false, world:'world', max:8, extra:2, spawn:null};
 function LL(x,z){ return L.latLng(-z*SQM_SCALE, x*SQM_SCALE); }
 function pt(ll){ return {x: ll.lng/SQM_SCALE, z: -ll.lat/SQM_SCALE}; }
 /** 视图 bounds → 方块坐标范围。 */
@@ -410,15 +411,33 @@ function ptBounds(b){
           z0:-b.getNorth()/SQM_SCALE, z1:-b.getSouth()/SQM_SCALE};
 }
 
-/* 视角持久化 */
+/**
+ * 把视角拉到 squaremap 真正**渲染过的**区域（世界导入点 = 战场中心）。
+ *
+ * 为什么需要它：扇区/据点坐标是上一张地图留下的，`lfFit()` 会按它们取景，
+ * 结果打开管理台看到的是一片空白（瓦片在几千米外）——这正是「压根没有展示
+ * 真实 2D 俯瞰图」的直接原因。squaremap 的 spawn 则是**真实战场**的确定位置。
+ */
+function sqmFocus(){
+  if(!lfInit()) return;
+  if(!SQM_INFO.ok||!SQM_INFO.spawn){ lfFit(); return; }
+  const sp=SQM_INFO.spawn;
+  const z=Math.max(0,SQM_INFO.max-1);       // 比最大层级退一档，视野更开阔
+  mapState.lf.setView(LL(sp.x,sp.z), z);
+  saveCam();
+  setMapHint('已定位到真实战场（'+sp.x+', '+sp.z+'）· squaremap 世界 '+SQM_INFO.world);
+}
+
+/* 视角持久化（键含版本：换地图后旧视角会指向错误区域，升版即自动丢弃） */
+const CAM_KEY='bfadmin_cam_v2';
 function saveCam(){
   if(!mapState.lf) return;
   try{ const c=pt(mapState.lf.getCenter());
-    localStorage.setItem('bfadmin_cam', JSON.stringify({cx:c.x,cz:c.z,zoom:mapState.lf.getZoom()}));
+    localStorage.setItem(CAM_KEY, JSON.stringify({cx:c.x,cz:c.z,zoom:mapState.lf.getZoom()}));
   }catch(e){}
 }
 function loadCam(){
-  try{ const s=localStorage.getItem('bfadmin_cam'); if(!s) return null;
+  try{ const s=localStorage.getItem(CAM_KEY); if(!s) return null;
     const o=JSON.parse(s); return (o&&typeof o.zoom==='number')?o:null;
   }catch(e){ return null; }
 }
@@ -827,13 +846,19 @@ async function ensureSqm(){
     const w=s.worlds[0];
     let max=(w.zoom&&w.zoom.max!=null)?w.zoom.max:8;
     let extra=(w.zoom&&w.zoom.extra!=null)?w.zoom.extra:2;
+    let spawn=null;
     try{
       const ws=await api('/bfadmin/api/sqm/tiles/'+encodeURIComponent(w.name)+'/settings.json');
       if(ws&&ws.zoom){ if(ws.zoom.max!=null) max=ws.zoom.max; if(ws.zoom.extra!=null) extra=ws.zoom.extra; }
+      if(ws&&ws.spawn&&typeof ws.spawn.x==='number') spawn={x:ws.spawn.x,z:ws.spawn.z};
     }catch(e){}
-    SQM_INFO={ok:true, world:w.name, max:max, extra:extra};
+    // 世界标识符（squaremap 用 minecraft:overworld）→ 渲染目录名（minecraft_overworld）
+    SQM_INFO={ok:true, world:w.name, max:max, extra:extra, spawn:spawn,
+              id:(w.display_name||w.name)};
     SQM_SCALE=1/Math.pow(2,max);
-    setMapHint('squaremap 可用：世界 '+w.name+'，zoom 0-'+max+'（真实俯瞰图已接入）');
+    setMapHint('squaremap 可用：世界 '+w.name+'，zoom 0-'+max
+      +(spawn?('，战场中心 '+spawn.x+', '+spawn.z):''));
+    if(window.__sqmReadyCb) window.__sqmReadyCb();
   }catch(e){ /* 未装/未渲染：保持默认比例 */ }
 }
 
@@ -872,7 +897,11 @@ async function mapLoad(keepUndo){
   if(!mapState._fitDone){
     const saved=loadCam();
     mapState._fitDone=true;
-    if(saved) mapState.lf.setView(LL(saved.cx,saved.cz), saved.zoom); else lfFit();
+    // 有存档视角就尊重它；否则 squaremap 可用时直接落在**真实战场**上，
+    // 避免用「上一张地图的据点坐标」取景导致打开就是一片空白。
+    if(saved) mapState.lf.setView(LL(saved.cx,saved.cz), saved.zoom);
+    else if(SQM_INFO.ok&&SQM_INFO.spawn) sqmFocus();
+    else lfFit();
   }
   installSqmLayer();
   lfRender(); lfDrawGrid(); showZoneInfo();

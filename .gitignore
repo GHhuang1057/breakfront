@@ -42,3 +42,8 @@ pack/tools/.modjar_cache/
 # 误在仓库根跑 npm 时产生的残留（本项目无 Node 构建）
 package-lock.json
 node_modules/
+
+# 从服务器取回的 squaremap 前端/配置副本 + 中转 bundle（纯诊断产物）
+scripts/_sqm_*
+scripts/_chk_*.js
+scripts/_relay.bundle
