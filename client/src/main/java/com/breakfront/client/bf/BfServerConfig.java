@@ -12,14 +12,14 @@ import java.util.Map;
 /**
  * BREAKFRONT 联机服务器配置。
  *
- * 默认直连公测服务器（mc.geekhonize.top，香港 frp 中继入口）；
+ * 默认直连公测服务器（play.geekhonize.top，北京 frps 中继入口）；
  * 自建/本地测试服可通过编辑 config/breakfront-client.properties 的
  * host/port 覆盖，不影响正式客户端。客户端因此不需要再走原版「服务器选择」。
  */
 public final class BfServerConfig {
 
     /** 公测服入口（frps 中继 → frpc → 香港 MC 主机）：换这里即可全网切换。 */
-    public static final String DEFAULT_HOST = "mc.geekhonize.top";
+    public static final String DEFAULT_HOST = "play.geekhonize.top";
     public static final int DEFAULT_PORT = 25565;
     public static final int DEFAULT_UPDATE_PORT = 25610;
     /**
@@ -74,7 +74,7 @@ public final class BfServerConfig {
                 Files.createDirectories(file.getParent());
                 Files.writeString(file, String.join("\n",
                         "# BREAKFRONT 联机配置",
-                        "# 默认即公测服 mc.geekhonize.top（内置），以下两行通常无需改动",
+                        "# 默认即公测服 play.geekhonize.top（内置），以下两行通常无需改动",
                         "# 自建/本地测试服请改 host（如 localhost）并保持端口一致",
                         "# updatebase：更新通道基址（公测服走 https://bfupdate.geekhonize.top 经 Cloudflare）；"
                                 + "留空则回退 http://host:updateport",

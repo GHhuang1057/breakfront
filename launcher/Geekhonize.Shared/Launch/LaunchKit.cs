@@ -225,7 +225,7 @@ public sealed class LaunchKit : IDisposable
             lines.RemoveAll(l => l.StartsWith(k + "="));
             lines.Add($"{k}={v}");
         }
-        Set("host", "mc.geekhonize.top");
+        Set("host", "play.geekhonize.top");
         Set("port", "25565");
         Set("updateport", "25610");
         File.WriteAllLines(props, lines);
