@@ -266,9 +266,10 @@ def cmd_deploy(cli, resume_updater: bool = False) -> int:
             break
     if not up:
         print("[!] 25565 未监听。诊断：")
-        print(ps(cli, "@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "
-                      "'fabric-server-launch' }).Count").strip() and "java 进程存在（可能仍在启动）"
-                      or "没有 java 进程（启动失败）"))
+        nproc = ps(cli, "@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine "
+                        "-match 'fabric-server-launch' }).Count").strip()
+        print("  java 进程数 =", nproc,
+              "→ 可能仍在启动" if nproc not in ("", "0") else "→ 启动失败（面板里看控制台输出）")
 
     if resume_updater:
         ps(cli, "Start-ScheduledTask -TaskName 'BreakfrontUpdater' -ErrorAction SilentlyContinue; 'updater resumed'")
