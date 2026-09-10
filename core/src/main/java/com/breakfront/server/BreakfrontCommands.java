@@ -411,6 +411,11 @@ root = root.then(literal("team")
                                 })));
     }
 
+    /**
+     * {@code /bf npc …} —— AI BOT 编制运维（历史命令名保留，实现已统一到假玩家小队）。
+     *
+     * <p>「僵尸壳 NpcSquad」已整体移除，故此命令现在等价于 {@code /bf bot} 的编制控制。
+     */
     private static LiteralArgumentBuilder<ServerCommandSource> npcNode() {
         return literal("npc").requires(s -> s.hasPermissionLevel(2))
                 .then(literal("status").executes(ctx -> {
@@ -418,15 +423,15 @@ root = root.then(literal("team")
                     if (match == null) {
                         return 0;
                     }
-                    send(ctx.getSource(), match.npc().info());
+                    send(ctx.getSource(), match.bots().info());
                     return 1;
                 }))
                 .then(literal("clear").executes(ctx -> {
                     var match = BreakfrontServer.match();
                     if (match != null) {
-                        match.npc().clearAll(BreakfrontServer.server());
+                        match.bots().clearAll(BreakfrontServer.server());
                     }
-                    send(ctx.getSource(), "已清除全部 NPC（目标数归零）");
+                    send(ctx.getSource(), "已清除全部 AI BOT（目标数归零）");
                     return 1;
                 }))
                 .then(npcSetNode("attacker", Side.ATTACKER))
@@ -442,19 +447,18 @@ root = root.then(literal("team")
                                 return 0;
                             }
                             int n = IntegerArgumentType.getInteger(ctx, "n");
-                            match.npc().setTarget(side, n);
-                            match.npc().topUp(match, BreakfrontServer.server());
-                            send(ctx.getSource(), side.labelCn + " NPC 目标人数=" + n);
+                            match.bots().setTarget(side, n);
+                            match.bots().reconcile(match, BreakfrontServer.server());
+                            send(ctx.getSource(), side.labelCn + " AI 编制目标（含真人）=" + n);
                             return 1;
                         })));
     }
 
     /**
-     * {@code /bf bot …} —— 假玩家小队（AI BOT 重构的玩家壳实现）运维入口。
+     * {@code /bf bot …} —— AI 假玩家小队运维入口。
      *
-     * <p>与 {@code /bf npc}（僵尸壳）互斥：启用假玩家前会清空旧壳 NPC，
-     * 避免两套 AI 同时在场互相叠加。试用建议先在 BATTLE 阶段（{@code /bf start}），
-     * 非战斗阶段 bot 会站在原地不动。
+     * <p>常态编制由大厅赛程自动维持（{@code /bf fill on}），真人进服会自动热顶替一个 BOT；
+     * 这里的 {@code trial} / {@code clear} 是**手动接管**编制用的调试开关。
      */
     private static LiteralArgumentBuilder<ServerCommandSource> botNode() {
         return literal("bot").requires(s -> s.hasPermissionLevel(2))
@@ -480,13 +484,11 @@ root = root.then(literal("team")
                                         return 0;
                                     }
                                     int n = IntegerArgumentType.getInteger(ctx, "n");
-                                    match.npc().clearAll(server);      // 互斥：清空旧壳
                                     match.bots().setTarget(Side.ATTACKER, n);
                                     match.bots().setTarget(Side.DEFENDER, n);
-                                    match.bots().ensure(match, server);
+                                    match.bots().reconcile(match, server);
                                     send(ctx.getSource(), "已生成 " + n + "v" + n
-                                            + " 假玩家小队（旧壳 NPC 已清空）；"
-                                            + "清除用 /bf bot clear，查看用 /bf bot status");
+                                            + " 假玩家小队；清除用 /bf bot clear，查看用 /bf bot status");
                                     return 1;
                                 })))
                 .then(literal("clear").executes(ctx -> {

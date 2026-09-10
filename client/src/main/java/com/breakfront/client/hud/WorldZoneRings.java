@@ -62,6 +62,15 @@ public final class WorldZoneRings {
     private static long lastFitMs;
     private static double[][] ground = new double[0][];
     private static int[] perEdge = new int[0];
+    /**
+     * 每个据点「是否有可信地面」。false = 本地未加载且服务端也没给出有效高度
+     * （坐标落在未生成区块/虚空）→ 该据点整条不渲染。
+     *
+     * <p>⚠️ 2026-09-10：以前这里没有这个判据，`centerY` 会退化成服务端旧版下发的
+     * `bottomY+3`（≈-61）假高度 —— 于是据点方坪/边带/角柱/光柱全被画到基岩层以下，
+     * 玩家在地面只看到错位残影或完全看不到。现在宁可不画，也不画错位置。
+     */
+    private static boolean[] valid = new boolean[0];
     private static final long REFIT_MS = 1000;
 
     private WorldZoneRings() {
@@ -69,7 +78,7 @@ public final class WorldZoneRings {
 
     // ================= 对外：地面参考高度（屏缘箭头/其它 2D 层共用） =================
 
-    /** 据点中心地表参考 Y（本地高度图，fallback payload groundY）。 */
+    /** 据点中心地表参考 Y（本地高度图，fallback 服务端 groundY）；无有效地面返回 NaN。 */
     public static double anchorY(ZoneView zone) {
         List<ZoneView> zones = ClientMatchState.zones();
         int idx = indexOf(zones, zone);
@@ -77,6 +86,15 @@ public final class WorldZoneRings {
             return ground[idx][0];
         }
         return zone.groundY();
+    }
+
+    /** 该据点是否有可信地面（渲染前统一判据）。 */
+    public static boolean hasGround(ZoneView zone) {
+        int idx = indexOf(ClientMatchState.zones(), zone);
+        if (idx >= 0 && idx < valid.length) {
+            return valid[idx];
+        }
+        return !Double.isNaN(zone.groundY());
     }
 
     private static int indexOf(List<ZoneView> zones, ZoneView zone) {
@@ -113,6 +131,9 @@ public final class WorldZoneRings {
         BufferBuilder quads = Tessellator.getInstance()
                 .begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
         for (int i = 0; i < zones.size(); i++) {
+            if (!isValidIdx(i)) {
+                continue;                       // 无有效地面 → 不画（避免画在基岩层/错位）
+            }
             ZoneView zone = zones.get(i);
             int[] col = areaColor(zone, t, false);
             double yc = centerY(i, zone);
@@ -134,6 +155,9 @@ public final class WorldZoneRings {
         BufferBuilder lines = Tessellator.getInstance()
                 .begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.LINES);
         for (int i = 0; i < zones.size(); i++) {
+            if (!isValidIdx(i)) {
+                continue;
+            }
             ZoneView zone = zones.get(i);
             int[] col = areaColor(zone, t, true);
             rimLineInto(lines, m, bounds(zone), i, col[0], col[1], col[2], 255);
@@ -147,6 +171,9 @@ public final class WorldZoneRings {
         BufferBuilder pillars = Tessellator.getInstance()
                 .begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
         for (int i = 0; i < zones.size(); i++) {
+            if (!isValidIdx(i)) {
+                continue;
+            }
             ZoneView zone = zones.get(i);
             int[] col = areaColor(zone, t, true);
             double[] b = bounds(zone);
@@ -443,6 +470,7 @@ public final class WorldZoneRings {
         lastFitMs = now;
         ground = new double[zones.size()][];
         perEdge = new int[zones.size()];
+        valid = new boolean[zones.size()];
         for (int i = 0; i < zones.size(); i++) {
             ZoneView z = zones.get(i);
             int pe = perEdgeOf(z);
@@ -451,6 +479,11 @@ public final class WorldZoneRings {
             // 中心 + 四边各 pe 个点（顺时针）
             double[] g = new double[1 + 4 * pe];
             g[0] = centerGround(world, z);
+            // 本地未加载（高度图 NaN）→ 用服务端下发的 groundY 兜底，保证整圈贴同一层；
+            // 两边都没有才判定为「无地面」，由 valid[] 统一跳过渲染。
+            if (Double.isNaN(g[0]) && !Double.isNaN(z.groundY())) {
+                g[0] = z.groundY();
+            }
             double[][][] edges = {
                     {{b[0], b[1]}, {b[2], b[1]}},
                     {{b[2], b[1]}, {b[2], b[3]}},
@@ -471,13 +504,37 @@ public final class WorldZoneRings {
             // 保证室内/地下时整圈领地贴「玩家所在连续层」而非浮在最高层天花板。
             if (!Double.isNaN(g[0])) {
                 for (int k = 1; k < g.length; k++) {
-                    if (!Double.isNaN(g[k]) && g[k] > g[0] + 2.0) {
+                    if (Double.isNaN(g[k])) {
+                        // 单点所在区块未载入 → 贴中心层。若不处理，NaN 顶点会把这圈方坪/
+                        // 边带的几何整体拉成乱面（表现为「高度错乱」的另一个来源）。
+                        g[k] = g[0];
+                        continue;
+                    }
+                    if (g[k] > g[0] + 2.0) {
                         g[k] = g[0];
                     }
                 }
             }
             ground[i] = g;
+            // 是否可信地面：本地高度图优先，其次服务端下发的 groundY；
+            // 两者都无效（未生成区块/虚空）→ 标记为「不渲染」。
+            valid[i] = isPlausibleGround(world, g[0], z);
         }
+    }
+
+    /** 索引对应的据点是否有可信地面。 */
+    private static boolean isValidIdx(int i) {
+        return i >= 0 && i < valid.length && valid[i];
+    }
+
+    /**
+     * 该据点是否有可信地面：取本地高度图（本地为 NaN 时退回服务端 groundY），
+     * 必须高于世界底部才有意义 —— 「世界底部 + 3」是旧实现的无地形哨兵值，
+     * 绝不能再当真实高度使用。
+     */
+    private static boolean isPlausibleGround(ClientWorld world, double localY, ZoneView zone) {
+        double y = !Double.isNaN(localY) ? localY : zone.groundY();
+        return !Double.isNaN(y) && y > world.getBottomY() + 2.0;
     }
 
     /**

@@ -136,6 +136,8 @@ public final class WebAdminConsole {
                 mapTerrain(ex);
             } else if (path.equals("/bfadmin/api/worldinfo") && m.equalsIgnoreCase("GET")) {
                 worldInfo(ex);
+            } else if (path.startsWith("/bfadmin/api/sqm/") && m.equalsIgnoreCase("GET")) {
+                sqmProxy(ex, path.substring("/bfadmin/api/sqm/".length()));
             } else if (path.equals("/bfadmin/api/mapedit") && m.equalsIgnoreCase("POST")) {
                 mapEdit(ex);
             } else if (path.equals("/bfadmin/api/cmd") && m.equalsIgnoreCase("POST")) {
@@ -228,10 +230,11 @@ public final class WebAdminConsole {
         sb.append("\"countdown\":").append((int) Math.ceil(g.countdownRemaining())).append(',');
         sb.append("\"autofill\":").append(match.autoFillEnabled()).append(',');
         sb.append("\"autostart\":").append(match.autostartEnabled()).append(',');
-        // AI
-        NpcSquad npc = match.npc();
-        sb.append("\"aiAlive\":").append(npc == null ? 0 : npc.alive()).append(',');
-        sb.append("\"aiInfo\":\"").append(esc(npc == null ? "-" : npc.info())).append("\",");
+        // AI：假玩家小队（含大厅「非战斗 BOT」与真人热顶替计数）
+        BotSquad bots = match.bots();
+        sb.append("\"aiAlive\":").append(bots == null ? 0 : bots.alive()).append(',');
+        sb.append("\"aiTakeover\":").append(bots == null ? 0 : bots.humansEngaged()).append(',');
+        sb.append("\"aiInfo\":\"").append(esc(bots == null ? "-" : bots.info())).append("\",");
         // 玩家
         sb.append("\"players\":[");
         boolean first = true;
@@ -728,6 +731,66 @@ public final class WebAdminConsole {
         }
         TOKENS.put(token, System.currentTimeMillis()); // 滑动续期
         return true;
+    }
+
+    // ================= squaremap 真实俯瞰图代理 =================
+
+    /** squaremap 内置 Web 服务的本机地址（默认 8080；可用 -Dbreakfront.squaremap 覆盖）。 */
+    private static final String SQM_BASE =
+            System.getProperty("breakfront.squaremap", "http://127.0.0.1:8080");
+    /** 同一进程复用连接池；瓦片很小，4s 连接超时足够。 */
+    private static final java.net.http.HttpClient SQM_HTTP = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(4))
+            .build();
+
+    /**
+     * 把 {@code /bfadmin/api/sqm/<sub>} 透明代理到 squaremap 的内置 Web 服务。
+     *
+     * <p>这样管理台只需暴露 25610 一个入口：浏览器拿 squaremap 渲染的**真实俯视瓦片**
+     * （{@code tiles/<world>/<z>/<x>_<y>.png}）与 {@code tiles/settings.json}（世界/缩放元数据），
+     * 无需把 squaremap 的 8080 端口暴露到公网。
+     */
+    private static void sqmProxy(HttpExchange ex, String sub) throws IOException {
+        if (!auth(ex)) {
+            json(ex, 401, "{\"ok\":false,\"msg\":\"未授权或已过期\"}");
+            return;
+        }
+        if (sub.isEmpty() || sub.contains("..") || !sub.matches("[A-Za-z0-9_./-]+")) {
+            respond(ex, 400, "bad path".getBytes(StandardCharsets.UTF_8), "text/plain");
+            return;
+        }
+        try {
+            var req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(SQM_BASE + "/" + sub))
+                    .timeout(java.time.Duration.ofSeconds(10)).GET().build();
+            var resp = SQM_HTTP.send(req, java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+            int code = resp.statusCode();
+            if (code != 200) {
+                respond(ex, code == 404 ? 404 : 502, new byte[0], "text/plain");
+                return;
+            }
+            String ct = resp.headers().firstValue("content-type").orElse(sqmContentType(sub));
+            ex.getResponseHeaders().set("Content-Type", ct);
+            ex.getResponseHeaders().set("Cache-Control", "public, max-age=20");
+            ex.sendResponseHeaders(200, resp.body().length);
+            ex.getResponseBody().write(resp.body());
+            ex.close();
+        } catch (Exception e) {
+            json(ex, 502, "{\"ok\":false,\"msg\":\"squaremap 不可达（未安装/未启动/未渲染）："
+                    + esc(e.getClass().getSimpleName()) + "\"}");
+        }
+    }
+
+    private static String sqmContentType(String sub) {
+        if (sub.endsWith(".png")) {
+            return "image/png";
+        }
+        if (sub.endsWith(".json")) {
+            return "application/json; charset=utf-8";
+        }
+        if (sub.endsWith(".svg")) {
+            return "image/svg+xml";
+        }
+        return "application/octet-stream";
     }
 
     private static String randomToken() {

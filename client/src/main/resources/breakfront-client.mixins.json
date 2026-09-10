@@ -6,7 +6,8 @@
     "InGameHudMixin",
     "SoundManagerMixin",
     "DebugHudOverlayMixin",
-    "ScreenBackgroundMixin"
+    "ScreenBackgroundMixin",
+    "EntityRendererNameTagMixin"
   ],
   "injectors": {
     "defaultRequire": 1

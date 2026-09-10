@@ -179,7 +179,8 @@
             <button class="btn" onclick="mapOp('sectorPrev')">◂ 上一扇区</button>
             <button class="btn" onclick="lfFit()">适配视角</button>
             <button class="btn" onclick="lfWorld()">世界范围</button>
-            <button class="btn" onclick="toggleTerrain()" id="btn-terrain">地形底图 ON</button>
+            <button class="btn" onclick="toggleSqm()" id="btn-sqm">真实地图 ON</button>
+            <button class="btn" onclick="toggleTerrain()" id="btn-terrain">自采样底图 ON</button>
             <button class="btn" onclick="doUndo()">撤销 ⌘Z</button>
             <span id="maphint" class="hint"></span>
           </div>
@@ -383,7 +384,8 @@ const mapState = {
   raw:null, model:null, selId:null,
   terrainOn:true, lf:null, layers:null,
   zoneLayer:new Map(),      // zoneId -> {rect, center, handles:[]}
-  _ready:false, _fitDone:false, _terrainKey:'', _terrainTimer:null
+  _ready:false, _fitDone:false, _terrainKey:'', _terrainTimer:null,
+  sqmOn:true, _sqmTried:false
 };
 let undoStack = [];
 const SEC_COLORS = ['#4da6ff','#f5cd54','#6fe873','#ff5a52','#b78bff','#ff9d4d','#4dd0e1'];
@@ -392,11 +394,27 @@ const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
 const fmt = v => (Math.round(v*100)/100).toString();
 function setMapHint(s){ const e=$('maphint'); if(e) e.textContent=s; }
 
+/* ================= 坐标系：与 squaremap 完全一致 =================
+ * squaremap 的瓦片按世界方块轴对齐，其官方前端把方块坐标换算为
+ *     lat = -z / 2^maxZoom,  lng = x / 2^maxZoom
+ * 管理台沿用同一约定，才能把它渲染的真实俯瞰瓦片直接叠上去而不错位。
+ * 约定：所有「方块坐标 <-> latlng」一律走 LL() / pt()，其余地方不要手写换算。
+ */
+let SQM_SCALE = 1 / 256;                       // 默认 1/2^8；拿到 squaremap 元数据后按其实 maxZoom 覆写
+let SQM_INFO  = {ok:false, world:'world', max:8, extra:2};
+function LL(x,z){ return L.latLng(-z*SQM_SCALE, x*SQM_SCALE); }
+function pt(ll){ return {x: ll.lng/SQM_SCALE, z: -ll.lat/SQM_SCALE}; }
+/** 视图 bounds → 方块坐标范围。 */
+function ptBounds(b){
+  return {x0:b.getWest()/SQM_SCALE, x1:b.getEast()/SQM_SCALE,
+          z0:-b.getNorth()/SQM_SCALE, z1:-b.getSouth()/SQM_SCALE};
+}
+
 /* 视角持久化 */
 function saveCam(){
   if(!mapState.lf) return;
-  try{ const c=mapState.lf.getCenter();
-    localStorage.setItem('bfadmin_cam', JSON.stringify({cx:c.lat,cz:c.lng,zoom:mapState.lf.getZoom()}));
+  try{ const c=pt(mapState.lf.getCenter());
+    localStorage.setItem('bfadmin_cam', JSON.stringify({cx:c.x,cz:c.z,zoom:mapState.lf.getZoom()}));
   }catch(e){}
 }
 function loadCam(){
@@ -457,18 +475,19 @@ function lfInit(){
     return false;
   }
   const lf=L.map('lfmap',{
-    // wheelPxPerZoomLevel 调大 → 滚轮每格缩放更平缓（默认 60 在 CRS.Simple 下过于跳跃）；
-    // minZoom 放到 -4：地图跨度可达数千米，需要更远的视野才能一眼看全
-    crs:L.CRS.Simple, minZoom:-4, maxZoom:5, zoomSnap:0.25, zoomDelta:0.5,
-    wheelPxPerZoomLevel:90, wheelDebounceTime:60,
+    // 缩放级别与 squaremap 瓦片金字塔一致（0 .. zoom.max+extra），不再使用负 zoom。
+    // wheelPxPerZoomLevel 调大 → 滚轮每格缩放更平缓。
+    crs:L.CRS.Simple, minZoom:0, maxZoom:SQM_INFO.max+SQM_INFO.extra,
+    zoomSnap:1, zoomDelta:1, wheelPxPerZoomLevel:90, wheelDebounceTime:60,
     attributionControl:true, zoomControl:true, doubleClickZoom:false
   });
-  lf.setView([0,0],0);
+  lf.setView(LL(0,0),0);
   lf.attributionControl.setPrefix('BREAKFRONT 地图编辑器');
   lf.attributionControl.addAttribution('x/z = MC 世界坐标');
 
   mapState.lf=lf;
-  // pane 顺序：地形底 < 网格 < 其它扇区 < 编辑扇区 < 出生点 < 手柄
+  // pane 顺序：squaremap 真实瓦片 < 自采样地形 < 网格 < 其它扇区 < 编辑扇区 < 出生点 < 手柄
+  lf.createPane('pSqm').style.zIndex=180;
   lf.createPane('pTerrain').style.zIndex=200;
   lf.createPane('pGrid').style.zIndex=210;
   lf.createPane('pOther').style.zIndex=300;
@@ -476,6 +495,7 @@ function lfInit(){
   lf.createPane('pSpawn').style.zIndex=500;
   lf.createPane('pHandles').style.zIndex=600;
   mapState.layers={
+    sqm:null,
     terrain:L.layerGroup([],{pane:'pTerrain'}).addTo(lf),
     grid:L.layerGroup([],{pane:'pGrid'}).addTo(lf),
     other:L.layerGroup([],{pane:'pOther'}).addTo(lf),
@@ -496,15 +516,15 @@ function lfFit(){
   const lf=mapState.lf, m=mapState.model;
   const pts=[];
   const s=m&&m.sectors?m.sectors[m.editorSectorIdx]:null;
-  if(s) s.zones.forEach(z=>{ pts.push([z.x-z.r,z.z-z.r],[z.x+z.r,z.z+z.r]); });
+  if(s) s.zones.forEach(z=>{ pts.push(LL(z.x-z.r,z.z-z.r),LL(z.x+z.r,z.z+z.r)); });
   // 出生点只在「本扇区没有据点」时参与取景：出生点常与据点群相距千米级，
   // 混在一起会把视野撑到数千米 → 采样步长被迫放大到十几格（看不出内容），
   // 且涉及区块数超出预载上限（地形整片显示为"未加载"）。
   if(!pts.length){
-    if(m&&m.spawns.attacker) pts.push([m.spawns.attacker.x,m.spawns.attacker.z]);
-    if(m&&m.spawns.defender) pts.push([m.spawns.defender.x,m.spawns.defender.z]);
+    if(m&&m.spawns.attacker) pts.push(LL(m.spawns.attacker.x,m.spawns.attacker.z));
+    if(m&&m.spawns.defender) pts.push(LL(m.spawns.defender.x,m.spawns.defender.z));
   }
-  if(!pts.length){ lf.setView([0,0],0); saveCam(); return; }
+  if(!pts.length){ lf.setView(LL(0,0),0); saveCam(); return; }
   lf.fitBounds(L.latLngBounds(pts).pad(0.25),{maxZoom:2});
   saveCam();
 }
@@ -514,24 +534,25 @@ function lfDrawGrid(){
   const lf=mapState.lf; if(!lf||!mapState.layers) return;
   const g=mapState.layers.grid; g.clearLayers();
   const b=lf.getBounds(); if(!b.isValid()) return;
-  const x0=b.getSouth(), x1=b.getNorth(), z0=b.getWest(), z1=b.getEast();
+  const rb=ptBounds(b);
+  const x0=rb.x0, x1=rb.x1, z0=rb.z0, z1=rb.z1;
   const span=Math.max(x1-x0, z1-z0);
   let step=512;
   for(const t of [8,16,32,64,128,256,512]){ if(span/t<=26){ step=t; break; } }
   const mkLine=(a,b2)=>L.polyline([a,b2],{color:'#1b2632',weight:1,interactive:false,opacity:0.85}).addTo(g);
   const mkAxis=(a,b2)=>L.polyline([a,b2],{color:'#3a4a5e',weight:1.6,interactive:false}).addTo(g);
   for(let z=Math.floor(z0/step)*step; z<=z1; z+=step){
-    (Math.abs(z)<1e-6?mkAxis:mkLine)([x0,z],[x1,z]);
+    (Math.abs(z)<1e-6?mkAxis:mkLine)(LL(x0,z),LL(x1,z));
   }
   for(let x=Math.floor(x0/step)*step; x<=x1; x+=step){
-    (Math.abs(x)<1e-6?mkAxis:mkLine)([x,z0],[x,z1]);
+    (Math.abs(x)<1e-6?mkAxis:mkLine)(LL(x,z0),LL(x,z1));
   }
   for(let x=Math.floor(x0/step)*step; x<=x1; x+=step){
-    L.marker([x,z0],{interactive:false,pane:'pGrid',
+    L.marker(LL(x,z0),{interactive:false,pane:'pGrid',
       icon:L.divIcon({className:'lf-spawn-label',html:'x'+fmt(x),iconSize:null})}).addTo(g);
   }
   for(let z=Math.floor(z0/step)*step; z<=z1; z+=step){
-    L.marker([x0,z],{interactive:false,pane:'pGrid',
+    L.marker(LL(x0,z),{interactive:false,pane:'pGrid',
       icon:L.divIcon({className:'lf-spawn-label',html:'z'+fmt(z),iconSize:null})}).addTo(g);
   }
 }
@@ -567,7 +588,7 @@ function lfRender(){
       rect.addTo(isEdit?Ls.edit:Ls.other);
 
       if(isEdit && z.r>0){
-        L.marker([z.x,z.z],{interactive:false,pane:'pEdit',
+        L.marker(LL(z.x,z.z),{interactive:false,pane:'pEdit',
           icon:L.divIcon({className:'lf-zone-label',html:String(z.letter!=null?z.letter:z.id),iconSize:null})})
           .addTo(Ls.edit);
       }
@@ -584,9 +605,9 @@ function lfRender(){
 /* 出生点标记 */
 function lfSpawnMarker(p,label,cls){
   const c=(cls==='att')?'#4da6ff':'#ff5a52';
-  L.circle([p.x,p.z],{pane:'pSpawn',radius:2.5,color:c,fillColor:c,fillOpacity:0.95,weight:1,interactive:false})
+  L.circle(LL(p.x,p.z),{pane:'pSpawn',radius:2.5*SQM_SCALE,color:c,fillColor:c,fillOpacity:0.95,weight:1,interactive:false})
     .addTo(mapState.layers.spawn);
-  L.marker([p.x,p.z],{pane:'pSpawn',icon:L.divIcon({className:'lf-spawn-label '+cls,html:'<b>'+label+'</b>',iconSize:null})})
+  L.marker(LL(p.x,p.z),{pane:'pSpawn',icon:L.divIcon({className:'lf-spawn-label '+cls,html:'<b>'+label+'</b>',iconSize:null})})
     .addTo(mapState.layers.spawn);
 }
 
@@ -599,15 +620,15 @@ function lfRenderSelection(){
   const entry=mapState.zoneLayer.get(String(z.id));
   if(entry&&entry.isEdit){
     // 中心移动把手：不可见但可拖拽的 marker
-    const center=L.marker([z.x,z.z],{
+    const center=L.marker(LL(z.x,z.z),{
       draggable:true, pane:'pHandles', opacity:0, zIndexOffset:900,
       icon:L.divIcon({className:'bf-move-grip',html:'',iconSize:[26,26]})
     });
     center._st=null;
     center.on('dragstart', ()=>{ center._st={x:z.x,z:z.z,r:z.r}; });
     center.on('drag', ()=>{
-      const ll=center.getLatLng();
-      const dx=ll.lat-center._st.x, dz=ll.lng-center._st.z;
+      const pb=pt(center.getLatLng());
+      const dx=pb.x-center._st.x, dz=pb.z-center._st.z;
       z.x=Math.round((center._st.x+dx)*10)/10;
       z.z=Math.round((center._st.z+dz)*10)/10;
       entry.rect.setBounds(zoneBounds(z.x,z.z,z.r));
@@ -632,15 +653,15 @@ function lfRenderSelection(){
     ];
     corners.forEach(c=>{
       const hx=z.x+c.fx*z.r, hz=z.z+c.fz*z.r;
-      const mk=L.marker([hx,hz],{draggable:true,pane:'pHandles',zIndexOffset:1000,
+      const mk=L.marker(LL(hx,hz),{draggable:true,pane:'pHandles',zIndexOffset:1000,
         icon:L.divIcon({className:'lf-handle',iconSize:[10,10]})});
       // 固定对角点
       const anchor={x:z.x-c.fx*z.r, z:z.z-c.fz*z.r};
       mk._st=null;
       mk.on('dragstart', ()=>{ mk._st={x:z.x,z:z.z,r:z.r}; });
       mk.on('drag', ()=>{
-        const ll=mk.getLatLng();
-        const nr=Math.max(1, Math.max(Math.abs(ll.lat-anchor.x), Math.abs(ll.lng-anchor.z))/2);
+        const pb=pt(mk.getLatLng());
+        const nr=Math.max(1, Math.max(Math.abs(pb.x-anchor.x), Math.abs(pb.z-anchor.z))/2);
         z.r=Math.round(nr*10)/10;
         z.x=Math.round((anchor.x+c.fx*nr)*10)/10;
         z.z=Math.round((anchor.z+c.fz*nr)*10)/10;
@@ -680,7 +701,8 @@ function onLfDbl(e){
   if(!mapState.model) return;
   if(e.originalEvent && e.originalEvent._bfStop) return;
   mapState.selId=null;
-  applyEdit('add',{x:r1(e.latlng.lat), z:r1(e.latlng.lng), r:6});
+  const pb=pt(e.latlng);
+  applyEdit('add',{x:r1(pb.x), z:r1(pb.z), r:6});
 }
 
 /* ---- 地形底图 ----
@@ -695,11 +717,12 @@ async function loadTerrain(){
   const lf=mapState.lf;
   const b=lf.getBounds();
   if(!b.isValid()) return;
-  const cx=Math.round((b.getNorth()+b.getSouth())/2);
-  const cz=Math.round((b.getWest()+b.getEast())/2);
+  const rb=ptBounds(b);
+  const cx=Math.round((rb.x0+rb.x1)/2);
+  const cz=Math.round((rb.z0+rb.z1)/2);
   // 地图跨度可达数千米，故放宽到与服务端一致的上限 1024
   const half=Math.min(1024, Math.max(32, Math.ceil(Math.max(
-    (b.getNorth()-b.getSouth())/2, (b.getEast()-b.getWest())/2)*1.2)));
+    (rb.x1-rb.x0)/2, (rb.z1-rb.z0)/2)*1.2)));
   const key=cx+'|'+cz+'|'+half;
   if(key===mapState._terrainKey) return;          // 视野未显著变化：复用现有底图
   mapState._terrainKey=key;
@@ -713,11 +736,9 @@ async function loadTerrain(){
     const cv=document.createElement('canvas'); cv.width=N; cv.height=N;
     const c2=cv.getContext('2d');
     const img=c2.createImageData(N,N); const d=img.data;
-    for(let py=0; py<N; py++){                    // py：目标行 → lat(x) 由大到小
-      for(let px=0; px<N; px++){                  // px：目标列 → lng(z) 由小到大
-        const srcRow=px;                          // 源行 = z 索引
-        const srcCol=N-1-py;                      // 源列 = x 索引（顶部对应最大 x）
-        const si=(srcRow*N+srcCol)*3;
+    for(let py=0; py<N; py++){                    // py：目标行 → z 由小到大（新约定下自上而下即 z 递增）
+      for(let px=0; px<N; px++){                  // px：目标列 → x 由小到大
+        const si=(py*N+px)*3;                     // 源/目标同序：行=z 索引、列=x 索引
         const di=(py*N+px)*4;
         d[di]=bin.charCodeAt(si);
         d[di+1]=bin.charCodeAt(si+1);
@@ -728,7 +749,7 @@ async function loadTerrain(){
     c2.putImageData(img,0,0);
     mapState.layers.terrain.clearLayers();
     L.imageOverlay(cv.toDataURL('image/png'),
-      [[r.x0, r.z0],[r.x0+N*step, r.z0+N*step]],
+      [LL(r.x0, r.z0), LL(r.x0+N*step, r.z0+N*step)],
       {opacity:0.92,interactive:false,pane:'pTerrain'}).addTo(mapState.layers.terrain);
   }catch(e){ /* 底图失败不影响编辑 */ }
 }
@@ -754,7 +775,7 @@ async function lfWorld(){
     setMapHint('存档中未找到已生成区域（region 目录为空）——若世界尚未生成，请先在游戏内加载');
     return;
   }
-  mapState.lf.fitBounds(L.latLngBounds([[g.x0,g.z0],[g.x1,g.z1]]).pad(0.05));
+  mapState.lf.fitBounds(L.latLngBounds([LL(g.x0,g.z0),LL(g.x1,g.z1)]).pad(0.05));
   mapState._terrainKey='';
   setMapHint('世界已生成范围 x['+g.x0+','+g.x1+'] z['+g.z0+','+g.z1+']（'
     +g.regions+' 个 region）· 出生点 ('+r.spawn.x+','+r.spawn.z+')');
@@ -779,16 +800,63 @@ async function checkZoneVsWorld(){
 }
 function toggleTerrain(){
   mapState.terrainOn=!mapState.terrainOn;
-  const b=$('btn-terrain'); if(b) b.textContent='地形底图 '+(mapState.terrainOn?'ON':'OFF');
+  const b=$('btn-terrain'); if(b) b.textContent='自采样底图 '+(mapState.terrainOn?'ON':'OFF');
   if(mapState.layers&&mapState.layers.terrain){
     if(mapState.terrainOn){ mapState._terrainKey=''; loadTerrain(); }
     else { mapState.layers.terrain.clearLayers(); }
   }
 }
 
+/** 真实俯瞰瓦片（squaremap）开关。 */
+function toggleSqm(){
+  mapState.sqmOn=!mapState.sqmOn;
+  const b=$('btn-sqm'); if(b) b.textContent='真实地图 '+(mapState.sqmOn?'ON':'OFF');
+  installSqmLayer();
+}
+
+/**
+ * 拉取 squaremap 的世界/缩放元数据（经管理台代理，不额外暴露 8080）。
+ * 失败就退回默认比例：此时只有自采样底图可用，地图功能不受影响。
+ */
+async function ensureSqm(){
+  if(mapState._sqmTried) return;
+  mapState._sqmTried=true;
+  try{
+    const s=await api('/bfadmin/api/sqm/tiles/settings.json');
+    if(!s||!s.worlds||!s.worlds.length) return;
+    const w=s.worlds[0];
+    let max=(w.zoom&&w.zoom.max!=null)?w.zoom.max:8;
+    let extra=(w.zoom&&w.zoom.extra!=null)?w.zoom.extra:2;
+    try{
+      const ws=await api('/bfadmin/api/sqm/tiles/'+encodeURIComponent(w.name)+'/settings.json');
+      if(ws&&ws.zoom){ if(ws.zoom.max!=null) max=ws.zoom.max; if(ws.zoom.extra!=null) extra=ws.zoom.extra; }
+    }catch(e){}
+    SQM_INFO={ok:true, world:w.name, max:max, extra:extra};
+    SQM_SCALE=1/Math.pow(2,max);
+    setMapHint('squaremap 可用：世界 '+w.name+'，zoom 0-'+max+'（真实俯瞰图已接入）');
+  }catch(e){ /* 未装/未渲染：保持默认比例 */ }
+}
+
+/** 安装 squaremap 真实俯瞰瓦片层（参数与 squaremap 官方前端一致）。 */
+function installSqmLayer(){
+  const lf=mapState.lf; if(!lf||!mapState.layers) return;
+  if(mapState.layers.sqm){ lf.removeLayer(mapState.layers.sqm); mapState.layers.sqm=null; }
+  if(!SQM_INFO.ok||!mapState.sqmOn) return;
+  const url='/bfadmin/api/sqm/tiles/'+encodeURIComponent(SQM_INFO.world)
+    +'/{z}/{x}_{y}.png?token='+encodeURIComponent(TOKEN);
+  const layer=L.tileLayer(url,{pane:'pSqm',tileSize:512,minNativeZoom:0,
+    maxNativeZoom:SQM_INFO.max,noWrap:true,attribution:'squaremap'});
+  layer.addTo(lf);
+  mapState.layers.sqm=layer;
+  // 真实底图已就位 → 关掉自采样色块，避免两层互相干扰
+  mapState.terrainOn=false;
+  const b=$('btn-terrain'); if(b) b.textContent='自采样底图 OFF';
+}
+
 /* ---- 读取并刷新 ---- */
 async function mapLoad(keepUndo){
   if(!TOKEN) return;
+  await ensureSqm();              // 先取 squaremap 的 zoom.max → 统一坐标比例后再建图
   const r=await getMapRaw();
   if(!r.ok){ setMapHint(r.msg||'读取失败'); return; }
   mapState.raw=r; mapState.model=normalizeMap(r);
@@ -804,8 +872,9 @@ async function mapLoad(keepUndo){
   if(!mapState._fitDone){
     const saved=loadCam();
     mapState._fitDone=true;
-    if(saved) mapState.lf.setView([saved.cx,saved.cz], saved.zoom); else lfFit();
+    if(saved) mapState.lf.setView(LL(saved.cx,saved.cz), saved.zoom); else lfFit();
   }
+  installSqmLayer();
   lfRender(); lfDrawGrid(); showZoneInfo();
   mapState._terrainKey='';        // 视图可能已被 lfFit 改变 → 强制重新采样
   loadTerrain();

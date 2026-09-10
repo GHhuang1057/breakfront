@@ -2,6 +2,8 @@ package com.breakfront.client.hud;
 
 import com.breakfront.client.state.ClientMatchState;
 import com.breakfront.client.state.ClientMatchState.BoardRow;
+import com.breakfront.client.state.ClientMatchState.FriendDot;
+import com.breakfront.client.util.BotNames;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.client.MinecraftClient;
@@ -13,7 +15,6 @@ import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Vec3d;
@@ -33,9 +34,12 @@ import java.util.Map;
  * - 自身不渲染标记。
  *
  * 阵营判定（无新增协议）：
- *   - 自身/真人玩家：ClientMatchState.board()（服务端 1s 一帧，含 sideOrdinal）按名字匹配；
- *   - AI 增援：NpcSquad 生成名字前缀「攻方增援/守方增援」（服务端已隐藏原版名字牌，
- *     本层以菱形代替标签）。
+ *   - 主来源 {@link ClientMatchState#friends()}：PlayerPosPayload 每 0.25s 刷新，
+ *     含**全部在线单位（真人 + AI 假玩家）**的 name→side —— 大厅阶段（无击杀、
+ *     战绩榜为空）同样可靠；
+ *   - 次来源 ClientMatchState.board()：只登记参与过击杀的人，作兜底；
+ *   - 末位兜底：AI 假玩家命名 BF_A<序号>/BF_D<序号>（见 BotSquad#spawn），
+ *     按前缀即时判别（刚进服、位置帧尚未到达的头 0.25s 也不会漏标）。
  *
  * 深度状态同批冲突：敌我分两遍提交（友军 pass disableDepthTest，敌军 pass 默认深度）。
  * 遮挡 raycast 每实体 250ms 节流（墙后淡化/敌人跳过）。距离 44m 内显示、随距离淡出。
@@ -87,8 +91,9 @@ public final class FriendlyHostileMarks {
 
         // 扫描战场角色（真人 + AI 增援），一次取回两遍共用
         var scanBox = mc.player.getBoundingBox().expand(MAX_DIST + 8);
+        // AI 假玩家已是**真实 ServerPlayerEntity 壳**（BotSquad），故只需扫玩家实体
         var actors = world.getEntitiesByClass(Entity.class, scanBox,
-                e -> e instanceof PlayerEntity || e instanceof ZombieEntity);
+                e -> e instanceof PlayerEntity);
 
         // 友军 pass（穿墙）：先关深度再画；敌军 pass（被墙挡）：恢复深度再画
         RenderSystem.enableBlend();
@@ -119,14 +124,11 @@ public final class FriendlyHostileMarks {
             if (e == mc.player) {
                 continue;
             }
-            boolean isBot = e instanceof ZombieEntity;
-            boolean isPlayer = e instanceof PlayerEntity;
-            if (!isBot && !isPlayer) {
+            if (!(e instanceof PlayerEntity pe)) {
                 continue;
             }
-            int side = isBot
-                    ? botSide((ZombieEntity) e)
-                    : playerSide(e.getDisplayName() != null ? e.getDisplayName().getString() : "");
+            // 用 GameProfile 名（稳定、与位置帧/战绩榜同名）而非展示名（可能带队伍前缀）
+            int side = sideOfName(pe.getGameProfile().getName());
             if (side < 0) {
                 continue; // 未分配/查不到阵营：不标
             }
@@ -220,43 +222,32 @@ public final class FriendlyHostileMarks {
 
     // ================= 阵营判定 =================
 
-    /** 自身 side（board 内按名字匹配）；未入队返回 -1。 */
+    /** 自身 side；未入队返回 -1。 */
     private static int selfSide() {
-        String me = MinecraftClient.getInstance().player.getName().getString();
-        for (BoardRow r : ClientMatchState.board()) {
-            if (r.name().equals(me)) {
-                return r.sideOrdinal();
-            }
-        }
-        return -1;
+        return sideOfName(MinecraftClient.getInstance().player.getGameProfile().getName());
     }
 
-    /** 真人玩家 side：board 匹配名字；查不到返回 -1。 */
-    private static int playerSide(String name) {
+    /**
+     * 名字 → 阵营序号（0=攻 / 1=守 / -1=未知）。
+     *
+     * <p>优先级：位置帧名册（全量、0.25s 刷新） → 战绩榜（仅参与过击杀者） →
+     * AI 命名前缀兜底。**不能只用战绩榜**：大厅阶段没有击杀，榜是空的，
+     * 那样会导致自身 side 都算不出来 → 整个标记层直接不渲染。
+     */
+    private static int sideOfName(String name) {
         if (name == null || name.isEmpty()) {
             return -1;
+        }
+        for (FriendDot f : ClientMatchState.friends()) {
+            if (f.name().equals(name) && f.sideOrdinal() >= 0) {
+                return f.sideOrdinal();
+            }
         }
         for (BoardRow r : ClientMatchState.board()) {
             if (r.name().equals(name)) {
                 return r.sideOrdinal();
             }
         }
-        return -1;
-    }
-
-    /** bot side：NpcSquad 生成名前缀（攻方增援/守方增援）。 */
-    private static int botSide(ZombieEntity e) {
-        var cn = e.getCustomName();
-        if (cn == null) {
-            return -1;
-        }
-        String s = cn.getString();
-        if (s.startsWith("攻方增援")) {
-            return 0;
-        }
-        if (s.startsWith("守方增援")) {
-            return 1;
-        }
-        return -1;
+        return BotNames.sideOfBotName(name);
     }
 }

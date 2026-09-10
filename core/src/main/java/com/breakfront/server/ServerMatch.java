@@ -57,8 +57,13 @@ public final class ServerMatch {
 
     private final TeamManager teams = new TeamManager();
     private final ScoreKeeper score = new ScoreKeeper();
-    private final NpcSquad npc = new NpcSquad();
-    /** 假玩家小队（ServerPlayerEntity 作壳；与 npc 互斥启用，见 BotSquad 类注释）。 */
+    /**
+     * AI 战场小队（假玩家壳）。
+     *
+     * <p>2026-09-10 v2：旧的僵尸壳 {@code NpcSquad} 已**整体移除**（它按
+     * 「目标 - 在线」补员，无真人时会无限补员 —— 实测 alive 涨到 755，直接把 TPS 拖垮）。
+     * 现全部走本小队：大厅维持「非战斗 BOT」编制，真人进服即时热顶替。
+     */
     private final BotSquad bots = new BotSquad();
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     /** 玩家选定的下一重生点：zoneId / "base" / "observe"（一次消费，详见 setDeployChoice）。 */
@@ -152,7 +157,7 @@ public final class ServerMatch {
         game.returnToLobby();
         autoArmed = false;
         autoTimer = -1;
-        npc.clearAll(server);
+        bots.clearAll(server);
         BreakfrontServer.LOGGER.info("[Breakfront] layout applied to live match (lobby)");
         pushEditorPreview(server);
         return "已应用并保存扇区布局，对局回到大厅（自动填充将在有真人后重开）：\n" + layout.toText();
@@ -237,7 +242,6 @@ public final class ServerMatch {
             placeZoneVisuals(server.getOverworld());
             visualsPlaced = true;
         }
-        npc.tick(this, server); // NPC 增援向目标点推进
         var overworld = server.getOverworld();
         for (int idx = 0; idx < zoneOrder.size(); idx++) {
             ZoneAnchor anchor = anchors.get(zoneOrder.get(idx));
@@ -247,7 +251,7 @@ public final class ServerMatch {
                 if (player.getWorld() != overworld || player.isSpectator()) {
                     continue;
                 }
-                Side side = teams.sideOf(player.getUuid());
+                Side side = sideOfEntity(player);
                 if (side == null) {
                     continue;
                 }
@@ -285,6 +289,27 @@ public final class ServerMatch {
     }
 
     /**
+     * 实体的阵营归属。
+     *
+     * <p>优先走 {@link TeamManager}；**AI 假玩家不在 TeamManager 里**（它们只是占位编制），
+     * 因此回退到命令标签 {@code bf.side.att/def} —— 否则假玩家会被判为「无阵营」，
+     * 既不参与据点人数判定，也不吃友伤豁免。
+     */
+    private Side sideOfEntity(ServerPlayerEntity p) {
+        Side s = teams.sideOf(p.getUuid());
+        if (s != null) {
+            return s;
+        }
+        if (p.getCommandTags().contains("bf.side.att")) {
+            return Side.ATTACKER;
+        }
+        if (p.getCommandTags().contains("bf.side.def")) {
+            return Side.DEFENDER;
+        }
+        return null;
+    }
+
+    /**
      * 开局赛程：
      * - autoFill 开 & 大厅有真人 → 双阵营补齐至 16 并 5 秒后自动开局（单人=1 真人其余 AI）
      * - autoFill 关 → 沿用旧规则：双真实阵营就绪自动开（/bf autostart on）或 /bf start 手动开
@@ -304,7 +329,7 @@ public final class ServerMatch {
         if (autoFill && humans > 0) {
             if (!autoArmed) {
                 desiredPerSide = pickFillTarget(server);
-                npc.applyFill(this, server, desiredPerSide, desiredPerSide);
+                applyFillTarget(server, desiredPerSide);
                 autoArmed = true;
                 autoTimer = 5.0;
                 float tps = server.getAverageTickTime() <= 0 ? 20f : 1000f / server.getAverageTickTime();
@@ -317,7 +342,7 @@ public final class ServerMatch {
                     int next = pickFillTarget(server);
                     if (next != desiredPerSide) {
                         desiredPerSide = next;
-                        npc.applyFill(this, server, desiredPerSide, desiredPerSide);
+                        applyFillTarget(server, desiredPerSide);
                         BreakfrontServer.LOGGER.info("[Breakfront] AI fill adjusted to {}v{} (tps={})",
                                 desiredPerSide, desiredPerSide,
                                 String.format("%.0f", server.getAverageTickTime() <= 0 ? 20f
@@ -399,13 +424,17 @@ public final class ServerMatch {
      */
     private void placeZoneVisuals(ServerWorld world) {
         for (ZoneAnchor anchor : anchors.values()) {
-            int cx = (int) anchor.x();
-            int cz = (int) anchor.z();
-            int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, cx, cz);
-            if (topY <= world.getBottomY()) {
+            // groundY 内部会按需载入已存在区块；无地形（未生成区）返回 NaN → 跳过，
+            // 不再把信标放到世界底部（那会让客户端地面标识整体错位）。
+            double gy = groundY(world, anchor.x(), anchor.z());
+            if (Double.isNaN(gy)) {
+                BreakfrontServer.LOGGER.warn(
+                        "[Breakfront] 据点 {} 处无地形，跳过信标放置（坐标落在未生成区块）",
+                        anchor.zoneId());
                 continue;
             }
-            world.setBlockState(new BlockPos(cx, topY + 1, cz), Blocks.BEACON.getDefaultState(), 3);
+            world.setBlockState(new BlockPos((int) Math.floor(anchor.x()), (int) gy,
+                    (int) Math.floor(anchor.z())), Blocks.BEACON.getDefaultState(), 3);
         }
     }
 
@@ -414,9 +443,11 @@ public final class ServerMatch {
         return groundY(world, anchor.x(), anchor.z());
     }
 
-    /** 据点锚点坐标摘要（供 /bf status 展示，方便传送验证）。 */
+    /** 据点锚点坐标摘要（供 /bf status 展示，方便传送验证）；无地形的锚点会标红提示。 */
     public String zoneAnchorsText() {
         StringBuilder sb = new StringBuilder();
+        var srv = BreakfrontServer.server();
+        ServerWorld world = srv == null ? null : srv.getOverworld();
         int gi = 0;
         for (String id : zoneOrder) {
             ZoneAnchor a = anchors.get(id);
@@ -425,6 +456,10 @@ public final class ServerMatch {
                     .append(String.format("%.1f", a.x())).append(", z=")
                     .append(String.format("%.1f", a.z())).append(", r=")
                     .append(String.format("%.0f", a.radius())).append(')');
+            // 坐标合法性体检：落在未生成区块的锚点会让地面标识「高度错乱/看不到」
+            if (world != null && Double.isNaN(groundY(world, a.x(), a.z()))) {
+                sb.append("  §c⚠ 无地形（落在未生成区块，请在管理台按真实俯瞰图重划扇区）§r");
+            }
             gi++;
         }
         return sb.toString();
@@ -483,7 +518,12 @@ public final class ServerMatch {
             return "据点不存在: " + zoneId + "（/bfs list 查看全部 id）";
         }
         ServerWorld world = server.getOverworld();
-        double y = groundY(world, a.x(), a.z()) + 1.5;
+        double gy = groundY(world, a.x(), a.z());
+        if (Double.isNaN(gy)) {
+            return String.format("据点 %s 坐标 (x=%.0f, z=%.0f) 处无地形（落在未生成区块），"
+                    + "请先在管理台按真实俯瞰图重划扇区", zoneId, a.x(), a.z());
+        }
+        double y = gy + 1.5;
         exec(server, String.format("tp %s %.1f %.1f %.1f",
                 player.getGameProfile().getName(), a.x(), y, a.z()));
         return String.format("已传送至 %s（x=%.0f, z=%.0f, r=%.0f）",
@@ -544,7 +584,10 @@ public final class ServerMatch {
     private void broadcastPos(MinecraftServer server) {
         var rows = new ArrayList<PlayerPosPayload.Row>();
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            Side side = teams.sideOf(p.getUuid());
+            // ⚠️ 必须走 sideOfEntity 而非 teams.sideOf：AI 假玩家（BotSquad）不在
+            // TeamManager 里，只挂了 bf.side.att/def 命令标签；用 teams.sideOf 会让它们
+            // 一律变成 -1，客户端据此就无法给 BOT 标友方/敌方（雷达、头顶菱形全会缺）。
+            Side side = sideOfEntity(p);
             int s = side == null ? -1 : side.ordinal();
             rows.add(new PlayerPosPayload.Row(p.getGameProfile().getName(), s,
                     p.getX(), p.getZ(), p.getYaw(), p.isAlive() && p.getHealth() > 0));
@@ -585,18 +628,28 @@ public final class ServerMatch {
         return layout;
     }
 
-    /** 开局统一入口：重开状态机、清战绩、补 NPC、复位据点标识、全员发装备。 */
+    /** 开局统一入口：重开状态机、清战绩、重置 AI 编制、复位据点标识、全员发装备。 */
     public void beginRound() {
         game.startRound();
         score.reset();
         visualsPlaced = false;
-        npc.beginRound(this, BreakfrontServer.server());
         MinecraftServer server = BreakfrontServer.server();
+        bots.clearAll(server);          // 新回合：AI 编制归零，随后按对账在新出生点重建
         if (server != null) {
+            bots.reconcile(this, server);
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                 kitPlayer(server, p);
             }
         }
+    }
+
+    /**
+     * 设置双阵营填充目标并立即对账（大厅「非战斗 BOT」+ 真人热顶替都在 {@code reconcile} 内完成）。
+     */
+    private void applyFillTarget(MinecraftServer server, int perSide) {
+        bots.setTarget(Side.ATTACKER, perSide);
+        bots.setTarget(Side.DEFENDER, perSide);
+        bots.reconcile(this, server);
     }
 
     /** 兵种装备发放（进服/开局/重生共用入口）。 */
@@ -613,16 +666,12 @@ public final class ServerMatch {
         return score;
     }
 
-    public NpcSquad npc() {
-        return npc;
-    }
-
-    /** 假玩家小队（AI BOT 重构的玩家壳实现）。 */
+    /** 假玩家小队（AI BOT 的玩家壳实现；大厅「非战斗 BOT」与真人热顶替都在这里）。 */
     public BotSquad bots() {
         return bots;
     }
 
-    /** 供 NpcSquad 使用的公开坐标（出生 y 含地面）。 */
+    /** 出生点公开坐标（出生 y 已含地面）；供 AI 小队与外部工具复用。 */
     public double[] spawnsFor(Side side, ServerWorld world) {
         return spawnFor(side, world);
     }
@@ -735,6 +784,9 @@ public final class ServerMatch {
         if (teams.sideOf(player.getUuid()) == null) {
             teams.assignLeast(player.getUuid());
         }
+        // 真人入编 → **立刻**对账：该侧（真人+BOT）超编时移除一个 BOT，真人直接接管它的名额。
+        // 放在部署之前，保证 BOT 让出的位置不会被下一轮补员抢回去。
+        bots.reconcile(this, server);
         // 任意阶段进服都部署到己方出生区（spawnFor 保证落真实实体表面；不再有假高度二次传送）
         deployPlayer(server, player);
         kitPlayer(server, player);
@@ -1035,14 +1087,40 @@ public final class ServerMatch {
         return topY <= world.getBottomY() ? Double.NaN : (double) topY;
     }
 
+    /**
+     * 据点/落点地表高度（最高方块顶 +1）；**无有效地面时返回 {@link Double#NaN}**。
+     *
+     * <p>⚠️ 2026-09-10 修「扇区区域在游戏中的展示位置/高度错乱」：
+     * 原实现在**区块未载入**时 {@code getTopY} 恒返回世界底部，于是退化成
+     * {@code bottomY + 3}（≈ -61）这个「假高度」。该值随状态包下发给客户端后，
+     * 客户端的据点地面标识（WorldZoneRings 的方坪/边带/角柱/光柱）就画在基岩层以下
+     * —— 玩家在 y≈70 时要么完全看不到，要么看到贴地错位/穿模的残影。
+     *
+     * <p>现改为两级处理：
+     * <ol>
+     *   <li>先按需载入该列所在**已存在**的区块（{@code create=false}，绝不触发新地形生成）；</li>
+     *   <li>仍无地形（坐标真的落在未生成区/虚空）→ 返回 {@code NaN}。
+     *       调用方与客户端据此判为「无有效地面」并**跳过渲染**，而不是画一个假高度。</li>
+     * </ol>
+     */
     private double groundY(ServerWorld world, double x, double z) {
-        int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, (int) Math.floor(x), (int) Math.floor(z));
+        int bx = (int) Math.floor(x);
+        int bz = (int) Math.floor(z);
+        if (!world.isChunkLoaded(bx >> 4, bz >> 4)) {
+            try {
+                world.getChunkManager().getChunk(bx >> 4, bz >> 4,
+                        net.minecraft.world.chunk.ChunkStatus.FULL, false);
+            } catch (Throwable ignored) {
+                // 读盘失败按「无地面」处理
+            }
+        }
+        int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, bx, bz);
         if (topY > world.getBottomY()) {
             return topY + 1.0;
         }
-        // 该列无方块（低海拔/虚空区）：在 ±6 邻域找最近真实站面，避免回退 64 高空假高度
+        // 该列无方块（低海拔/虚空区）：在 ±6 邻域找最近真实站面
         double nt = neighborTopY(world, x, z);
-        return Double.isNaN(nt) ? world.getBottomY() + 3.0 : nt + 1.0;
+        return Double.isNaN(nt) ? Double.NaN : nt + 1.0;
     }
 
     /** 在 (x,z) ±6 邻域内找最高「真实 MOTION_BLOCKING 方块顶」；全空返回 NaN。 */
@@ -1126,7 +1204,7 @@ public final class ServerMatch {
         autoArmed = false;
         autoTimer = -1;
         if (!on) {
-            npc.clearAll(BreakfrontServer.server());
+            bots.clearAll(BreakfrontServer.server());
         }
         saveServerProps();
     }

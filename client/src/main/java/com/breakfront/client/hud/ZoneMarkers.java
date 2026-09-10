@@ -126,6 +126,9 @@ public final class ZoneMarkers {
         // 错开槽位：每条屏缘记录已占用的 y/x，防止同侧箭头重叠
         int[] edgeCursor = new int[4]; // 0右 1左 2下 3上
         for (ZoneView zone : zones) {
+            if (!WorldZoneRings.hasGround(zone)) {
+                continue; // 无有效地面（未生成区块）→ 不画屏缘箭头/世界标记，避免错位指示
+            }
             double wx = zone.worldX();
             double wz = zone.worldZ();
             double wy = WorldZoneRings.anchorY(zone) + 2.0;

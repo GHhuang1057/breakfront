@@ -17,28 +17,31 @@ import java.util.UUID;
 /**
  * 假玩家战场小队（2026-09-10 v1）—— AI BOT 重构的「可用闭环」。
  *
- * <h2>与 {@link NpcSquad} 的关系</h2>
- * 并存而非替换。{@code NpcSquad} 用 {@code ZombieEntity} 作壳、原版导航移动；
- * 本类用 {@link ServerPlayerEntity} 假玩家作壳（见 {@link BotPlayerFactory}）、
- * {@link BotMotor} 驱动位移。两者**互斥启用**：
+ * <h2>编制模型（2026-09-10 v2：非战斗 BOT + 真人热顶替）</h2>
+ * 不变量：**某侧（真人 + BOT）总数 == 该侧目标人数**（见 {@link #reconcile}）。
  * <ul>
- *   <li>旧壳渲染/追踪走怪物通路，需不断打补丁（防火、禁 AI、persistent 防 despawn），
- *       仍会有「忽隐忽现」的观感问题；</li>
- *   <li>新壳与真人走**完全相同**的实体、渲染、追踪、伤害、计分通路 —— 从根上消除该问题。</li>
+ *   <li><b>非战斗 BOT</b>：大厅阶段同样维持编制 —— 空服也始终有成建制的双方；</li>
+ *   <li><b>热顶替</b>：真人进服并被分到某侧后，该侧立刻移除一个 BOT，真人直接占位，
+ *       <u>不需要</u>改目标人数、也不需要重开回合；真人退服则下一轮对账补回 BOT。</li>
  * </ul>
- * 保留旧实现是为了回退安全：新系统经真机验证后再考虑摘除旧代码。
  *
- * <h2>行为（第一版：跑通优先）</h2>
+ * <h2>壳的选择（历史决策）</h2>
+ * 早先用 {@code ZombieEntity} 作壳（原 {@code NpcSquad}，已在本版**移除**）：怪物通路与
+ * 真人不同，需要不断打补丁（防火、禁 AI、persistent 防 despawn），仍有「忽隐忽现」观感，
+ * 且其按「目标 - 在线」补员的写法会在没人时**无限补员**（实测 alive 涨到 755）。
+ * 现统一用 {@link ServerPlayerEntity} 假玩家作壳（见 {@link BotPlayerFactory}）：
+ * 与真人走**完全相同**的实体、渲染、追踪、伤害、计分通路。
+ *
+ * <h2>行为</h2>
  * <ul>
  *   <li><b>无敌人</b>：朝当前扇区目标据点推进（攻方聚首点、守方按 id 分散到各点）</li>
  *   <li><b>有敌人</b>（≤{@value #ENGAGE_RANGE}m 且视线通畅）：停下、转向、周期开火</li>
- *   <li><b>阵亡</b>：从名册移除，由补员逻辑在出生点重建（与真人复活语义一致）</li>
+ *   <li><b>阵亡</b>：摘除实体后**同名重建**（身份稳定，不刷玩家列表）</li>
  * </ul>
  *
  * <h2>已知取舍</h2>
  * <ul>
- *   <li>假玩家入列会触发服务端「XX joined the game」广播（{@code onPlayerConnect} 内置行为）。
- *       这是管理员指令触发的运维动作，暂接受；若需静默需 mixin 拦截广播。</li>
+ *   <li>假玩家入列会触发服务端「XX joined the game」广播（{@code onPlayerConnect} 内置行为）。</li>
  *   <li>寻路为「朝目标直线 + 卡住重试」，未做完整 A*。城市街区尚可，复杂室内后续升级。</li>
  * </ul>
  */
@@ -48,7 +51,7 @@ public final class BotSquad {
     private static final String NAME_PREFIX = "BF_";
     /** 索敌半径（米）。 */
     private static final double SCAN_RANGE = 34.0;
-    /** 有效射程：超出不自伤开火（与 NpcSquad 口径一致）。 */
+    /** 有效射程：超出不开火（避免"隔街互射"的观感）。 */
     private static final double GUN_RANGE = 30.0;
     /** 进入交战（停步开火）的距离。 */
     private static final double ENGAGE_RANGE = 24.0;
@@ -74,9 +77,20 @@ public final class BotSquad {
      */
     private static final int DEPLOY_PROTECT_TICKS = 160;
 
-    private final Map<UUID, Trooper> troopers = new HashMap<>();
+    private final Map<UUID, Trooper> troopers = new java.util.LinkedHashMap<>();
     private int targetAttacker;
     private int targetDefender;
+    /**
+     * 是否在大厅（非战斗）阶段也维持编制 —— 即「非战斗 BOT」。
+     *
+     * <p>开：一进服就能看到成建制的双方 AI（不再是空荡荡的大厅），
+     * 且真人进服时立刻腾出名额。关：只在 BATTLE 阶段填充。
+     */
+    private boolean lobbyPresence = true;
+    /** 最近一次「真人热顶替 BOT」的可读说明（供管理台/日志）。 */
+    private volatile String lastTakeover = "";
+    /** 累计顶替次数（诊断用）。 */
+    private int takeoverCount;
     private int attSeq;
     private int defSeq;
     private int tickCounter;
@@ -101,8 +115,9 @@ public final class BotSquad {
         LivingTarget foe;
     }
 
-    // ---------- 对外接口（与 NpcSquad 对齐，便于将来互换） ----------
+    // ---------- 对外接口 ----------
 
+    /** 设定某侧**目标总人数（含真人）**；0 = 不填充。 */
     public void setTarget(Side side, int count) {
         if (side == Side.ATTACKER) {
             targetAttacker = Math.max(0, count);
@@ -111,13 +126,27 @@ public final class BotSquad {
         }
     }
 
+    public int targetOf(Side side) {
+        return side == Side.ATTACKER ? targetAttacker : targetDefender;
+    }
+
+    public void setLobbyPresence(boolean on) {
+        this.lobbyPresence = on;
+    }
+
     public int alive() {
         return troopers.size();
     }
 
+    /** 累计被真人顶替的次数（管理台/诊断）。 */
+    public int humansEngaged() {
+        return takeoverCount;
+    }
+
     public String info() {
-        return String.format("假玩家小队：攻 %d / 守 %d 目标，当前存活 %d",
-                targetAttacker, targetDefender, troopers.size());
+        return String.format("假玩家小队：攻 %d / 守 %d 目标（含真人），当前 BOT %d，已热顶替 %d 次%s",
+                targetAttacker, targetDefender, troopers.size(), takeoverCount,
+                lastTakeover.isEmpty() ? "" : "；最近：" + lastTakeover);
     }
 
     public void clearAll(MinecraftServer server) {
@@ -127,31 +156,85 @@ public final class BotSquad {
         troopers.clear();
         targetAttacker = 0;
         targetDefender = 0;
+        lastTakeover = "";
     }
 
-    /** 按目标人数补员（不改动已有单位）。 */
+    /**
+     * <b>编制对账</b>——整套「非战斗 BOT + 真人热顶替」的核心。
+     *
+     * <p>不变量：**某侧（真人 + BOT）总数 == 该侧目标人数**。据此：
+     * <ul>
+     *   <li>真人进服并被分到某侧 → 该侧超编 → <b>立刻移除一个同侧 BOT</b>（热顶替），
+     *       真人直接占住那个名额与位置，无需改目标数、无需重开回合；</li>
+     *   <li>真人退服 → 该侧欠编 → 下一轮对账补回一个 BOT；</li>
+     *   <li>大厅阶段同样执行（{@link #lobbyPresence}）→ 空服也始终是成建制双方。</li>
+     * </ul>
+     * 顶替优先裁掉**最后补进来**的那个（LinkedHashMap 尾部），让先来的单位位置稳定。
+     */
+    public void reconcile(ServerMatch match, MinecraftServer server) {
+        // 1) 清扫阵亡单位：玩家壳死亡后仍会留在玩家列表等待重生，必须显式摘除，
+        //    否则会累积「幽灵在线」。摘除后按**同名**重建，保持身份稳定
+        //    （避免玩家列表不停 join/leave、playerdata 无限增长）。
+        for (Trooper t : new ArrayList<>(troopers.values())) {
+            ServerPlayerEntity bot = entity(server, t);
+            if (bot == null) {
+                if (tickCounter - t.spawnTick > 40) {
+                    troopers.remove(t.id);          // 实体确实没了（如被 /kill 且未入列）
+                }
+                continue;
+            }
+            if (bot.isAlive()) {
+                continue;
+            }
+            BotPlayerFactory.remove(server, bot);
+            respawn(match, server, t);
+        }
+        if (!lobbyPresence && match.game().phase() != MatchPhase.BATTLE) {
+            return;                                 // 仅战斗中填充
+        }
+        // 2) 逐侧对账：真人多了裁 BOT（热顶替），BOT 少了补 BOT
+        for (Side side : new Side[]{Side.ATTACKER, Side.DEFENDER}) {
+            int target = targetOf(side);
+            int humans = countHumans(match, server, side);
+            int wantBots = Math.max(0, target - humans);
+            List<Trooper> mine = sideTroopers(side);
+            if (mine.size() > wantBots) {
+                for (int i = 0, drop = mine.size() - wantBots; i < drop; i++) {
+                    Trooper t = mine.get(mine.size() - 1 - i);   // 后进先出
+                    remove(server, t);
+                    takeoverCount++;
+                    lastTakeover = side.labelCn + " " + t.name + " → 真人接管（真人 " + humans
+                            + " / 目标 " + target + "）";
+                    BreakfrontServer.LOGGER.info(
+                            "[BF-Bot] 真人热顶替：移除 {} 侧 BOT {}（真人 {}，目标 {}）",
+                            side.labelCn, t.name, humans, target);
+                }
+            } else if (mine.size() < wantBots) {
+                for (int i = 0, n = wantBots - mine.size(); i < n; i++) {
+                    spawn(match, server, side);
+                }
+            }
+        }
+    }
+
+    /** 兼容旧调用点：按当前目标补齐编制（现在等价于一次对账）。 */
     public void ensure(ServerMatch match, MinecraftServer server) {
-        int att = countAlive(Side.ATTACKER);
-        int def = countAlive(Side.DEFENDER);
-        for (int i = 0; i < Math.max(0, targetAttacker - att); i++) {
-            spawn(match, server, Side.ATTACKER);
-        }
-        for (int i = 0; i < Math.max(0, targetDefender - def); i++) {
-            spawn(match, server, Side.DEFENDER);
-        }
+        reconcile(match, server);
     }
 
     // ---------- 每 tick 推进 ----------
 
     public void tick(ServerMatch match, MinecraftServer server) {
-        if (troopers.isEmpty()) {
-            return;
-        }
         tickCounter++;
         boolean upkeep = tickCounter % MAINTAIN_EVERY_TICKS == 0;
-        // 每 20 tick：清扫阵亡并补员（真人死亡也是这个节奏被系统感知）
+        // 每 1s 编制对账（战斗/大厅一致）：
+        //   大厅 = 维持「非战斗 BOT」编制 + 真人进服即时热顶替；
+        //   战斗 = 阵亡同名补员 + 真人顶替。
         if (tickCounter % 20 == 0) {
-            sweepAndReinforce(match, server);
+            reconcile(match, server);
+        }
+        if (troopers.isEmpty()) {
+            return;
         }
         if (match.game().phase() != MatchPhase.BATTLE) {
             // 非战斗阶段：不下发移动，但仍做最低限度的状态维持，
@@ -283,19 +366,29 @@ public final class BotSquad {
         troopers.remove(t.id);
     }
 
-    /** 清扫阵亡 bot 并**同名重生**（编制固定，不新增玩家身份）。 */
-    private void sweepAndReinforce(ServerMatch match, MinecraftServer server) {
-        for (Trooper t : new ArrayList<>(troopers.values())) {
-            ServerPlayerEntity bot = entity(server, t);
-            if (bot != null && bot.isAlive()) {
+    /** 该侧**真人**数量（按 TeamManager 归属；AI 假玩家不计入——它们的名额就是用来被顶替的）。 */
+    private int countHumans(ServerMatch match, MinecraftServer server, Side side) {
+        int n = 0;
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (BotPlayerFactory.isBot(p)) {
                 continue;
             }
-            if (bot != null) {
-                // 玩家实体死亡后仍留在玩家列表（等待重生），必须显式摘除，否则会"幽灵在线"
-                BotPlayerFactory.remove(server, bot);
+            if (match.teams().sideOf(p.getUuid()) == side) {
+                n++;
             }
-            respawn(match, server, t);
         }
+        return n;
+    }
+
+    /** 该侧当前 BOT 名册（LinkedHashMap 保序：尾部 = 最后补进来的）。 */
+    private List<Trooper> sideTroopers(Side side) {
+        List<Trooper> out = new ArrayList<>();
+        for (Trooper t : troopers.values()) {
+            if (t.side == side) {
+                out.add(t);
+            }
+        }
+        return out;
     }
 
     // ---------- 行为 ----------

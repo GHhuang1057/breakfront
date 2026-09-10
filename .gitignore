@@ -38,3 +38,7 @@ pack/tools/.modjar_cache/
 
 # MC 主机 SSH 凭据（本地私密，勿入库）
 .bf_mc_secret
+
+# 误在仓库根跑 npm 时产生的残留（本项目无 Node 构建）
+package-lock.json
+node_modules/

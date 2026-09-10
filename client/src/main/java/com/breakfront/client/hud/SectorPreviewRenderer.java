@@ -22,8 +22,6 @@ import java.util.List;
  */
 public final class SectorPreviewRenderer {
 
-    private static final int SEGMENTS = 48;
-
     // 扇区分色轮盘（BF 语义近似：攻/守蓝橙之外顺延绿、黄…）
     private static final int[][] PALETTE = {
             {232, 98, 44},    // 橙（扇区一/进攻侧）
@@ -47,16 +45,29 @@ public final class SectorPreviewRenderer {
         if (zones.isEmpty()) {
             return;
         }
+        var mc = net.minecraft.client.MinecraftClient.getInstance();
+        var world = mc.world;
+        if (world == null) {
+            return;
+        }
         Matrix4f m = context.positionMatrix();
         int cur = SectorEditState.currentSector();
         for (ZoneView zone : zones) {
+            // ⚠️ 无有效地面（坐标落在未生成区块/虚空）→ 跳过：以前会拿旧版服务端下发的
+            // bottomY+3 假高度画在基岩层，导致编辑器里「圈全都不见了/位置错乱」。
+            double gy = zone.groundY();
+            if (Double.isNaN(gy) || gy <= world.getBottomY() + 2.0) {
+                continue;
+            }
             int[] rgb = PALETTE[(zone.sectorIndex() & 0x7fffffff) % PALETTE.length];
             boolean active = zone.sectorIndex() == cur;
             int a = active ? 255 : 180;
-            drawRing(m, zone.worldX(), zone.groundY() + 0.12, zone.worldZ(),
-                    zone.radius(), rgb[0], rgb[1], rgb[2], a, active ? 2.0 : 1.0);
+            // 与服务端方形判定（|dx|≤r 且 |dz|≤r）保持一致：画方框而非圆环，
+            // 避免"看到的范围"和"实际占领判定范围"对不上。
+            drawSquare(m, zone.worldX(), gy + 0.12, zone.worldZ(),
+                    zone.radius(), rgb, a, active ? 2.0 : 1.0);
             if (active) {
-                drawCenterMark(m, zone.worldX(), zone.groundY() + 0.22, zone.worldZ(), rgb);
+                drawCenterMark(m, zone.worldX(), gy + 0.22, zone.worldZ(), rgb);
             }
         }
     }
@@ -80,23 +91,28 @@ public final class SectorPreviewRenderer {
         RenderSystem.disableBlend();
     }
 
-    private static void drawRing(Matrix4f m, double cx, double y, double cz,
-                                 double radius, int r, int g, int b, int a, double width) {
+    /** 方形边界框（与服务端 |dx|≤r 且 |dz|≤r 的判定一致）。 */
+    private static void drawSquare(Matrix4f m, double cx, double y, double cz,
+                                   double radius, int[] rgb, int a, double width) {
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.setShader(GameRenderer::getRenderTypeLinesProgram);
         RenderSystem.lineWidth((float) width);
         BufferBuilder buffer = Tessellator.getInstance()
                 .begin(VertexFormat.DrawMode.DEBUG_LINE_STRIP, VertexFormats.LINES);
-        double step = Math.PI * 2.0 / SEGMENTS;
-        float rf = r / 255f;
-        float gf = g / 255f;
-        float bf = b / 255f;
+        float rf = rgb[0] / 255f;
+        float gf = rgb[1] / 255f;
+        float bf = rgb[2] / 255f;
         float af = a / 255f;
-        for (int i = 0; i <= SEGMENTS; i++) {
-            double ang = i * step;
-            buffer.vertex(m, (float) (cx + radius * Math.cos(ang)), (float) y,
-                            (float) (cz + radius * Math.sin(ang)))
+        double[][] pts = {
+                {cx - radius, cz - radius},
+                {cx + radius, cz - radius},
+                {cx + radius, cz + radius},
+                {cx - radius, cz + radius},
+                {cx - radius, cz - radius},
+        };
+        for (double[] p : pts) {
+            buffer.vertex(m, (float) p[0], (float) y, (float) p[1])
                     .color(rf, gf, bf, af)
                     .normal(0.0f, 1.0f, 0.0f);
         }
