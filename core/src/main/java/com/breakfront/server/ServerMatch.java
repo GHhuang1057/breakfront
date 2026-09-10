@@ -99,6 +99,11 @@ public final class ServerMatch {
      * 大厅阶段统一落 BF 出生点，可保证「进服即在出生点」，与据点配置是否过期无关。
      */
     private final double[] lobbySpawn = {Double.NaN, Double.NaN};
+    /**
+     * 管理员是否**手动接管**了 AI 编制（/bf bot trial 或 /bf npc add）。
+     * true 时空服自愈不介入，避免把调试用的 BOT 秒清；/bf bot clear 交还给自动管理。
+     */
+    private boolean botManual;
 
     // ---- AI 自动填充（人机对战 / 单机=一真人其余AI）----
     private boolean autoFill = true;    // 默认开：有真人即按负载填充并自动开局
@@ -389,6 +394,11 @@ public final class ServerMatch {
      * 幂等：已经干净时直接返回，不会每 tick 反复刷日志。
      */
     private void resetWhenEmpty(MinecraftServer server) {
+        // 管理员用 /bf bot trial|add 手动接管编制时，不自愈 —— 否则刚生成用于调试的
+        // BOT 会被下一个 tick 立刻清掉（实测踩过）。交还自动管理用 /bf bot clear。
+        if (botManual) {
+            return;
+        }
         boolean dirty = game.phase() != MatchPhase.LOBBY
                 || bots.alive() > 0
                 || autoArmed
@@ -736,6 +746,17 @@ public final class ServerMatch {
     /** 假玩家小队（AI BOT 的玩家壳实现；大厅「非战斗 BOT」与真人热顶替都在这里）。 */
     public BotSquad bots() {
         return bots;
+    }
+
+    /**
+     * 标记 / 解除「管理员手动接管 AI 编制」。
+     *
+     * <p>{@code true}（{@code /bf bot trial}、{@code /bf npc add}）：空服自愈不介入，
+     * 否则刚生成用于调试的 BOT 会被下一个 tick 立刻清掉。
+     * <p>{@code false}（{@code /bf bot clear}）：交还大厅赛程自动管理。
+     */
+    public void setBotManual(boolean on) {
+        this.botManual = on;
     }
 
     /** 出生点公开坐标（出生 y 已含地面）；供 AI 小队与外部工具复用。 */

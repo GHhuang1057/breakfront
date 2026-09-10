@@ -469,9 +469,10 @@ root = root.then(literal("team")
                 .then(literal("clear").executes(ctx -> {
                     var match = BreakfrontServer.match();
                     if (match != null) {
+                        match.setBotManual(false);   // 交还大厅赛程自动管理
                         match.bots().clearAll(BreakfrontServer.server());
                     }
-                    send(ctx.getSource(), "已清除全部 AI BOT（目标数归零）");
+                    send(ctx.getSource(), "已清除全部 AI BOT（目标数归零，已交还自动管理）");
                     return 1;
                 }))
                 .then(npcSetNode("attacker", Side.ATTACKER))
@@ -487,6 +488,7 @@ root = root.then(literal("team")
                                 return 0;
                             }
                             int n = IntegerArgumentType.getInteger(ctx, "n");
+                            match.setBotManual(true);   // 手动接管：空服自愈不介入
                             match.bots().setTarget(side, n);
                             match.bots().reconcile(match, BreakfrontServer.server());
                             send(ctx.getSource(), side.labelCn + " AI 编制目标（含真人）=" + n);
@@ -524,6 +526,7 @@ root = root.then(literal("team")
                                         return 0;
                                     }
                                     int n = IntegerArgumentType.getInteger(ctx, "n");
+                                    match.setBotManual(true);   // 手动接管：空服自愈不介入
                                     match.bots().setTarget(Side.ATTACKER, n);
                                     match.bots().setTarget(Side.DEFENDER, n);
                                     match.bots().reconcile(match, server);
@@ -536,8 +539,9 @@ root = root.then(literal("team")
                     if (match == null) {
                         return 0;
                     }
+                    match.setBotManual(false);   // 交还大厅赛程自动管理
                     match.bots().clearAll(BreakfrontServer.server());
-                    send(ctx.getSource(), "已清除全部假玩家");
+                    send(ctx.getSource(), "已清除全部假玩家（已交还自动管理）");
                     return 1;
                 }));
     }
