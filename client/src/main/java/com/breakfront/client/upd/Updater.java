@@ -1,5 +1,6 @@
 package com.breakfront.client.upd;
 
+import com.breakfront.client.bf.BfServerConfig;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,7 +66,7 @@ public final class Updater {
     /** 轻量探测更新源是否在线（主菜单状态徽章用）。 */
     public static boolean probe(String host, int updatePort) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create("http://" + host + ":" + updatePort
+            HttpRequest req = HttpRequest.newBuilder(URI.create(BfServerConfig.updateBase()
                             + "/breakfront/manifest.json"))
                     .timeout(Duration.ofSeconds(3))
                     .GET()
@@ -91,7 +92,7 @@ public final class Updater {
             progress.report("正在检查更新源…", 0.02f);
         }
         try {
-            String base = "http://" + host + ":" + updatePort;
+            String base = BfServerConfig.updateBase();
             String manifest = fetchWithRetry(base + "/breakfront/manifest.json");
             if (manifest == null) {
                 return new Result(Outcome.SKIPPED_NO_SOURCE, "更新源不可达（跳过更新）");

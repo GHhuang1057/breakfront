@@ -1,5 +1,6 @@
 package com.breakfront.client.upd;
 
+import com.breakfront.client.bf.BfServerConfig;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,7 +42,7 @@ public final class MusicUpdater {
 
     /** 进度回调（与 {@link Updater.Progress} 同形，复用其定义）。 */
     public static SyncResult sync(String host, int updatePort, Updater.Progress progress) {
-        String base = "http://" + host + ":" + updatePort + "/breakfront/music";
+        String base = BfServerConfig.updateBase() + "/breakfront/music";
         List<MusicFile> remote = new ArrayList<>();
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(base + "/music.json"))

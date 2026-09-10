@@ -28,6 +28,8 @@ public final class BfServerConfig {
     private static String host = DEFAULT_HOST;
     private static int port = DEFAULT_PORT;
     private static int updatePort = DEFAULT_UPDATE_PORT;
+    /** 更新/音乐通道基址覆盖（如 https://bfupdate.geekhonize.top）；留空回退 http://host:updatePort。 */
+    private static String updateBase = "";
 
     private BfServerConfig() {
     }
@@ -53,6 +55,8 @@ public final class BfServerConfig {
                         "# BREAKFRONT 联机配置",
                         "# 默认即公测服 mc.geekhonize.top（内置），以下两行通常无需改动",
                         "# 自建/本地测试服请改 host（如 localhost）并保持端口一致",
+                        "# updatebase：更新/音乐通道基址（公测服走 https://bfupdate.geekhonize.top 经 Cloudflare）；"
+                                + "留空则回退 http://host:updateport",
                         "host=" + DEFAULT_HOST,
                         "port=" + DEFAULT_PORT,
                         "updatePort=" + DEFAULT_UPDATE_PORT) + "\n",
@@ -61,6 +65,14 @@ public final class BfServerConfig {
             host = kv.getOrDefault("host", DEFAULT_HOST);
             port = parseIntSafe(kv.get("port"), DEFAULT_PORT);
             updatePort = parseIntSafe(kv.get("updateport"), DEFAULT_UPDATE_PORT);
+            String ub = kv.getOrDefault("updatebase", "");
+            if (ub == null) {
+                ub = "";
+            }
+            updateBase = ub.trim();
+            if (!updateBase.isEmpty() && updateBase.endsWith("/")) {
+                updateBase = updateBase.substring(0, updateBase.length() - 1);
+            }
         } catch (IOException e) {
             // 保持默认
         }
@@ -87,6 +99,17 @@ public final class BfServerConfig {
 
     public static int updatePort() {
         return updatePort;
+    }
+
+    /**
+     * 更新/音乐通道基址：配置 updatebase（如 https://bfupdate.geekhonize.top）时优先，
+     * 否则回退 http://host:updatePort（本地/自建服场景）。
+     * 说明：公测服走未备案域名 + HTTP 会被 ICP 合规拦截，正式通道改由 Cloudflare 前端转发。
+     */
+    public static String updateBase() {
+        return updateBase.isEmpty()
+                ? "http://" + host + ":" + updatePort
+                : updateBase;
     }
 
     public static String address() {
