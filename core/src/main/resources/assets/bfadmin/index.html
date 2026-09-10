@@ -385,7 +385,7 @@ const mapState = {
   raw:null, model:null, selId:null,
   terrainOn:true, lf:null, layers:null,
   zoneLayer:new Map(),      // zoneId -> {rect, center, handles:[]}
-  _ready:false, _fitDone:false, _terrainKey:'', _terrainTimer:null,
+  _ready:false, _fitDone:false, _terrainKey:'', _terrainTimer:null, _resizeBound:false,
   sqmOn:true, _sqmTried:false
 };
 let undoStack = [];
@@ -504,6 +504,12 @@ function lfInit(){
   lf.attributionControl.setPrefix('BREAKFRONT 地图编辑器');
   lf.attributionControl.addAttribution('x/z = MC 世界坐标');
 
+  // 标签页/窗口尺寸变化后让 Leaflet 重新测量容器，避免残留 0 尺寸导致整图偏移（错位）。
+  if(!mapState._resizeBound){
+    mapState._resizeBound=true;
+    window.addEventListener('resize', ()=>{ if(mapState.lf) mapState.lf.invalidateSize(); });
+  }
+
   mapState.lf=lf;
   // pane 顺序：squaremap 真实瓦片 < 自采样地形 < 网格 < 其它扇区 < 编辑扇区 < 出生点 < 手柄
   lf.createPane('pSqm').style.zIndex=180;
@@ -544,7 +550,10 @@ function lfFit(){
     if(m&&m.spawns.defender) pts.push(LL(m.spawns.defender.x,m.spawns.defender.z));
   }
   if(!pts.length){ lf.setView(LL(0,0),0); saveCam(); return; }
-  lf.fitBounds(L.latLngBounds(pts).pad(0.25),{maxZoom:2});
+  // 不限制 maxZoom：坐标按 SQM_SCALE=1/2^max 缩放，若封顶到 2 整个战场只有十几像素宽，
+  // 表现为「地图空荡荡、据点挤成一团 / 错位」。交给 Leaflet 按容器尺寸自动选合适层级
+  // （上限受地图 maxZoom=SQM_INFO.max+extra 约束，不会越过 squaremap 原生层级）。
+  lf.fitBounds(L.latLngBounds(pts).pad(0.25));
   saveCam();
 }
 
@@ -894,6 +903,9 @@ async function mapLoad(keepUndo){
   loadMap();
   renderSectorList();
   if(!lfInit()) return;
+  // 容器可能在「地图俯瞰」页签刚显示、布局尚未稳定时初始化 → 先强制按真实尺寸重算，
+  // 否则后续 fitBounds 用 0/旧尺寸，表现为整图偏移、据点落在视野外（即用户说的「错位」）。
+  mapState.lf.invalidateSize();
   if(!mapState._fitDone){
     const saved=loadCam();
     mapState._fitDone=true;

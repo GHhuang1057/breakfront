@@ -102,15 +102,21 @@ public final class BotPlayerFactory {
             ClientConnection connection = new ClientConnection(NetworkSide.SERVERBOUND);
             EmbeddedChannel channel = new EmbeddedChannel(connection);
 
+            // ⚠️ 必须在 onPlayerConnect 之前打上 bot 标签：onPlayerConnect 会**同步**触发
+            // ServerPlayConnectionEvents.JOIN → ServerMatch.onPlayerJoin，而 onPlayerJoin 仅对
+            // 非 bot 走「入编 TeamManager + 部署 + 发装备」流程。若标签在之后才打，bot 会被
+            // 误判为真人 → 错误塞进 TeamManager（与本模组「bot 不入 TeamManager」的设计相悖，
+            // 见 ServerMatch 多处 sideOfEntity 兜底注释），并触发无意义的装备/部署覆盖。
+            player.addCommandTag(BOT_TAG);
+            CHANNELS.put(player.getUuid(), channel);
+
             server.getPlayerManager().onPlayerConnect(connection, player, clientData);
 
             // 入列后定位（onPlayerConnect 会把玩家放到世界出生点，需再挪到目标位置）
             player.teleport(world, x, y, z, 0.0f, 0.0f);
             player.setCustomName(Text.literal(name));
             player.setCustomNameVisible(false);
-            // 打上 bot 标签（工厂负责，保证任何创建路径都带标记；阵营标签由调用方补）
-            player.addCommandTag(BOT_TAG);
-            CHANNELS.put(player.getUuid(), channel);
+            // 阵营标签由调用方（BotSquad.applyLoadout）补打；此处仅确保 bot 标记先到位。
             return player;
         } catch (Throwable t) {
             BreakfrontServer.LOGGER.error("[BF-Bot] 创建假玩家 {} 失败: {}", name, t.toString());
