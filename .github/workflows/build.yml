@@ -26,7 +26,22 @@ jobs:
           gradle-version: '9.5.0'
 
       - name: Build with Gradle
-        run: gradle --no-daemon :core:build :client:build
+        # 失败时把关键错误行以 ::error:: 注解输出 —— GitHub 会将其写入 check-run
+        # annotations，而该接口公开可读（无需 admin token），便于快速定位编译/测试错误。
+        run: |
+          set +e
+          gradle --no-daemon :core:build :client:build 2>&1 | tee /tmp/gradle.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "================ GRADLE FAILURE SUMMARY ================"
+            grep -nE "error:|错误:|FAILED|AssertionFailedError|expected:|Caused by:" /tmp/gradle.log | head -60 || true
+            echo "========================================================"
+            grep -nE "error:|错误:|AssertionFailedError|expected:|> Task .* FAILED" /tmp/gradle.log \
+              | head -20 | while IFS= read -r line; do
+                echo "::error::$line"
+              done
+            exit "$STATUS"
+          fi
 
       - name: Upload mod jars
         uses: actions/upload-artifact@v4
