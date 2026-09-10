@@ -37,6 +37,9 @@ public class BreakfrontClient implements ClientModInitializer {
     /** 本进程只跑一次启动预检（BootstrapScreen），完成后进主菜单。 */
     private static volatile boolean bootstrapped = false;
 
+    /** 本进程只在「进入游戏后」提示一次 Geekhonize 登录（关闭 = 稍后再说，本次不再弹）。 */
+    private static volatile boolean loginPrompted = false;
+
     @Override
     public void onInitializeClient() {
         LOGGER.info("[Breakfront] client initialized (BF2042 UI)");
@@ -49,6 +52,17 @@ public class BreakfrontClient implements ClientModInitializer {
 
         // 主菜单接管 + 回合 COUNTDOWN 自动弹部署界面（每阶段变化仅一次）+ 死亡替换为部署重生页
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            // 【进入游戏即提示登录】——是「进入游戏」而不是「加入服务器」：主菜单一出现
+            // 就检查本地令牌，没有就把登录屏压上去。这样玩家在进任何 BF 服**之前**登录
+            // 就已就绪，不会被服务端的登录门禁拦在门外。每会话只提示一次，关闭即视为
+            // 「稍后再说」（仍可用 /geo ui 或主菜单重新打开）。
+            if (!loginPrompted && client.currentScreen instanceof BreakfrontMainMenu) {
+                loginPrompted = true;
+                com.breakfront.client.geo.GeoSession.load();
+                if (!com.breakfront.client.geo.GeoSession.signedIn()) {
+                    client.setScreen(new com.breakfront.client.ui.BfGeoLoginScreen(client.currentScreen));
+                }
+            }
             if (client.currentScreen instanceof TitleScreen) {
                 if (!bootstrapped) {
                     bootstrapped = true;

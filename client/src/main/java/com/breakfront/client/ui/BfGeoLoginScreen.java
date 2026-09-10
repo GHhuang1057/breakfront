@@ -27,6 +27,10 @@ public class BfGeoLoginScreen extends Screen {
     private String codeBuf = "";
     private int focus = 0;                 // 0 用户名 / 1 密码 / 2 邮箱 / 3 验证码
     private boolean registerMode = false;
+    /** 令牌登录模式：粘贴「账号中心 → 游戏令牌」生成的长期令牌直接完成绑定。 */
+    private boolean tokenMode = false;
+    /** 令牌输入缓冲（tokenMode 下由 focus==0 编辑）。 */
+    private String tokenBuf = "";
     private boolean busy = false;
     private boolean showPw = false;
 
@@ -51,6 +55,7 @@ public class BfGeoLoginScreen extends Screen {
     private int toggleX, toggleY, toggleW, toggleH;
     private int sendX, sendY, sendW, sendH;
     private int deviceX, deviceY, deviceW, deviceH;
+    private int tokenX, tokenY, tokenW, tokenH;
     private int logoutX, logoutY, logoutW, logoutH;
     private int closeX, closeY, closeW, closeH;
 
@@ -85,7 +90,7 @@ public class BfGeoLoginScreen extends Screen {
         int sh = this.height;
         panelW = Math.min(460, sw - 56);
         boolean si = GeoSession.signedIn();
-        rows = (si || !registerMode) ? 2 : 4;
+        rows = (si || !registerMode) ? (tokenMode ? 1 : 2) : 4;
         // 登录模式多一行「浏览器登录」按钮；注册模式比原版多留反馈区余量
         panelH = si ? 232 : (registerMode ? 448 : 402);
         panelX = (sw - panelW) / 2;
@@ -110,11 +115,19 @@ public class BfGeoLoginScreen extends Screen {
         toggleX = panelX + (panelW - toggleW) / 2;
         toggleY = submitY + submitH + 6;
 
-        // 浏览器登录（仅登录模式显示）
-        deviceW = Math.min(320, panelW - 60);
+        // 登录辅助行（仅登录模式显示）：左=浏览器登录，右=令牌登录。
+        // 两个按钮**并排共用原有的一行高度** —— 本面板的纵向布局是「以底边为基准往上
+        // 推」的写法，再加一行会把面板撑破，故只能横向分摊宽度。
+        int auxW = Math.min(320, panelW - 60);
+        int auxGap = 8;
+        deviceW = (auxW - auxGap) / 2;
         deviceH = 24;
-        deviceX = panelX + (panelW - deviceW) / 2;
+        deviceX = panelX + (panelW - auxW) / 2;
         deviceY = toggleY + toggleH + 10;
+        tokenW = deviceW;
+        tokenH = deviceH;
+        tokenX = deviceX + deviceW + auxGap;
+        tokenY = deviceY;
 
         // 发送验证码（仅注册模式，位于验证码行内右侧）
         sendW = 118;
@@ -138,12 +151,18 @@ public class BfGeoLoginScreen extends Screen {
                 panelX + 30, ty, BfTheme.TEAL, false);
         ctx.drawText(this.textRenderer,
                 Text.literal(registerMode ? "邮箱验证码注册（一个账号通行全部作品）"
+                        : tokenMode ? "粘贴账号中心生成的「游戏令牌」即可完成绑定"
                         : "登录后进服自动绑定 · 防冒名"),
                 panelX + 30, ty + 14, BfTheme.MUTED, false);
 
-        drawBox(ctx, "用户名", userBuf, boxY[0], focus == 0, mouseX, mouseY, false, 32);
-        drawBox(ctx, registerMode ? "密码（6-128 位）" : "密码", passBuf, boxY[1],
-                focus == 1, mouseX, mouseY, true, 128);
+        if (tokenMode) {
+            drawBox(ctx, "游戏令牌（账号中心 → 游戏令牌 生成）", tokenBuf, boxY[0],
+                    focus == 0, mouseX, mouseY, false, 2048);
+        } else {
+            drawBox(ctx, "用户名", userBuf, boxY[0], focus == 0, mouseX, mouseY, false, 32);
+            drawBox(ctx, registerMode ? "密码（6-128 位）" : "密码", passBuf, boxY[1],
+                    focus == 1, mouseX, mouseY, true, 128);
+        }
         if (rows == 4) {
             drawBox(ctx, "邮箱（接收验证码）", emailBuf, boxY[2],
                     focus == 2, mouseX, mouseY, false, 160);
@@ -193,7 +212,8 @@ public class BfGeoLoginScreen extends Screen {
         }
         BfDraw.parallelogram(ctx, submitX, submitY, submitW, submitH, 6,
                 busy ? BfTheme.PANEL_LINE : BfTheme.TEAL);
-        String act = busy ? "处理中…" : (registerMode ? "注 册" : "登 录");
+        String act = busy ? "处理中…"
+                : (registerMode ? "注 册" : (tokenMode ? "令牌登录" : "登 录"));
         int lw = this.textRenderer.getWidth(act);
         ctx.drawText(this.textRenderer, Text.literal(act),
                 submitX + submitW / 2 - lw / 2 + 6,
@@ -201,33 +221,51 @@ public class BfGeoLoginScreen extends Screen {
                 busy ? BfTheme.MUTED : 0xFF0A0D12, false);
 
         // 切换 登录/注册
-        String tg = registerMode ? "← 已有账号？返回登录" : "没有账号？邮箱验证码注册";
+        String tg = registerMode ? "← 已有账号？返回登录"
+                : (tokenMode ? "← 用账号密码登录" : "没有账号？邮箱验证码注册");
         int gw = this.textRenderer.getWidth(tg);
         boolean gh = inRect(mouseX, mouseY, toggleX, toggleY, toggleW, toggleH);
         ctx.drawText(this.textRenderer, Text.literal(tg),
                 panelX + (panelW - gw) / 2, toggleY + 4,
                 gh ? BfTheme.TEAL : BfTheme.MUTED, false);
 
-        // 浏览器登录（第三方启动器）
+        // 登录辅助行：浏览器登录 / 令牌登录（令牌模式下只剩浏览器登录，占满整行）
         if (!registerMode) {
-            boolean dh = inRect(mouseX, mouseY, deviceX, deviceY, deviceW, deviceH);
-            boolean active = devicePolling && !deviceCode.isEmpty();
+            int dw = tokenMode ? deviceW * 2 + 8 : deviceW;
+            boolean dh = inRect(mouseX, mouseY, deviceX, deviceY, dw, deviceH);
             if (dh && !devicePolling && !busy) {
-                BfGlow.rect(ctx, deviceX - 2, deviceY - 2, deviceW + 4, deviceH + 4,
+                BfGlow.rect(ctx, deviceX - 2, deviceY - 2, dw + 4, deviceH + 4,
                         BfTheme.TEAL & 0xFFFFFF, 24, 4);
             }
-            BfDraw.parallelogram(ctx, deviceX, deviceY, deviceW, deviceH, 4,
+            BfDraw.parallelogram(ctx, deviceX, deviceY, dw, deviceH, 4,
                     devicePolling ? BfTheme.PANEL_LINE : 0xE6161C25);
-            BfDraw.border(ctx, deviceX, deviceY, deviceW, deviceH,
+            BfDraw.border(ctx, deviceX, deviceY, dw, deviceH,
                     dh && !devicePolling ? BfTheme.TEAL : BfTheme.PANEL_LINE);
             String dl = devicePolling
                     ? (deviceCode.isEmpty() ? "正在请求设备码…" : "浏览器登录中… 设备码 " + deviceCode)
-                    : "或 浏览器登录（PCL / FCL 等第三方启动器）";
+                    : (tokenMode ? "或 浏览器登录（PCL / FCL 等第三方启动器）" : "浏览器登录");
             int dlw = this.textRenderer.getWidth(dl);
             ctx.drawText(this.textRenderer, Text.literal(dl),
-                    deviceX + deviceW / 2 - dlw / 2,
+                    deviceX + dw / 2 - dlw / 2,
                     deviceY + deviceH / 2 - this.textRenderer.fontHeight / 2,
                     devicePolling ? BfTheme.TEAL : (dh ? BfTheme.TEXT : BfTheme.TEXT_DIM), false);
+
+            if (!tokenMode) {
+                boolean th = inRect(mouseX, mouseY, tokenX, tokenY, tokenW, tokenH);
+                if (th && !busy) {
+                    BfGlow.rect(ctx, tokenX - 2, tokenY - 2, tokenW + 4, tokenH + 4,
+                            BfTheme.AMBER & 0xFFFFFF, 24, 4);
+                }
+                BfDraw.parallelogram(ctx, tokenX, tokenY, tokenW, tokenH, 4, 0xE6161C25);
+                BfDraw.border(ctx, tokenX, tokenY, tokenW, tokenH,
+                        th ? BfTheme.AMBER : BfTheme.PANEL_LINE);
+                String tl = "令牌登录";
+                int tlw = this.textRenderer.getWidth(tl);
+                ctx.drawText(this.textRenderer, Text.literal(tl),
+                        tokenX + tokenW / 2 - tlw / 2,
+                        tokenY + tokenH / 2 - this.textRenderer.fontHeight / 2,
+                        th ? BfTheme.TEXT : BfTheme.TEXT_DIM, false);
+            }
         }
 
         // 反馈
@@ -391,13 +429,27 @@ public class BfGeoLoginScreen extends Screen {
             return true;
         }
         if (inRect(mx, my, toggleX, toggleY, toggleW, toggleH)) {
-            registerMode = !registerMode;
             msgText = "";
             focus = 0;
+            if (tokenMode) {
+                tokenMode = false;              // 令牌 → 账号密码
+            } else {
+                registerMode = !registerMode;    // 登录 ↔ 注册
+            }
             return true;
         }
-        if (!registerMode && inRect(mx, my, deviceX, deviceY, deviceW, deviceH)) {
+        if (!registerMode && inRect(mx, my, deviceX, deviceY,
+                tokenMode ? deviceW * 2 + 8 : deviceW, deviceH)) {
             doDeviceLogin();
+            return true;
+        }
+        // 令牌登录入口：切到令牌模式（面板只留一行令牌输入）
+        if (!registerMode && !tokenMode
+                && inRect(mx, my, tokenX, tokenY, tokenW, tokenH)) {
+            tokenMode = true;
+            focus = 0;
+            msgOk = true;
+            msgText = "在账号中心「我的账号 → 游戏令牌」生成后复制到这里";
             return true;
         }
         return false;
@@ -414,6 +466,12 @@ public class BfGeoLoginScreen extends Screen {
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_BACKSPACE) {
+            if (tokenMode) {
+                if (focus == 0 && !tokenBuf.isEmpty()) {
+                    tokenBuf = tokenBuf.substring(0, tokenBuf.length() - 1);
+                }
+                return true;
+            }
             if (focus == 0 && !userBuf.isEmpty()) {
                 userBuf = userBuf.substring(0, userBuf.length() - 1);
             } else if (focus == 1 && !passBuf.isEmpty()) {
@@ -438,6 +496,13 @@ public class BfGeoLoginScreen extends Screen {
             return false;
         }
         if (chr == '\r' || chr == '\n' || chr < ' ') {
+            return false;
+        }
+        if (tokenMode) {
+            if (focus == 0 && tokenBuf.length() < 2048) {
+                tokenBuf += chr;
+                return true;
+            }
             return false;
         }
         if (focus == 0 && userBuf.length() < 32) {
@@ -559,8 +624,26 @@ public class BfGeoLoginScreen extends Screen {
                 }));
     }
 
+    /** 令牌登录：校验粘贴的长期令牌，通过后直接落盘为本地会话。 */
+    private void submitToken() {
+        String tk = tokenBuf.trim();
+        if (tk.isEmpty()) {
+            msgText = "请粘贴账号中心生成的游戏令牌";
+            msgOk = false;
+            return;
+        }
+        busy = true;
+        msgText = "";
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> GeoHttp.me(tk))
+                .thenAccept(r -> this.client.execute(() -> onAuthResult(r, false)));
+    }
+
     private void submit() {
         if (busy) {
+            return;
+        }
+        if (tokenMode) {
+            submitToken();
             return;
         }
         String u = userBuf.trim();

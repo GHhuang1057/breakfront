@@ -162,13 +162,22 @@ def cmd_deploy(cli, resume_updater: bool = False) -> int:
                     "$_.CommandLine -match 'fabric-server-launch' }).Count").strip()
         if n == "0":
             print("  [✓] 服务端已退出")
+            killed = True
             break
     if not killed:
-        ps(cli, "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^java' -and "
-                "$_.CommandLine -match 'fabric-server-launch' } | "
-                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
-                "Start-Sleep -Seconds 4; Write-Output 'force killed'")
-        print("  [!] 已强杀")
+        print("  [!] java 未自行退出，强杀")
+    # ⚠️ 无论 java 是否自行退出，都要清掉「卡在 pause 的 start.bat cmd」：
+    #    start.bat 末尾是 pause，java 一退出 cmd 就会挂在那里 → BFServerOnce 任务一直是
+    #    Running 状态 → Windows 默认 MultipleInstances=IgnoreNew，后续 Start-ScheduledTask
+    #    直接变成空操作（实测：部署日志说"已启动"，实际 25565 永远不监听）。
+    ps(cli, "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'cmd.exe' -and "
+            "$_.CommandLine -like '*start.bat*' } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+            "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^java' -and "
+            "$_.CommandLine -match 'fabric-server-launch' } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+            "Stop-ScheduledTask -TaskName 'BFServerOnce' -ErrorAction SilentlyContinue; "
+            "Start-Sleep -Seconds 3; Write-Output 'cleaned'")
 
     print("[*] 替换 jar（旧文件备份到 J:\\bfbuild\\mods_backup）…")
     script = ("$mods='" + MODS + "'; $src='" + jar + "'; $bak='J:\\bfbuild\\mods_backup'; "
@@ -189,17 +198,26 @@ def cmd_deploy(cli, resume_updater: bool = False) -> int:
     #   start.bat 末尾的 `pause` 让 cmd 持有 stdin，计划任务又独立于会话 → 稳定（实测 90s+ 存活）。
     ps(cli, "Remove-ScheduledTask -TaskName 'BFServerOnce' -ErrorAction SilentlyContinue; "
             "$a = New-ScheduledTaskAction -Execute 'J:\\bfserver\\server\\start.bat'; "
-            "Register-ScheduledTask -TaskName 'BFServerOnce' -Action $a -RunLevel Highest -Force | Out-Null; "
-            "Start-ScheduledTask -TaskName 'BFServerOnce'; Write-Output 'task-started'")
+            "$s = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew; "
+            "Register-ScheduledTask -TaskName 'BFServerOnce' -Action $a -Settings $s "
+            "-RunLevel Highest -Force | Out-Null; "
+            "Start-ScheduledTask -TaskName 'BFServerOnce'; "
+            "Start-Sleep -Seconds 2; "
+            "(Get-ScheduledTask -TaskName 'BFServerOnce').State")
     t0 = time.time()
-    for _ in range(30):
+    up = False
+    for _ in range(40):          # 最多等 200s（首次启动要大世界加载）
         time.sleep(5)
         n = ps(cli, "@(Get-NetTCPConnection -LocalPort 25565 -State Listen -ErrorAction SilentlyContinue).Count").strip()
         if n != "0":
             print(f"[✓] 服务端已监听 25565（耗时 {int(time.time() - t0)}s）")
+            up = True
             break
-    else:
-        print("[!] 25565 未监听，请查 J:\\bfserver\\server\\logs\\latest.log")
+    if not up:
+        print("[!] 25565 未监听。诊断：")
+        print(ps(cli, "Get-ScheduledTask -TaskName 'BFServerOnce' | Select-Object -Expand State; "
+                      "Get-ScheduledTaskInfo -TaskName 'BFServerOnce' | "
+                      "Select-Object LastRunTime,LastTaskResult | Format-List | Out-String"))
 
     if resume_updater:
         ps(cli, "Start-ScheduledTask -TaskName 'BreakfrontUpdater' -ErrorAction SilentlyContinue; 'updater resumed'")

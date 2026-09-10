@@ -49,6 +49,40 @@ public final class GeoHttp {
                         + "\",\"app\":\"breakfront\"}");
     }
 
+    /**
+     * 校验一个已有令牌（{@code GET /api/v1/auth/me}）——「令牌登录」用。
+     *
+     * <p>玩家在账号中心（auth.geekhonize.top → 我的账号 → 游戏令牌）生成长期令牌，
+     * 复制到游戏内粘贴即可完成绑定，无需输账号密码、也不用邮箱验证码往返。
+     * 服务端 {@code AuthBridge.me} 校验的是同一个端点，故两边口径一致。
+     */
+    public static Res me(String token) {
+        String tk = token == null ? "" : token.trim();
+        if (tk.isEmpty()) {
+            return new Res(false, "", "", "令牌为空");
+        }
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(endpoint + "/api/v1/auth/me"))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Authorization", "Bearer " + tk)
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                String msg = quoted(resp.body(), "msg");
+                return new Res(false, "", "",
+                        msg == null ? "令牌校验失败（HTTP " + resp.statusCode() + "）" : msg);
+            }
+            String user = quoted(resp.body(), "username");
+            if (user == null || user.isEmpty()) {
+                return new Res(false, "", "", "令牌响应缺少用户名");
+            }
+            return new Res(true, tk, user, "ok");
+        } catch (Exception e) {
+            return new Res(false, "", "", "网络错误：" + e.getClass().getSimpleName());
+        }
+    }
+
     // ---------- 设备码登录（PCL/FCL 等第三方启动器：游戏内跳浏览器授权） ----------
 
     public record DeviceStart(boolean ok, String code, String msg) {
