@@ -152,9 +152,16 @@ public final class Kits {
         int left = spec.spareAmmo();
         while (left > 0) {
             int n = Math.min(max, left);
-            ItemStack a = new ItemStack(ammo, n);
-            a.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(ac));
+            // ⚠️ 顺序很关键：TaCZ 用 mixin 把 ItemStack.getMaxStackSize() 覆写成
+            //    「按 stack 里的 AmmoId 查弹药 index 的 stack_size」，所以
+            //    ① 必须先把 AmmoId 写进 NBT，② 再设数量。
+            //    若照 `new ItemStack(ammo, n)` 那样在构造时带数量，此刻 NBT 还空着 →
+            //    TaCZ 查不到 stack_size → 返回 1 → 数量被夹成 1（实测踩过：
+            //    max_stack_size 写进去了，但每堆 count 还是 1）。
+            ItemStack a = new ItemStack(ammo);
+            a.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(ac.copy()));
             a.set(DataComponentTypes.MAX_STACK_SIZE, max);
+            a.setCount(n);
             player.getInventory().offerOrDrop(a);
             left -= n;
         }
