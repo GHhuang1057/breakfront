@@ -338,13 +338,20 @@ public final class WebAdminConsole {
                         continue;
                     }
                     int top = world.getTopY(Heightmap.Type.MOTION_BLOCKING, bx, bz);
-                    BlockState bs = null;
                     if (top <= bottom) {
                         top = world.getTopY(Heightmap.Type.WORLD_SURFACE, bx, bz);
                     }
-                    if (top > bottom) {
-                        bs = world.getBlockState(new BlockPos(bx, top, bz));
+                    if (top <= bottom) {
+                        // 该列无任何方块 = 地形从未生成（或虚空）。
+                        // 实测证据：出生点外 2km 的坐标采样结果与"已加载但无方块"完全同色，
+                        // 说明 isChunkLoaded 对未生成区块同样可能返回 true —— 因此必须在
+                        // 这里兜底着色，否则「未生成」会被误读成「有地形但无方块」。
+                        rgb[p++] = (byte) TERRAIN_UNLOADED[0];
+                        rgb[p++] = (byte) TERRAIN_UNLOADED[1];
+                        rgb[p++] = (byte) TERRAIN_UNLOADED[2];
+                        continue;
                     }
+                    BlockState bs = world.getBlockState(new BlockPos(bx, top, bz));
                     double factor = 0.6 + 0.55 * Math.max(0.0, Math.min(1.0,
                             (top - TERRAIN_REF_LOW) / TERRAIN_REF_SPAN));
                     int[] c = bs == null ? TERRAIN_BASE : terrainPalette(bs);
