@@ -20,6 +20,7 @@
     {"slug": "threadtweak",         "expect": "0.1.5",                   "env": "both",   "note": "线程/调度调优（Smooth Boot 继任）"},
     {"slug": "servercore",          "expect": "1.5.19+1.21.1",           "env": "both",   "note": "服务端 tick/实体密度治理（默认配置保守）"},
     {"slug": "noisium",             "expect": "2.3.0+mc1.21-1.21.1",     "env": "both",   "note": "世界生成噪声优化"},
-    {"slug": "c2me-fabric",         "expect": "0.4.0-alpha.0.27+1.21.1", "env": "both",   "note": "并发区块生成/加载（alpha，首崩嫌疑，出问题先摘）"}
+    {"slug": "c2me-fabric",         "expect": "0.4.0-alpha.0.27+1.21.1", "env": "both",   "note": "并发区块生成/加载（alpha，首崩嫌疑，出问题先摘）"},
+    {"slug": "squaremap",           "expect": "mc1.21.1-1.3.2",          "env": "server", "note": "真实世界俯视图（网页地图）。服务端专属（client_side=unsupported，客户端加载器会自动跳过）；管理台经 /bfadmin/tiles 代理其瓦片作为 Leaflet 底图，取代此前的方块色采样示意；默认 web 端口 8080。env 由脚本按 Modrinth client_side/server_side 自动判定为 server —— 服务端打包脚本已放行 both+server。"}
   ]
 }

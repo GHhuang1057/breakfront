@@ -27,10 +27,13 @@ def main():
     dist = pathlib.Path(args.out)
     dist.mkdir(parents=True, exist_ok=True)
 
-    # 1. mods：从客户端包提取 jar，但只放「双端可运行」(env==both) 的模组。
-    #    客户端专属模组（entityculling / immediatelyfast / natural-motion-blur 及其
-    #    cloth-config / satin 依赖、breakfront-client、sodium / iris / tacz）不进服务端，
-    #    避免服务端误加载客户端渲染模组。env 取自客户端包内的 manifest.json。
+    # 1. mods：从客户端包提取 jar。放行两类：
+    #      - env == "both"    双端通用（lithium / krypton / fabric-api …）
+    #      - env == "server"  服务端专属（squaremap 网页地图等，client_side=unsupported）
+    #    客户端专属模组（entityculling / immediatelyfast / sodium / iris / tacz /
+    #    breakfront-client 等）不进服务端，避免误加载渲染模组。env 取自客户端包内
+    #    manifest.json（该字段由 assemble_dev_release.py 按 Modrinth 的
+    #    client_side/server_side 自动判定）。
     mods_dir = stage / "mods"
     mods_dir.mkdir(exist_ok=True)
     server_ok = set()
@@ -40,7 +43,7 @@ def main():
             try:
                 manifest = json.loads(z.read("manifest.json"))
                 for entry in manifest.get("files", []):
-                    if entry.get("env") == "both":
+                    if entry.get("env") in ("both", "server"):
                         server_ok.add(entry.get("file"))
             except Exception as e:
                 print(f"[warn] 解析 manifest.json 失败，回退为全量复制：{e}")
