@@ -70,7 +70,10 @@ BF_CONFIG = {
                      "-jar fabric-server-launch.jar nogui"),
     "stopCommand": "stop",          # 写进 stdin，MC 服务端读 stdin 执行
     "cwd": "J:/bfserver/server",
-    "type": "universal",
+    # ⚠️ 必须用 minecraft/java（不是 universal）：daemon 的 FunctionDispatcher 里
+    #    只有 type 含 TYPE_MINECRAFT_JAVA 才注册 MC ping 生命周期任务与玩家追踪，
+    #    否则面板会永远显示「MC 离线」，且没有玩家列表。
+    "type": "minecraft/java",
     "ie": "utf8",
     "oe": "utf8",
     "fileCode": "utf8",
@@ -172,8 +175,8 @@ def cmd_list(cli) -> int:
     for i in insts:
         c = i.get("config") or {}
         info = i.get("info") or {}
-        # 实测字段名是 status / started，不是 instanceStatus
-        state = {0: "已停止", 1: "运行中", 2: "启动中", -1: "已结束"}.get(i.get("status"), "?")
+        # ⚠️ daemon 的实例状态枚举：STOP=0 / STOPPING=1 / STARTING=2 / RUNNING=3（不是 1=运行中！）
+        state = {0: "已停止", 1: "停止中", 2: "启动中", 3: "运行中"}.get(i.get("status"), "?")
         mc = "✓" if info.get("mcPingOnline") else "-"
         print(f"{i['instanceUuid']:<34} {str(c.get('nickname'))[:15]:<16} {state:<8} "
               f"{mc:<7} {c.get('cwd')}")
