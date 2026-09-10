@@ -996,19 +996,38 @@ public final class ServerMatch {
      */
     public double[] lobbySpawnPoint(ServerWorld world) {
         double x, z;
+        int preferY;
         if (!Double.isNaN(lobbySpawn[0])) {
             x = lobbySpawn[0];
             z = lobbySpawn[1];
+            double t0 = columnTopY(world, x, z);
+            preferY = Double.isNaN(t0) ? 80 : (int) Math.floor(t0) + 1;
         } else {
             var sp = world.getSpawnPos();
             x = sp.getX() + 0.5;
             z = sp.getZ() + 0.5;
+            // ⚠️ 世界出生点自带的 Y 才是"出生点"：Metro 实测出生点 y=32 是合法站位
+            //    （y-1 实心、y 与 y+1 空），而高度图柱顶是 76 —— 多盖了一层结构。
+            //    若无条件用柱顶，玩家会被放到出生点上方 46 格的屋顶上（2026-09-10 实测）。
+            preferY = sp.getY();
+        }
+        if (standableAt(world, x, preferY, z)) {
+            return new double[]{x, preferY, z};
         }
         double t = columnTopY(world, x, z);
         if (!Double.isNaN(t)) {
-            return new double[]{x, t + 1, z};
+            int ty = (int) Math.floor(t) + 1;
+            for (int d = 0; d <= 6; d++) {
+                if (standableAt(world, x, ty + d, z)) {
+                    return new double[]{x, ty + d, z};
+                }
+                if (standableAt(world, x, ty - d, z)) {
+                    return new double[]{x, ty - d, z};
+                }
+            }
+            return new double[]{x, ty, z};
         }
-        // 出生点柱没有地形：由近及远四向找最近可站立柱（不然玩家会掉进虚空）
+        // 出生点柱没有地形：由近及远八向找最近安全站位（不然玩家会掉进虚空）
         double[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}};
         for (int d = 4; d <= 128; d += 4) {
             for (double[] dir : dirs) {
@@ -1016,14 +1035,41 @@ public final class ServerMatch {
                 double cz = z + dir[1] * d;
                 double ct = columnTopY(world, cx, cz);
                 if (!Double.isNaN(ct)) {
-                    BreakfrontServer.LOGGER.warn(
-                            "[Breakfront] 出生点 ({}, {}) 无地形，已外移到 ({}, {})",
-                            (long) x, (long) z, (long) cx, (long) cz);
-                    return new double[]{cx, ct + 1, cz};
+                    int cty = (int) Math.floor(ct) + 1;
+                    if (standableAt(world, cx, cty, cz)) {
+                        BreakfrontServer.LOGGER.warn(
+                                "[Breakfront] 出生点 ({}, {}) 无地形，已外移到 ({}, {})",
+                                (long) x, (long) z, (long) cx, (long) cz);
+                        return new double[]{cx, cty, cz};
+                    }
                 }
             }
         }
         return new double[]{x, 80, z};
+    }
+
+    /**
+     * (x, y, z) 是否是能站人的位置：脚下有碰撞体（踩得住），且身体两格是空的（站得下）。
+     *
+     * <p>用 {@code getCollisionShape} 判据而非高度图：高度图只给"最高阻挡面"，
+     * 在多层结构（Metro 这类有上下层的地图）里会把出生点算到屋顶上。
+     */
+    private static boolean standableAt(ServerWorld world, double x, int y, double z) {
+        int bx = (int) Math.floor(x);
+        int bz = (int) Math.floor(z);
+        if (y <= world.getBottomY() || y >= world.getTopY()) {
+            return false;
+        }
+        var mut = new net.minecraft.util.math.BlockPos.Mutable(bx, y, bz);
+        // 脚下方块必须有碰撞体
+        if (world.getBlockState(mut.set(bx, y - 1, bz)).getCollisionShape(world, mut).isEmpty()) {
+            return false;
+        }
+        // 身体两格必须无碰撞（避免卡进方块/窒息）
+        if (!world.getBlockState(mut.set(bx, y, bz)).getCollisionShape(world, mut).isEmpty()) {
+            return false;
+        }
+        return world.getBlockState(mut.set(bx, y + 1, bz)).getCollisionShape(world, mut).isEmpty();
     }
 
     /**
