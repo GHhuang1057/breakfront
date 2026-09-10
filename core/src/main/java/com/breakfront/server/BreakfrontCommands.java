@@ -73,6 +73,7 @@ public final class BreakfrontCommands {
         root = root.then(fillNode());
         root = root.then(spawnsNode());
         root = root.then(npcNode());
+        root = root.then(botNode());
 
 root = root.then(literal("team")
                 .executes(ctx -> {
@@ -448,7 +449,57 @@ root = root.then(literal("team")
                         })));
     }
 
+    /**
+     * {@code /bf bot …} —— 假玩家小队（AI BOT 重构的玩家壳实现）运维入口。
+     *
+     * <p>与 {@code /bf npc}（僵尸壳）互斥：启用假玩家前会清空旧壳 NPC，
+     * 避免两套 AI 同时在场互相叠加。试用建议先在 BATTLE 阶段（{@code /bf start}），
+     * 非战斗阶段 bot 会站在原地不动。
+     */
+    private static LiteralArgumentBuilder<ServerCommandSource> botNode() {
+        return literal("bot").requires(s -> s.hasPermissionLevel(2))
+                .then(literal("status").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        return 0;
+                    }
+                    send(ctx.getSource(), match.bots().info());
+                    String roster = match.bots().roster();
+                    if (!roster.isEmpty()) {
+                        send(ctx.getSource(), "名册：" + roster);
+                    }
+                    return 1;
+                }))
+                .then(literal("trial")
+                        .then(CommandManager.argument("n", IntegerArgumentType.integer(1, 32))
+                                .executes(ctx -> {
+                                    var match = BreakfrontServer.match();
+                                    var server = BreakfrontServer.server();
+                                    if (match == null || server == null) {
+                                        ctx.getSource().sendError(Text.literal("服务端未就绪"));
+                                        return 0;
+                                    }
+                                    int n = IntegerArgumentType.getInteger(ctx, "n");
+                                    match.npc().clearAll(server);      // 互斥：清空旧壳
+                                    match.bots().setTarget(Side.ATTACKER, n);
+                                    match.bots().setTarget(Side.DEFENDER, n);
+                                    match.bots().ensure(match, server);
+                                    send(ctx.getSource(), "已生成 " + n + "v" + n
+                                            + " 假玩家小队（旧壳 NPC 已清空）；"
+                                            + "清除用 /bf bot clear，查看用 /bf bot status");
+                                    return 1;
+                                })))
+                .then(literal("clear").executes(ctx -> {
+                    var match = BreakfrontServer.match();
+                    if (match == null) {
+                        return 0;
+                    }
+                    match.bots().clearAll(BreakfrontServer.server());
+                    send(ctx.getSource(), "已清除全部假玩家");
+                    return 1;
+                }));
+    }
+
     private static void send(ServerCommandSource source, String message) {
         source.sendFeedback(() -> Text.literal(message), false);
-    }
-}
+    }}

@@ -58,6 +58,8 @@ public final class ServerMatch {
     private final TeamManager teams = new TeamManager();
     private final ScoreKeeper score = new ScoreKeeper();
     private final NpcSquad npc = new NpcSquad();
+    /** 假玩家小队（ServerPlayerEntity 作壳；与 npc 互斥启用，见 BotSquad 类注释）。 */
+    private final BotSquad bots = new BotSquad();
     private final Map<String, ZoneAnchor> anchors = new LinkedHashMap<>();
     /** 玩家选定的下一重生点：zoneId / "base" / "observe"（一次消费，详见 setDeployChoice）。 */
     private final Map<UUID, String> deployChoices = new HashMap<>();
@@ -225,6 +227,9 @@ public final class ServerMatch {
             teleportAllToSpawns(server);
         }
         lastPhase = game.phase();
+        // 假玩家小队（AI BOT 重构的玩家壳实现）—— 放在阶段判定之前：
+        // 非战斗阶段仍需执行阵亡清扫与状态维持，否则会累积"幽灵在线"的假玩家。
+        bots.tick(this, server);
         if (game.phase() != MatchPhase.BATTLE) {
             return;
         }
@@ -288,7 +293,14 @@ public final class ServerMatch {
         if (game.phase() != MatchPhase.LOBBY) {
             return; // 局中/倒计时/结算均不干预
         }
-        int humans = server.getPlayerManager().getPlayerList().size();
+        // 只统计**真人**：假玩家（AI bot）也在玩家列表里，若不排除会让填充逻辑
+        // 误判"人已满"从而不再补员，且会把旧壳 NPC 又加回来与假玩家小队叠加。
+        int humans = 0;
+        for (ServerPlayerEntity hp : server.getPlayerManager().getPlayerList()) {
+            if (!BotPlayerFactory.isBot(hp)) {
+                humans++;
+            }
+        }
         if (autoFill && humans > 0) {
             if (!autoArmed) {
                 desiredPerSide = pickFillTarget(server);
@@ -603,6 +615,11 @@ public final class ServerMatch {
 
     public NpcSquad npc() {
         return npc;
+    }
+
+    /** 假玩家小队（AI BOT 重构的玩家壳实现）。 */
+    public BotSquad bots() {
+        return bots;
     }
 
     /** 供 NpcSquad 使用的公开坐标（出生 y 含地面）。 */

@@ -226,7 +226,11 @@ public final class BreakfrontServer {
     private static int sideOfEntity(LivingEntity e) {
         if (e instanceof ServerPlayerEntity p && match != null) {
             Side s = match.teams().sideOf(p.getUuid());
-            return s == null ? -1 : s.ordinal();
+            if (s != null) {
+                return s.ordinal();
+            }
+            // 假玩家（AI bot）不注册在 TeamManager，会得到 null —— 必须继续走下面的
+            // 实体标签判定，否则会被判为「无阵营」→ 与同阵营单位之间的友伤豁免失效。
         }
         if (e.getCommandTags().contains("bf.side.att")) {
             return 0;

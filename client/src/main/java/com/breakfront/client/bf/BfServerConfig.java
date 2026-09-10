@@ -28,6 +28,20 @@ public final class BfServerConfig {
      */
     public static final String DEFAULT_UPDATE_BASE = "https://bfupdate.geekhonize.top";
 
+    /**
+     * 公测服**音乐库**入口（2026-09-10 定案）。
+     *
+     * <p>音乐不从 CF 走：Cloudflare Workers 的出站 fetch 有**端口白名单**
+     * （80/8080/443/8443/2052… ），25610 不在其中 → Worker 回源被 CF 以
+     * error 1003 拒绝。故音乐改为客户端直连 MC 主机的更新服务端口。
+     * 用 IP 而非域名：未备案域名直连易被 ICP 合规拦截，IP 更稳。
+     *
+     * <p>若将来让音乐也经 CF 分发，两条路：① 把音乐作为 GitHub Release 资产
+     * （Worker 已能代理 443，客户端零改动）；② 在 frpc 增加一条映射到 CF 白名单
+     * 端口（如北京 8080），再把此处换成对应地址。
+     */
+    public static final String DEFAULT_MUSIC_BASE = "http://8.141.114.60:25610";
+
     private static final String FILE_NAME = "breakfront-client.properties";
 
     private static String host = DEFAULT_HOST;
@@ -35,6 +49,8 @@ public final class BfServerConfig {
     private static int updatePort = DEFAULT_UPDATE_PORT;
     /** 更新/音乐通道基址覆盖（如 https://bfupdate.geekhonize.top）；留空回退 http://host:updatePort。 */
     private static String updateBase = "";
+    /** 音乐库基址覆盖；留空按 musicBase() 规则推导。 */
+    private static String musicBase = "";
 
     private BfServerConfig() {
     }
@@ -60,8 +76,10 @@ public final class BfServerConfig {
                         "# BREAKFRONT 联机配置",
                         "# 默认即公测服 mc.geekhonize.top（内置），以下两行通常无需改动",
                         "# 自建/本地测试服请改 host（如 localhost）并保持端口一致",
-                        "# updatebase：更新/音乐通道基址（公测服走 https://bfupdate.geekhonize.top 经 Cloudflare）；"
+                        "# updatebase：更新通道基址（公测服走 https://bfupdate.geekhonize.top 经 Cloudflare）；"
                                 + "留空则回退 http://host:updateport",
+                        "# musicbase：音乐库基址（公测服直连 MC 主机音频服务；Cloudflare Workers 出站"
+                                + "端口白名单不含 25610 故音乐不经 CF）；留空按上述规则推导",
                         "host=" + DEFAULT_HOST,
                         "port=" + DEFAULT_PORT,
                         "updatePort=" + DEFAULT_UPDATE_PORT) + "\n",
@@ -77,6 +95,14 @@ public final class BfServerConfig {
             updateBase = ub.trim();
             if (!updateBase.isEmpty() && updateBase.endsWith("/")) {
                 updateBase = updateBase.substring(0, updateBase.length() - 1);
+            }
+            String mb = kv.getOrDefault("musicbase", "");
+            if (mb == null) {
+                mb = "";
+            }
+            musicBase = mb.trim();
+            if (!musicBase.isEmpty() && musicBase.endsWith("/")) {
+                musicBase = musicBase.substring(0, musicBase.length() - 1);
             }
         } catch (IOException e) {
             // 保持默认
@@ -119,6 +145,22 @@ public final class BfServerConfig {
             return "http://" + host + ":" + updatePort; // 自建/本地服：就地取服务端更新源
         }
         return DEFAULT_UPDATE_BASE;                   // 公测服：Cloudflare 更新通道
+    }
+
+    /**
+     * 音乐库基址。与 {@link #updateBase()} 分离的原因：CF Workers 出站 fetch 有端口白名单，
+     * 25610 不在其中，音乐无法经 Worker 回源（详见 {@link #DEFAULT_MUSIC_BASE}）。
+     *
+     * <p>推导顺序：显式配置 musicbase > 自建服（http://host:updatePort）> 公测服直连 MC 主机。
+     */
+    public static String musicBase() {
+        if (!musicBase.isEmpty()) {
+            return musicBase;                         // 显式配置优先
+        }
+        if (!DEFAULT_HOST.equalsIgnoreCase(host)) {
+            return "http://" + host + ":" + updatePort; // 自建/本地服：与更新源同一入口
+        }
+        return DEFAULT_MUSIC_BASE;                    // 公测服：直连 MC 主机音频服务
     }
 
     public static String address() {

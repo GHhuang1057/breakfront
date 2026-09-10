@@ -50,7 +50,19 @@ public final class BotPlayerFactory {
     /** bot 名字前缀：便于日志辨识与指令选择器批量操作。 */
     public static final String NAME_PREFIX = "BF_";
 
+    /**
+     * bot 命令标签：全服唯一的「这是 AI 假玩家」判据。
+     * 用标签而非玩家列表登记表，好处是重启/热更后对已存在实体依然有效，
+     * 且任何模块（统计真人、友伤判定、管理台）都能无依赖地复用。
+     */
+    public static final String BOT_TAG = "breakfront.bot";
+
     private BotPlayerFactory() {
+    }
+
+    /** 实体是否为 BREAKFRONT 假玩家。 */
+    public static boolean isBot(net.minecraft.entity.Entity e) {
+        return e != null && e.getCommandTags().contains(BOT_TAG);
     }
 
     /**
@@ -83,6 +95,8 @@ public final class BotPlayerFactory {
             player.teleport(world, x, y, z, 0.0f, 0.0f);
             player.setCustomName(Text.literal(name));
             player.setCustomNameVisible(false);
+            // 打上 bot 标签（工厂负责，保证任何创建路径都带标记；阵营标签由调用方补）
+            player.addCommandTag(BOT_TAG);
             return player;
         } catch (Throwable t) {
             BreakfrontServer.LOGGER.error("[BF-Bot] 创建假玩家 {} 失败: {}", name, t.toString());

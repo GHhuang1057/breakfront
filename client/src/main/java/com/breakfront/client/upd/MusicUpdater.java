@@ -42,7 +42,9 @@ public final class MusicUpdater {
 
     /** 进度回调（与 {@link Updater.Progress} 同形，复用其定义）。 */
     public static SyncResult sync(String host, int updatePort, Updater.Progress progress) {
-        String base = BfServerConfig.updateBase() + "/breakfront/music";
+        // 注意：音乐基址与更新基址**不同** —— Cloudflare Workers 出站 fetch 有端口白名单，
+        // 25610 不在其中，音乐无法经 Worker 回源，故走 BfServerConfig.musicBase()（直连 MC 主机）。
+        String base = BfServerConfig.musicBase() + "/breakfront/music";
         List<MusicFile> remote = new ArrayList<>();
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(base + "/music.json"))
