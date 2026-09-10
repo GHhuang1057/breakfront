@@ -396,7 +396,10 @@ public final class WebAdminConsole {
         long rz1 = Long.MIN_VALUE;
         int regions = 0;
         try {
-            java.nio.file.Path dir = server.getSavePath(net.minecraft.util.WorldSavePath.REGIONS);
+            // 注意：yarn 1.21.1 的 WorldSavePath 没有 REGIONS 常量（已核官方 API 文档），
+            // 主世界的 region 目录固定在存档根之下：<save>/region/
+            java.nio.file.Path dir = server.getSavePath(net.minecraft.util.WorldSavePath.ROOT)
+                    .resolve("region");
             if (java.nio.file.Files.isDirectory(dir)) {
                 try (var stream = java.nio.file.Files.list(dir)) {
                     for (java.nio.file.Path f : (Iterable<java.nio.file.Path>) stream::iterator) {
