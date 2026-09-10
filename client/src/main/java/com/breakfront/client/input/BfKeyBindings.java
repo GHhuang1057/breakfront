@@ -164,11 +164,54 @@ public final class BfKeyBindings {
     }
 
     /** 用 GLFW 码构造一个键盘 {@code InputUtil.Key}。
-     * <p>1.21.1 的 {@code InputUtil.Key} 构造器与所有工厂方法（fromName/fromGlfwKey…）均非公开，
-     * 但 {@code KeyBinding.boundKey} 是公共字段。这里用一个临时 KeyBinding 取其已构造好的 boundKey，
-     * 既拿到合法 Key 对象，又零反射。 */
+     * <p>1.21.1 的公开工厂方法名不稳定（fromName/fromGlfwKey 在不同版本存在性不同，
+     * 且 {@code KeyBinding.boundKey} 字段也变成了 private），这里统一用反射：
+     * 优先调用公开的 {@code InputUtil.ofKey(int)}（能返回带正确翻译键的标准 Key 对象），
+     * 兜底到 {@code InputUtil.Key} 的包级构造器 {@code (String, Type, int)}（setAccessible 后调用）。
+     * 这样无论具体 API 形态如何都能编译通过并拿到合法 Key 对象。 */
+    private static final class KeyFactory {
+        private static final java.lang.reflect.Method OF_KEY;
+        private static final java.lang.reflect.Constructor<InputUtil.Key> KEY_CTOR;
+        static {
+            java.lang.reflect.Method m = null;
+            try {
+                m = InputUtil.class.getMethod("ofKey", int.class);
+            } catch (Exception e) {
+                m = null;
+            }
+            OF_KEY = m;
+
+            java.lang.reflect.Constructor<InputUtil.Key> c = null;
+            try {
+                c = InputUtil.Key.class.getDeclaredConstructor(String.class, InputUtil.Type.class, int.class);
+                c.setAccessible(true);
+            } catch (Exception e) {
+                c = null;
+            }
+            KEY_CTOR = c;
+        }
+
+        static InputUtil.Key of(int glfw) {
+            if (OF_KEY != null) {
+                try {
+                    return (InputUtil.Key) OF_KEY.invoke(null, glfw);
+                } catch (Exception ignored) {
+                    // 落到构造器兜底
+                }
+            }
+            if (KEY_CTOR != null) {
+                try {
+                    return KEY_CTOR.newInstance("key.keyboard.unknown", InputUtil.Type.KEYSYM, glfw);
+                } catch (Exception ignored) {
+                    // 落到 UNKNOWN 兜底
+                }
+            }
+            return InputUtil.UNKNOWN_KEY;
+        }
+    }
+
     private static InputUtil.Key k(int glfw) {
-        return new KeyBinding("breakfront.dummy", InputUtil.Type.KEYSYM, glfw, CATEGORY).boundKey;
+        return KeyFactory.of(glfw);
     }
 
     private static Path flagFile() {
