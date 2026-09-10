@@ -66,9 +66,9 @@ public final class BfKeyBindings {
     /** 原版键位 → BF2042 目标键（直接构造 {@code InputUtil.Key}，避开 1.21 无 {@code fromName} 的坑）。 */
     private static final Map<String, InputUtil.Key> VANILLA_REMAP = new LinkedHashMap<>();
     static {
-        VANILLA_REMAP.put("key.sprint",        k("key.keyboard.left.shift",   GLFW.GLFW_KEY_LEFT_SHIFT));   // 原版默认 Left Control
-        VANILLA_REMAP.put("key.sneak",         k("key.keyboard.left.control", GLFW.GLFW_KEY_LEFT_CONTROL)); // 原版默认 Left Shift
-        VANILLA_REMAP.put("key.chat",          k("key.keyboard.h",            GLFW.GLFW_KEY_H));            // 原版默认 T
+        VANILLA_REMAP.put("key.sprint",        k(GLFW.GLFW_KEY_LEFT_SHIFT));   // 原版默认 Left Control
+        VANILLA_REMAP.put("key.sneak",         k(GLFW.GLFW_KEY_LEFT_CONTROL)); // 原版默认 Left Shift
+        VANILLA_REMAP.put("key.chat",          k(GLFW.GLFW_KEY_H));            // 原版默认 T
         // 以下原版绑定与 BF 动作键冲突 → 置为未绑定，腾出键位
         VANILLA_REMAP.put("key.drop",          InputUtil.UNKNOWN_KEY);      // 原版 Q → 让给标记
         VANILLA_REMAP.put("key.inventory",     InputUtil.UNKNOWN_KEY);      // 原版 E → 让给互动
@@ -151,21 +151,24 @@ public final class BfKeyBindings {
 
     private static InputUtil.Key defaultFor(String translationKey) {
         return switch (translationKey) {
-            case "key.drop"         -> k("key.keyboard.q",            GLFW.GLFW_KEY_Q);
-            case "key.inventory"    -> k("key.keyboard.e",            GLFW.GLFW_KEY_E);
-            case "key.swapHands"    -> k("key.keyboard.f",            GLFW.GLFW_KEY_F);
-            case "key.hideHud"      -> k("key.keyboard.f1",           GLFW.GLFW_KEY_F1);
-            case "key.advancements" -> k("key.keyboard.l",            GLFW.GLFW_KEY_L);
-            case "key.chat"         -> k("key.keyboard.t",            GLFW.GLFW_KEY_T);
-            case "key.sprint"       -> k("key.keyboard.left.control", GLFW.GLFW_KEY_LEFT_CONTROL);
-            case "key.sneak"       -> k("key.keyboard.left.shift",    GLFW.GLFW_KEY_LEFT_SHIFT);
+            case "key.drop"         -> k(GLFW.GLFW_KEY_Q);
+            case "key.inventory"    -> k(GLFW.GLFW_KEY_E);
+            case "key.swapHands"    -> k(GLFW.GLFW_KEY_F);
+            case "key.hideHud"      -> k(GLFW.GLFW_KEY_F1);
+            case "key.advancements" -> k(GLFW.GLFW_KEY_L);
+            case "key.chat"         -> k(GLFW.GLFW_KEY_T);
+            case "key.sprint"       -> k(GLFW.GLFW_KEY_LEFT_CONTROL);
+            case "key.sneak"       -> k(GLFW.GLFW_KEY_LEFT_SHIFT);
             default                 -> null;
         };
     }
 
-    /** 用 GLFW 码构造一个键盘 {@code InputUtil.Key}（1.21 的 {@code InputUtil.Key} 构造器非 public，走工厂方法）。 */
-    private static InputUtil.Key k(String trans, int glfw) {
-        return InputUtil.fromGlfwKey(glfw);
+    /** 用 GLFW 码构造一个键盘 {@code InputUtil.Key}。
+     * <p>1.21.1 的 {@code InputUtil.Key} 构造器与所有工厂方法（fromName/fromGlfwKey…）均非公开，
+     * 但 {@code KeyBinding.boundKey} 是公共字段。这里用一个临时 KeyBinding 取其已构造好的 boundKey，
+     * 既拿到合法 Key 对象，又零反射。 */
+    private static InputUtil.Key k(int glfw) {
+        return new KeyBinding("breakfront.dummy", InputUtil.Type.KEYSYM, glfw, CATEGORY).boundKey;
     }
 
     private static Path flagFile() {
