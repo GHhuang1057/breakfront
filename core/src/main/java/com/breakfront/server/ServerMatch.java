@@ -578,21 +578,37 @@ public final class ServerMatch {
         }
     }
 
-    /** 广播玩家位置帧（每 0.25s）：客户端雷达只显示同阵营队友。 */
+    /** 广播玩家位置帧（每 0.25s）：客户端雷达只显示同阵营队友，故**只发同侧的 rows**。
+     *
+     * <p>为什么要按接收者过滤：这是 32v32 下唯一由我们自造的高频广播。
+     * 每行 ≈ 33 字节（name + side + x/z 两个 double + yaw + alive），
+     * 32 人一帧 ≈ 1.0KB，4Hz × 32 个接收者 ≈ 135KB/s ≈ 1.08Mbps ——
+     * 北京出口只有 5Mbps，光雷达帧就吃掉两成以上，而且是纯浪费：
+     * 客户端本来就只画同阵营点（敌情靠目视/据点状态，不泄露位置）。
+     * 过滤后带宽直接减半，且**线格式不变**，老客户端二进制兼容。
+     */
     private void broadcastPos(MinecraftServer server) {
-        var rows = new ArrayList<PlayerPosPayload.Row>();
-        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+        var players = server.getPlayerManager().getPlayerList();
+        // 先按阵营归拢一次，避免每个接收者都重算 sideOfEntity（那是标签查询，不便宜）
+        java.util.Map<Integer, List<PlayerPosPayload.Row>> bySide = new java.util.HashMap<>();
+        for (ServerPlayerEntity p : players) {
             // ⚠️ 必须走 sideOfEntity 而非 teams.sideOf：AI 假玩家（BotSquad）不在
             // TeamManager 里，只挂了 bf.side.att/def 命令标签；用 teams.sideOf 会让它们
             // 一律变成 -1，客户端据此就无法给 BOT 标友方/敌方（雷达、头顶菱形全会缺）。
             Side side = sideOfEntity(p);
             int s = side == null ? -1 : side.ordinal();
-            rows.add(new PlayerPosPayload.Row(p.getGameProfile().getName(), s,
-                    p.getX(), p.getZ(), p.getYaw(), p.isAlive() && p.getHealth() > 0));
+            bySide.computeIfAbsent(s, k -> new ArrayList<>())
+                    .add(new PlayerPosPayload.Row(p.getGameProfile().getName(), s,
+                            p.getX(), p.getZ(), p.getYaw(), p.isAlive() && p.getHealth() > 0));
         }
-        var payload = new PlayerPosPayload(rows);
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            ServerPlayNetworking.send(player, payload);
+        for (ServerPlayerEntity player : players) {
+            Side side = sideOfEntity(player);
+            int s = side == null ? -1 : side.ordinal();
+            List<PlayerPosPayload.Row> rows = bySide.get(s);
+            if (rows == null || rows.isEmpty()) {
+                continue;
+            }
+            ServerPlayNetworking.send(player, new PlayerPosPayload(rows));
         }
     }
 

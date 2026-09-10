@@ -73,7 +73,14 @@ def main():
         "online-mode=false",
         "accepts-transfers=true",
         "level-type=minecraft\\:flat",
-        "view-distance=12",
+        # 带宽受限（实测北京出口仅 5Mbps）：视距/模拟距离是 32v32 下最大的带宽杠杆，
+        # 区块流送量的增长近似 O(视距²)。10/8 在城市场景里几乎看不出差别，但省得多。
+        "view-distance=10",
+        "simulation-distance=8",
+        # 实体同步范围收到 80%：减少远处实体的高频位置包（对 BF 玩法影响很小）
+        "entity-broadcast-range-percentage=80",
+        # 压缩阈值下调：让更多小包（位置/状态）也走压缩，换取出口带宽
+        "network-compression-threshold=128",
         "spawn-protection=0",
         "allow-flight=true",
         "max-players=64",
