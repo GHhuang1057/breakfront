@@ -120,6 +120,35 @@ def find_version(slug: str, expect: str):
     return hit[0]
 
 
+def cross_check(infos: dict[str, tuple[str, dict]]) -> list[str]:
+    """两两交叉检查 depends / breaks —— 这是单看「各模组 vs sodium」时的盲区。
+
+    实测教训：Sodium 0.6.13 声明 `breaks reeses-sodium-options <1.8.0`，
+    而 RSO 1.8.0-beta.4 按语义化版本仍 <1.8.0（预发布小于正式版）→ 二者冲突。
+    只看「RSO 对 sodium 的 depends」是发现不了的，必须双向检查。
+
+    infos: modid -> (filename, fabric.mod.json)
+    """
+    problems = []
+    for mid, (fn, mj) in infos.items():
+        mine = str(mj.get("version", "?"))
+        for key in ("depends", "breaks"):
+            for other, expr in (mj.get(key) or {}).items():
+                if other not in infos or other == mid:
+                    continue
+                ofn, omj = infos[other]
+                over = str(omj.get("version", "?"))
+                ok = satisfies(expr, over)
+                if ok is None:
+                    continue
+                # depends 不满足 → 冲突；breaks 命中（对方落在排除区间）→ 冲突
+                bad = (ok is False) if key == "depends" else (ok is True)
+                if bad:
+                    problems.append(
+                        f"{fn} ({mine}) {key} {other}={expr} —— 但已装 {other} {over}")
+    return problems
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sodium", default="0.6.13", help="基准 Sodium 版本（默认 0.6.13）")
@@ -131,11 +160,9 @@ def main() -> int:
     print("=" * 96)
 
     problems = []
+    infos: dict[str, tuple[str, dict]] = {}
     for p in pins:
         slug, expect = p["slug"], p["expect"]
-        if slug == "sodium":
-            print(f"  {slug:<26} {expect:<30} 基准本体（跳过）")
-            continue
         try:
             v = find_version(slug, expect)
         except Exception as e:  # noqa: BLE001
@@ -158,12 +185,17 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             print(f"  {slug:<26} {expect:<30} ✗ jar 读取失败: {e}")
             continue
+        infos[mj.get("id") or slug] = (fname, mj)
+
+        if slug == "sodium":
+            print(f"  {slug:<26} {expect:<30} 基准本体（跳过单向检查）")
+            continue
 
         notes, bad = [], False
         for key in ("depends", "breaks"):
             for name, ver in (mj.get(key) or {}).items():
-                # 只关心对 **sodium 本体** 的约束；sodium-extra / reeses-sodium-options
-                # 是别的模组，不能拿 sodium 的版本来套它们的约束。
+                # 只关心对 **sodium 本体** 的约束；sodium-extra 等是别的模组，
+                # 不能拿 sodium 的版本来套它们的约束（那部分交给 cross_check）。
                 if name.lower() != "sodium":
                     continue
                 ok = satisfies(ver, target)
@@ -171,8 +203,6 @@ def main() -> int:
                 if ok is None:
                     notes.append(f"? {tag} sodium={ver}")
                     continue
-                # depends：不满足 → 缺依赖 → 冲突
-                # breaks ：满足（target 落在被排除的范围内）→ 冲突
                 conflict = (ok is False) if key == "depends" else (ok is True)
                 if conflict:
                     bad = True
@@ -185,13 +215,24 @@ def main() -> int:
         if bad:
             problems.append(f"{slug} {expect}: " + "; ".join(n for n in notes if n.startswith("✗")))
 
+    # ---- 交叉检查：所有已装模组两两之间的 depends / breaks ----
+    print("=" * 96)
+    print(f"交叉约束检查（{len(infos)} 个模组两两之间）")
+    cross = cross_check(infos)
+    if cross:
+        for x in cross:
+            print("  ✗ " + x)
+        problems.extend(cross)
+    else:
+        print("  ✓ 无跨模组冲突")
+
     print("=" * 96)
     if problems:
-        print(f"发现 {len(problems)} 处与 Sodium {target} 冲突：")
+        print(f"发现 {len(problems)} 处问题：")
         for x in problems:
             print("  - " + x)
         return 1
-    print("全部模组的 Sodium 约束自洽 ✓")
+    print(f"全部模组自洽 ✓（基准 Sodium {target}）")
     return 0
 
 

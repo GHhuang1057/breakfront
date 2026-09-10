@@ -1,7 +1,7 @@
 {
   "mc_version": "1.21.1",
   "loader": "fabric",
-  "_comment": "BREAKFRONT 极致优化组合版本钉（#44 批次 + 极致优化扩充）。expect 为 Modrinth version_number 子串，resolve_mod 命中即钉该版本。env 仅作人工备注，脚本实际以 jar 内 fabric.mod.json / 项目 client_side|server_side 为准计算。注意：sodium/iris 必须显式钉住（配对锁定 Iris 1.8.8 + Sodium 0.6.13），否则 sodium-extra/reeses 的依赖递归会拉到 0.8.13 破坏配对启动即崩。",
+  "_comment": "BREAKFRONT 极致优化组合版本钉（#44 批次 + 极致优化扩充）。expect 为 Modrinth version_number 子串，resolve_mod 命中即钉该版本。env 仅作人工备注，脚本实际以 jar 内 fabric.mod.json / 项目 client_side|server_side 为准计算。注意：sodium/iris 必须显式钉住（配对锁定 Iris 1.8.8 + Sodium 0.6.13），否则 sodium-extra 的依赖递归会拉到 0.8.13 破坏配对启动即崩。⚠️ 已移除 reeses-sodium-options：Sodium 0.6.2+ 声明 breaks reeses-sodium-options <1.8.0，而 1.8.0-beta.x 按语义化版本仍 <1.8.0（预发布 < 正式版），且 MC 1.21.1 上 RSO 只有 1.8.0-beta.x（正式版 1.8.0 仅存于 MC 1.21.3+）→ 二者在 1.21.1 无法共存。RSO 仅提供视频设置界面增强，为保住最新的 Sodium 0.6.13 而舍弃。",
   "pins": [
     {"slug": "sodium",              "expect": "mc1.21.1-0.6.13-fabric",  "env": "both",   "note": "渲染优化核心 · 锁 0.6.13（0.7/0.8 breaks iris<1.8.13，1.21.1 稳定 Iris 仅 1.8.8）"},
     {"slug": "iris",                "expect": "1.8.8+1.21.1-fabric",     "env": "client", "note": "光影核心 · 锁 1.8.8（1.8.14-beta 不稳）"},
@@ -11,7 +11,6 @@
     {"slug": "entityculling",       "expect": "1.10.5",                  "env": "client", "note": "屏幕外实体/方块实体跳过渲染（客户端专属）"},
     {"slug": "immediatelyfast",     "expect": "1.6.13+1.21.1-fabric",    "env": "client", "note": "立即模式渲染批处理（客户端专属，需 Java>=21）"},
     {"slug": "sodium-extra",        "expect": "mc1.21.1-0.6.0+fabric",   "env": "client", "note": "Sodium 细粒度选项。⚠️ 0.7+ 起改为 depends sodium>=0.8.12，与本项目锁定的 0.6.13 冲突（实测 0.9.3 报错）→ 钉最后的 0.6 线版本 0.6.0（depends sodium>=0.6.0 已核 jar 内 fabric.mod.json）"},
-    {"slug": "reeses-sodium-options","expect": "mc1.21.1-1.8.0-beta.4+fabric", "env": "client", "note": "视频设置界面增强。⚠️ 2.x 起改为 depends sodium>=0.8.12（实测 2.2.3 报错）→ 钉 1.8.0-beta.4（depends sodium>=0.6.0-beta.2，已核 jar）；1.7.3 虽 depends sodium=* 但标 MC 1.21 非 1.21.1"},
     {"slug": "dynamic-fps",         "expect": "3.11.4",                  "env": "client", "note": "失焦/最小化降帧省电"},
     {"slug": "moreculling",         "expect": "1.0.7",                   "env": "client", "note": "方块面剔除（叶子/玻璃等）。⚠️ 1.0.10 声明 breaks sodium<=0.6.13（实测报不兼容）→ 钉 1.0.7（breaks sodium<=0.6.6，0.6.13 不受影响）"},
     {"slug": "language-reload",     "expect": "1.7.6+1.21.1",            "env": "client", "note": "语言资源异步加载"},
@@ -21,6 +20,6 @@
     {"slug": "servercore",          "expect": "1.5.19+1.21.1",           "env": "both",   "note": "服务端 tick/实体密度治理（默认配置保守）"},
     {"slug": "noisium",             "expect": "2.3.0+mc1.21-1.21.1",     "env": "both",   "note": "世界生成噪声优化"},
     {"slug": "c2me-fabric",         "expect": "0.4.0-alpha.0.27+1.21.1", "env": "both",   "note": "并发区块生成/加载（alpha，首崩嫌疑，出问题先摘）"},
-    {"slug": "squaremap",           "expect": "mc1.21.1-1.3.2",          "env": "server", "note": "真实世界俯视图（网页地图）。服务端专属（client_side=unsupported，客户端加载器会自动跳过）；管理台经 /bfadmin/tiles 代理其瓦片作为 Leaflet 底图，取代此前的方块色采样示意；默认 web 端口 8080。env 由脚本按 Modrinth client_side/server_side 自动判定为 server —— 服务端打包脚本已放行 both+server。"}
+    {"slug": "squaremap",           "expect": "1.3.2",                   "env": "server", "note": "真实世界俯视图（网页地图）。服务端专属（client_side=unsupported，客户端加载器会自动跳过）；管理台经 /bfadmin/tiles 代理其瓦片作为 Leaflet 底图，取代此前的方块色采样示意；默认 web 端口 8080。⚠️ 本项 expect 用简短号 1.3.2 —— squaremap 的 version_number 就是纯版本号（不像 sodium 那样带 mc1.21.1 前缀），写全文件名格式会匹配不到导致打包失败。env 由脚本按 Modrinth client_side/server_side 自动判定为 server，服务端打包脚本已放行 both+server。"}
   ]
 }
