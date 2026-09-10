@@ -2,10 +2,13 @@
 
 产物：client/src/main/resources/resourcepacks/bf_ui/
   pack.mcmeta
-  assets/minecraft/textures/gui/sprites/widget/*.png (+ 原版 .mcmeta 九宫格定义)
+  assets/minecraft/textures/gui/sprites/widget/*.png (+ 九宫格 .mcmeta，见 MC_META)
   assets/minecraft/textures/gui/{menu,menu_list,inworld_menu,inworld_menu_list}_background.png
   assets/minecraft/textures/gui/{header, inworld_header, inworld_footer}_separator.png
   assets/minecraft/textures/gui/{tab_header_background,title/background/panorama_overlay}.png
+
+本脚本**不依赖任何 Mojang 资产**（九宫格切边数字已内联在 MC_META），克隆即可重跑；
+仓库里也不要提交从原版 jar 抽出的参照贴图（见 .gitignore）。
 
 为什么放 resourcepacks/ 而非 assets/ 根：这里用 Fabric 的「内置资源包」机制
 （ResourceManagerHelper.registerBuiltinResourcePack，见 BreakfrontClient），
@@ -22,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -52,7 +56,6 @@ INSET = (10, 16, 23, 0xF2)          # 输入框内部
 BLANK = (0, 0, 0, 0)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REF = os.path.join(ROOT, "scripts", "_vanilla_png")
 OUT = os.path.join(ROOT, "client", "src", "main", "resources",
                    "resourcepacks", "bf_ui")
 TP = os.path.join(OUT, "assets", "minecraft", "textures", "gui")
@@ -112,15 +115,48 @@ def save(im: Image.Image, rel: str):
     im.save(p, "PNG", optimize=True)
 
 
-def copy_mcmeta(rel_png: str):
-    """把原版 .mcmeta（九宫格/缩放声明）原样搬过来 —— 这些元数据决定切边，
-    自研贴图必须沿用，否则拉伸行为会变。"""
-    src = os.path.join(REF, rel_png + ".mcmeta")
-    if not os.path.isfile(src):
+# --------------------------------------------------------------------------- #
+# 九宫格/缩放元数据（从原版 1.21.1 客户端 jar 读出后内联）
+# --------------------------------------------------------------------------- #
+# 内联而不是每次从原版 jar 抄：这些只是切边数字（非受版权保护），内联后生成器
+# **不依赖任何 Mojang 资产**，仓库克隆下来即可直接重跑（仓库要公开，原版贴图不入库）。
+# 格式：rel -> (width, height, border)；border 为 int 表示四边同值。
+MC_META: dict[str, tuple[int, int, int | dict]] = {
+    "sprites/widget/button.png": (200, 20, 3),
+    "sprites/widget/button_highlighted.png": (200, 20, 3),
+    "sprites/widget/button_disabled.png": (200, 20, 1),
+    "sprites/widget/slider.png": (200, 20, 1),
+    "sprites/widget/slider_highlighted.png": (200, 20, 1),
+    "sprites/widget/slider_handle.png": (8, 20, {"left": 2, "top": 2, "right": 2, "bottom": 3}),
+    "sprites/widget/slider_handle_highlighted.png": (8, 20, {"left": 2, "top": 2, "right": 2, "bottom": 3}),
+    "sprites/widget/text_field.png": (200, 20, 1),
+    "sprites/widget/text_field_highlighted.png": (200, 20, 1),
+    "sprites/widget/tab.png": (130, 24, {"left": 2, "top": 2, "right": 2, "bottom": 0}),
+    "sprites/widget/tab_highlighted.png": (130, 24, {"left": 2, "top": 2, "right": 2, "bottom": 0}),
+    "sprites/widget/tab_selected.png": (130, 24, {"left": 2, "top": 2, "right": 2, "bottom": 0}),
+    "sprites/widget/tab_selected_highlighted.png": (130, 24, {"left": 2, "top": 2, "right": 2, "bottom": 0}),
+    "sprites/widget/scroller.png": (6, 32, 1),
+    "sprites/widget/scroller_background.png": (6, 32, 1),
+    "sprites/popup/background.png": (236, 34, 6),
+}
+
+
+def mcmeta_text(rel: str) -> str:
+    w, h, border = MC_META[rel]
+    b = json.dumps(border) if isinstance(border, dict) else str(border)
+    return ('{\n  "gui": {\n    "scaling": {\n      "type": "nine_slice",\n'
+            f'      "width": {w},\n      "height": {h},\n      "border": {b}\n'
+            '    }\n  }\n}\n')
+
+
+def write_mcmeta(rel: str) -> bool:
+    """有九宫格声明的贴图必须配套写 .mcmeta，否则缩放行为与设计不符。"""
+    if rel not in MC_META:
         return False
-    dst = os.path.join(TP, rel_png + ".mcmeta")
+    dst = os.path.join(TP, rel + ".mcmeta")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    shutil.copyfile(src, dst)
+    with open(dst, "w", encoding="utf-8") as f:
+        f.write(mcmeta_text(rel))
     return True
 
 
@@ -325,10 +361,6 @@ def main() -> int:
     ap.add_argument("--preview", action="store_true")
     args = ap.parse_args()
 
-    if not os.path.isdir(REF):
-        print("[✗] 缺少原版参照目录，先跑 scripts/_probe_gui_extract.py")
-        return 1
-
     if os.path.isdir(OUT):
         shutil.rmtree(OUT)
     os.makedirs(TP, exist_ok=True)
@@ -337,11 +369,11 @@ def main() -> int:
 
     made: list[tuple[str, Image.Image]] = []
 
-    def emit(rel: str, im: Image.Image, mc: bool = True):
+    def emit(rel: str, im: Image.Image):
         save(im, rel)
-        if mc:
-            if not copy_mcmeta(rel):
-                print(f"  [!] 无原版 mcmeta（可能本就不需要）: {rel}")
+        if not write_mcmeta(rel):
+            # 没有九宫格声明的贴图（勾选框/图标/平铺底…）本就不需要 .mcmeta
+            pass
         made.append((rel, im))
 
     # --- 按钮族 ---
@@ -369,40 +401,40 @@ def main() -> int:
     emit("sprites/widget/tab_selected_highlighted.png", tab(True, True))
 
     # --- 勾选框 ---
-    emit("sprites/widget/checkbox.png", checkbox("n"), mc=False)
-    emit("sprites/widget/checkbox_highlighted.png", checkbox("nh"), mc=False)
-    emit("sprites/widget/checkbox_selected.png", checkbox("s"), mc=False)
-    emit("sprites/widget/checkbox_selected_highlighted.png", checkbox("sh"), mc=False)
+    emit("sprites/widget/checkbox.png", checkbox("n"))
+    emit("sprites/widget/checkbox_highlighted.png", checkbox("nh"))
+    emit("sprites/widget/checkbox_selected.png", checkbox("s"))
+    emit("sprites/widget/checkbox_selected_highlighted.png", checkbox("sh"))
 
     # --- 图标类按钮 ---
-    emit("sprites/widget/cross_button.png", cross_button(False), mc=False)
-    emit("sprites/widget/cross_button_highlighted.png", cross_button(True), mc=False)
-    emit("sprites/widget/page_backward.png", page_arrow(False, False), mc=False)
-    emit("sprites/widget/page_backward_highlighted.png", page_arrow(False, True), mc=False)
-    emit("sprites/widget/page_forward.png", page_arrow(True, False), mc=False)
-    emit("sprites/widget/page_forward_highlighted.png", page_arrow(True, True), mc=False)
-    emit("sprites/widget/locked_button.png", lock_button(True, False), mc=False)
-    emit("sprites/widget/locked_button_highlighted.png", lock_button(True, True), mc=False)
-    emit("sprites/widget/locked_button_disabled.png", lock_button(True, False, True), mc=False)
-    emit("sprites/widget/unlocked_button.png", lock_button(False, False), mc=False)
-    emit("sprites/widget/unlocked_button_highlighted.png", lock_button(False, True), mc=False)
-    emit("sprites/widget/unlocked_button_disabled.png", lock_button(False, False, True), mc=False)
+    emit("sprites/widget/cross_button.png", cross_button(False))
+    emit("sprites/widget/cross_button_highlighted.png", cross_button(True))
+    emit("sprites/widget/page_backward.png", page_arrow(False, False))
+    emit("sprites/widget/page_backward_highlighted.png", page_arrow(False, True))
+    emit("sprites/widget/page_forward.png", page_arrow(True, False))
+    emit("sprites/widget/page_forward_highlighted.png", page_arrow(True, True))
+    emit("sprites/widget/locked_button.png", lock_button(True, False))
+    emit("sprites/widget/locked_button_highlighted.png", lock_button(True, True))
+    emit("sprites/widget/locked_button_disabled.png", lock_button(True, False, True))
+    emit("sprites/widget/unlocked_button.png", lock_button(False, False))
+    emit("sprites/widget/unlocked_button_highlighted.png", lock_button(False, True))
+    emit("sprites/widget/unlocked_button_disabled.png", lock_button(False, False, True))
 
     # --- 滚动条 / 槽位 / 弹窗 ---
     emit("sprites/widget/scroller.png", scroller(False))
     emit("sprites/widget/scroller_background.png", scroller(True))
-    emit("sprites/widget/slot_frame.png", slot_frame(), mc=False)
+    emit("sprites/widget/slot_frame.png", slot_frame())
     emit("sprites/popup/background.png", popup_background())
 
     # --- 平铺底 / 分隔线（无 mcmeta） ---
     for name in ("menu_background", "menu_list_background",
                  "inworld_menu_background", "inworld_menu_list_background"):
-        emit(f"{name}.png", tiled_background(name), mc=False)
-    emit("tab_header_background.png", tiled_background("tab_header"), mc=False)
-    emit("header_separator.png", separator("header"), mc=False)
-    emit("inworld_header_separator.png", separator("header"), mc=False)
-    emit("inworld_footer_separator.png", separator("footer"), mc=False)
-    emit("title/background/panorama_overlay.png", panorama_overlay(), mc=False)
+        emit(f"{name}.png", tiled_background(name))
+    emit("tab_header_background.png", tiled_background("tab_header"))
+    emit("header_separator.png", separator("header"))
+    emit("inworld_header_separator.png", separator("header"))
+    emit("inworld_footer_separator.png", separator("footer"))
+    emit("title/background/panorama_overlay.png", panorama_overlay())
 
     print(f"[✓] 生成 {len(made)} 个贴图 → {os.path.relpath(OUT, ROOT)}")
 

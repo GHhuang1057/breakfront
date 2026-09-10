@@ -47,3 +47,9 @@ node_modules/
 scripts/_sqm_*
 scripts/_chk_*.js
 scripts/_relay.bundle
+
+# 从原版客户端 jar 抽取的 GUI 参照贴图/清单 —— **Mojang 资产，禁止入库**
+# （仓库未来要公开；这些文件由 scripts/_probe_gui_extract.py 按需重新抽取即可）
+scripts/_vanilla_png/
+scripts/_vanilla_gui_*.txt
+scripts/_gui_dump.txt

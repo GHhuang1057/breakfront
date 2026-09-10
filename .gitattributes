@@ -1,0 +1,9 @@
+# 生成的材质包元数据一律 LF —— 生成器写 LF，若按全局 autocrlf 转成 CRLF，
+# 每次重跑生成器都会产生"仅换行符不同"的伪 diff。
+*.mcmeta text eol=lf
+pack.mcmeta text eol=lf
+
+# 二进制资产不做换行转换
+*.png binary
+*.jar binary
+*.zip binary
