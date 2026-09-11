@@ -72,8 +72,8 @@ try {
 
   # 有人在线则本轮跳过（不写标记，3 分钟后重试）——避免发版重启把在线玩家踢出。
   $est = @(Get-NetTCPConnection -LocalPort 25565 -State Established -ErrorAction SilentlyContinue |
-           Where-Object { \$_.RemoteAddress -notmatch '^(127\.|::1|0\.0\.0\.0)' })
-  if (\$est.Count -gt 0) { Log ('defer: ' + \$est.Count + ' player connections online'); Remove-Item \$Lock -Force; exit 0 }
+           Where-Object { $_.RemoteAddress -notmatch '^(127\.|::1|0\.0\.0\.0)' })
+  if ($est.Count -gt 0) { Log ('defer: ' + $est.Count + ' player connections online'); Remove-Item $Lock -Force; exit 0 }
 
   function InstCall($action) {
     Invoke-RestMethod -Uri ("$Panel/api/protected_instance/$action" + "?daemonId=$DaemonId&uuid=$InstanceUuid&token=$token") -WebSession $sess -Headers $ph -TimeoutSec 30 | Out-Null
@@ -127,7 +127,9 @@ Write-Output 'BFDeploy registered'
 """
 
 def write_remote(cli, path, content):
-    b64 = base64.b64encode(content.encode("utf-8")).decode()
+    # ⚠️ 必须带 BOM 写入：PS 5.1 对无 BOM 的 UTF-8 按 ANSI/GBK 解码，中文注释会撕裂字节流
+    #    导致整个脚本 parse error（实测 2026-09-11：task result=1 静默失败、日志零输出）。
+    b64 = base64.b64encode(content.encode("utf-8-sig")).decode()
     out = ps(cli, f"[IO.File]::WriteAllText('{path}', [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}'))); "
                   f"Write-Output ('wrote ' + (Get-Item '{path}').Length)")
     print("write", path, "->", out.strip()[:60])
