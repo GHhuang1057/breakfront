@@ -63,6 +63,14 @@ public final class BotSquad {
     private static final long FIRE_MS = 500;
     /** 单次开火伤害：对齐 {@code WeaponCatalog} 的 hk416d 单发 26 伤（AR 4 发击杀）。 */
     private static final double SHOT_DAMAGE = 26.0;
+
+    // ---- BF 风格 TTK 节奏（2026-09-11）：MC 20TPS 离散伤害，改用「点射组」模型拉长 TTK——
+    //      组 = 3 发 × 140ms（14 伤/发），组间 850ms+抖动；距离越远命中率越低。
+    //      100HP 需 8 发命中 ≈ 2.5~4s 持续交火，战斗有来有回而非瞬间融化/僵持。 ----
+    private static final int BURST_SHOTS = 3;
+    private static final long SHOT_GAP_MS = 140;
+    private static final long BURST_GAP_MS = 850;
+    private static final double BURST_SHOT_DAMAGE = 14.0;
     /** 卡住判定：连续该 tick 数无有效位移则重掷目标点。 */
     private static final int STUCK_TICKS = 60;
     /** 状态维持间隔（生命上限/饱食度/灭火/假连线排空）。20 tick = 1s。 */
@@ -114,6 +122,10 @@ public final class BotSquad {
         int stalledTicks;
         long scanAtMs;
         long fireAtMs;
+        // 点射组状态（BF 风格 TTK 节奏）
+        int burstLeft;
+        long nextShotAtMs;
+        long burstAtMs;
         /** 出生 tick（用于部署保护期判定）。 */
         int spawnTick;
         /** 缓存的交战目标：每 DECIDE 节流刷新；坐标动态读取（目标会移动）。 */
@@ -474,15 +486,29 @@ public final class BotSquad {
             BotMotor.stepToward(bot, foe.x(), foe.z(), BotMotor.DEFAULT_SPEED);
             return;
         }
-        if (now < t.fireAtMs) {
-            return;
-        }
-        t.fireAtMs = now + FIRE_MS;
         if (dist > GUN_RANGE || !lineOfSight(bot, foe)) {
             return;
         }
-        bot.swingHand(net.minecraft.util.Hand.MAIN_HAND);   // 挥臂动画（客户端可见）
-        foe.entity.damage(bot.getDamageSources().playerAttack(bot), (float) SHOT_DAMAGE);
+        // 点射组节奏：burstLeft>0 期间按 SHOT_GAP_MS 逐发（含命中概率），组间 BURST_GAP_MS 休整
+        if (t.burstLeft > 0) {
+            if (now < t.nextShotAtMs) {
+                return;
+            }
+            t.nextShotAtMs = now + SHOT_GAP_MS;
+            t.burstLeft--;
+            bot.swingHand(net.minecraft.util.Hand.MAIN_HAND);
+            double hitP = Math.max(0.35, 1.05 - dist / GUN_RANGE);
+            if (Math.random() < hitP) {
+                foe.entity.damage(bot.getDamageSources().playerAttack(bot), (float) BURST_SHOT_DAMAGE);
+            }
+            return;
+        }
+        if (now < t.burstAtMs) {
+            return;
+        }
+        t.burstAtMs = now + BURST_GAP_MS + (t.id.hashCode() & 0x1FF);   // 组间抖动打散齐射
+        t.burstLeft = BURST_SHOTS;
+        t.nextShotAtMs = now;
     }
 
     // ---------- 索敌 ----------

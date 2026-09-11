@@ -108,10 +108,9 @@ public class BfDeployScreen extends Screen {
         int sw = this.width;
         int sh = this.height;
 
-        // 全屏冷底 → 阵亡部署期间改为**半透明**：露出 BfDeployCamera 的实时 3D 俯瞰
-        // （相机已切到目标上空；面板/文字保持不透明保证可读性）。
-        if (respawnMode && com.breakfront.client.hud.BfDeployCamera.active()) {
-            BfDraw.gradientV(ctx, 0, 0, sw, sh, 0x660A0D12, 0x88141B26);
+        // 全屏冷底 → 部署相机激活时改为**半透明**：露出 3D 实景俯瞰（两种部署模式皆然）。
+        if (com.breakfront.client.hud.BfDeployCamera.active()) {
+            BfDraw.gradientV(ctx, 0, 0, sw, sh, 0x440A0D12, 0x66141B26);
         } else {
             BfDraw.gradientV(ctx, 0, 0, sw, sh, 0xFF0A0D12, 0xFF141B26);
         }
@@ -136,7 +135,16 @@ public class BfDeployScreen extends Screen {
         if (mapH < 80) {
             mapH = 80;
         }
-        renderMap(ctx, 0, mapTop, sw, mapH, mySide, mouseX, mouseY, a);
+        // 俯瞰相机激活（含开局首次部署）：跳过 2D 战区面板——它会把 3D 实景俯瞰整个挡住，
+        // 只留选择提示；部署点用 A/D 或 ←/→ 切换（底部条显示当前选中）。
+        if (com.breakfront.client.hud.BfDeployCamera.active()) {
+            String hint = "A / D 或 ← → 切换部署点 · 「部署」提交重生";
+            int hw2 = this.textRenderer.getWidth(hint);
+            ctx.drawText(this.textRenderer, Text.literal(hint),
+                    sw / 2 - hw2 / 2, mapTop + 10, argb(BfTheme.TEXT_DIM, a), false);
+        } else {
+            renderMap(ctx, 0, mapTop, sw, mapH, mySide, mouseX, mouseY, a);
+        }
 
         // 底部兵种条
         renderBar(ctx, sw, sh, mapTop + mapH, BAR_H, mouseX, mouseY, a);
@@ -209,9 +217,9 @@ public class BfDeployScreen extends Screen {
                     valid, owner.ordinal(), defContested));
         }
 
-        // 部署相机：阵亡部署期间把主相机切到「所选目标上空的实时 3D 俯瞰」。
-        // 目标切换时锚点跟随；点击部署后 beginGlide 滑落到第一人称（BfDeployCamera/CameraMixin）。
-        if (respawnMode && selectedDeployIndex >= 0 && selectedDeployIndex < targets.size()) {
+        // 部署相机：**两种模式都启用**（用户要求开局首次部署也用 3D 俯瞰）。
+        // 阵亡=锚定所选目标；开局首次=锚定本方出生区（targets[0]）。
+        if (selectedDeployIndex >= 0 && selectedDeployIndex < targets.size()) {
             DeployTarget sel = targets.get(selectedDeployIndex);
             com.breakfront.client.hud.BfDeployCamera.engage(sel.wx(), sel.wz());
         }

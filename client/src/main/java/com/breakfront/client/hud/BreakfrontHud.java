@@ -814,35 +814,39 @@ public class BreakfrontHud {
 
     private void renderObjective(DrawContext ctx, TextRenderer font, int sw) {
         List<ZoneView> zones = ClientMatchState.zones();
-        int x = 10;
-        int y = 8;
-        ctx.drawText(font, Text.literal("OBJECTIVE  目标"), x, y, BfTheme.MUTED, false);
-        int cy = y + font.fontHeight + 3;
         if (zones.isEmpty()) {
             return;
         }
+        int x = 10;
+        int y = 8;
+        ctx.drawText(font, Text.literal("OBJECTIVE  领地"), x, y, BfTheme.MUTED, false);
+        int cy = y + font.fontHeight + 4;
+        // 2026-09-11 改版：去掉「方向/占守」文字，只画**领地范围**（世界 x 跨度按比例映射）
+        // 与**领地中心**（竖线刻度）——条带即战场的空间布局。
+        int stripW = Math.min(sw - 20, 460);
+        double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE;
         for (ZoneView z : zones) {
-            int bw = 30;
-            int bh = 16;
-            ctx.fill(x, cy, x + bw, cy + bh, 0x99000000);
+            minX = Math.min(minX, z.worldX() - z.radius());
+            maxX = Math.max(maxX, z.worldX() + z.radius());
+        }
+        if (maxX - minX < 1e-6) {
+            return;
+        }
+        long t = System.currentTimeMillis();
+        for (ZoneView z : zones) {
+            int x0 = x + (int) ((z.worldX() - z.radius() - minX) / (maxX - minX) * stripW);
+            int x1 = x + (int) ((z.worldX() + z.radius() - minX) / (maxX - minX) * stripW);
+            int cm = x + (int) ((z.worldX() - minX) / (maxX - minX) * stripW);
             Side owner = Side.values()[z.ownerOrdinal()];
-            long t = System.currentTimeMillis();
             boolean contested = owner == Side.DEFENDER && z.meter() > 1e-3f;
             int edge = contested
                     ? ((t % 700) < 350 ? 0xFFEFFFFF : BfTheme.CYAN)
                     : (owner == Side.ATTACKER ? BfTheme.GREEN : BfTheme.BLUE);
-            ctx.fill(x, cy, x + bw, cy + 1, edge);
-            ctx.fill(x, cy, x + 1, cy + bh, edge);
-            ctx.fill(x + bw - 1, cy, x + bw, cy + bh, edge);
-            ctx.fill(x, cy + bh - 1, x + bw, cy + bh, edge);
-            // 字母菱形占位：小方块字母
-            ctx.drawText(font, Text.literal(z.letter()), x + 4, cy + 3, 0xFFFFFFFF, false);
-            ctx.drawText(font, Text.literal(owner == Side.ATTACKER ? "占" : "守"),
-                    x + bw - font.getWidth("占") - 3, cy + 3, edge, false);
-            x += bw + 6;
-            if (x > sw - 130) {
-                break;
-            }
+            ctx.fill(x0, cy, x1, cy + 4, 0x99000000);        // 领地范围
+            ctx.fill(x0, cy, x1, cy + 1, edge);               // 上沿按归属描边
+            ctx.fill(cm, cy - 3, cm + 1, cy + 9, edge);       // 领地中心刻度
+            ctx.drawText(font, Text.literal(z.letter()),
+                    cm - font.getWidth(z.letter()) / 2, cy + 10, edge, false);
         }
     }
 

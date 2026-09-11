@@ -19,11 +19,11 @@ public final class BfKeymap {
     private static final Set<Integer> ALLOWED = Set.of(
             GLFW.GLFW_KEY_W, GLFW.GLFW_KEY_A, GLFW.GLFW_KEY_S, GLFW.GLFW_KEY_D,
             GLFW.GLFW_KEY_SPACE, GLFW.GLFW_KEY_LEFT_SHIFT, GLFW.GLFW_KEY_LEFT_CONTROL,
+            GLFW.GLFW_KEY_C,                                  // 2042 布局：蹲=C（见 BreakfrontClient 重映射）
             GLFW.GLFW_KEY_1, GLFW.GLFW_KEY_2, GLFW.GLFW_KEY_3, GLFW.GLFW_KEY_4,
             GLFW.GLFW_KEY_5, GLFW.GLFW_KEY_6, GLFW.GLFW_KEY_7, GLFW.GLFW_KEY_8,
             GLFW.GLFW_KEY_9,
             GLFW.GLFW_KEY_TAB, GLFW.GLFW_KEY_ESCAPE,
-            GLFW.GLFW_KEY_F2, GLFW.GLFW_KEY_F11,
             GLFW.GLFW_KEY_R, GLFW.GLFW_KEY_Y, GLFW.GLFW_KEY_B);
 
     private BfKeymap() {}
