@@ -957,10 +957,8 @@ public final class ServerMatch {
             resolved = "base"; // 非法目标回退己方出生区
         }
         if (resolved.equals("observe")) {
-            // 观察模式：进入旁观，不走重生点逻辑
-            exec(server, "gamemode spectator " + player.getGameProfile().getName());
-            deployChoices.remove(player.getUuid());
-            return;
+            // 2026-09-11 取消旁观模式：observe 选择一律落到己方出生区（保留字符串兼容旧客户端）
+            resolved = "base";
         }
         deployChoices.put(player.getUuid(), resolved);
         // 阵亡（部署页已开）时立即锚定，保证 requestRespawn 落点正确；随后消费清除

@@ -108,8 +108,13 @@ public class BfDeployScreen extends Screen {
         int sw = this.width;
         int sh = this.height;
 
-        // 全屏冷底
-        BfDraw.gradientV(ctx, 0, 0, sw, sh, 0xFF0A0D12, 0xFF141B26);
+        // 全屏冷底 → 阵亡部署期间改为**半透明**：露出 BfDeployCamera 的实时 3D 俯瞰
+        // （相机已切到目标上空；面板/文字保持不透明保证可读性）。
+        if (respawnMode && com.breakfront.client.hud.BfDeployCamera.active()) {
+            BfDraw.gradientV(ctx, 0, 0, sw, sh, 0x660A0D12, 0x88141B26);
+        } else {
+            BfDraw.gradientV(ctx, 0, 0, sw, sh, 0xFF0A0D12, 0xFF141B26);
+        }
         BfDraw.parallelogram(ctx, -120, sh - 220, sw / 2, 5, 60, 0x10FFFFFF);
         BfDraw.parallelogram(ctx, sw / 3, -30, sw / 3, 4, -40, 0x0CFFFFFF);
         BfDraw.fill(ctx, 0, 0, 4, sh, BfTheme.TEAL);
@@ -202,6 +207,13 @@ public class BfDeployScreen extends Screen {
             }
             targets.add(new DeployTarget(z.zoneId(), label, z.worldX(), z.worldZ(), 1,
                     valid, owner.ordinal(), defContested));
+        }
+
+        // 部署相机：阵亡部署期间把主相机切到「所选目标上空的实时 3D 俯瞰」。
+        // 目标切换时锚点跟随；点击部署后 beginGlide 滑落到第一人称（BfDeployCamera/CameraMixin）。
+        if (respawnMode && selectedDeployIndex >= 0 && selectedDeployIndex < targets.size()) {
+            DeployTarget sel = targets.get(selectedDeployIndex);
+            com.breakfront.client.hud.BfDeployCamera.engage(sel.worldX(), sel.worldZ());
         }
 
         // 自动 fit：整个据点集 + 出生区包围盒 → 视口居中，留 8% 边距
@@ -428,16 +440,6 @@ public class BfDeployScreen extends Screen {
                     deployBx + deployBw / 2 - tw / 2, deployBy + 15,
                     hov ? BfTheme.TEAL : 0xFF0A0D12, false);
 
-            obsBw = 132; obsBh = 34;
-            obsBx = deployBx - obsBw - 12;
-            obsBy = deployBy + (deployBh - obsBh) / 2;
-            boolean hov2 = mouseIn(obsBx, obsBy, obsBw, obsBh);
-            BfDraw.fill(ctx, obsBx, obsBy, obsBw, obsBh, argb(BfTheme.PANEL, a));
-            BfDraw.border(ctx, obsBx, obsBy, obsBw, obsBh, argb(BfTheme.PANEL_LINE, a));
-            String ot = "观察  OBSERVE";
-            int ow2 = this.textRenderer.getWidth(ot);
-            ctx.drawText(this.textRenderer, Text.literal(ot), obsBx + obsBw / 2 - ow2 / 2, obsBy + 10,
-                    argb(BfTheme.TEXT_DIM, a), false);
         } else {
             String hint = "开战后自动关闭 · ESC 可提前返回战场";
             int hw = this.textRenderer.getWidth(hint);
@@ -463,13 +465,9 @@ public class BfDeployScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         int mx = (int) mouseX, my = (int) mouseY;
         if (respawnMode) {
-            // 部署 / 观察
+            // 部署（观察模式已按用户要求取消——一律走重生部署）
             if (mouseIn(deployBx, deployBy, deployBw, deployBh, mx, my)) {
                 doDeploy();
-                return true;
-            }
-            if (mouseIn(obsBx, obsBy, obsBw, obsBh, mx, my)) {
-                doObserve();
                 return true;
             }
         }
@@ -613,17 +611,10 @@ public class BfDeployScreen extends Screen {
         if (this.client != null && this.client.getNetworkHandler() != null) {
             this.client.getNetworkHandler().sendChatCommand("bf deploy " + t.id());
         }
+        // 相机从俯瞰平滑滑落到重生后的第一人称
+        com.breakfront.client.hud.BfDeployCamera.beginGlide();
         if (this.client != null && this.client.player != null) {
             this.client.player.requestRespawn();
-            this.client.setScreen(null);
-        }
-    }
-
-    private void doObserve() {
-        if (this.client != null && this.client.getNetworkHandler() != null) {
-            this.client.getNetworkHandler().sendChatCommand("bf deploy observe");
-        }
-        if (this.client != null) {
             this.client.setScreen(null);
         }
     }

@@ -600,14 +600,34 @@ public final class BotSquad {
         if (zones.isEmpty()) {
             return null;
         }
-        int pick = t.side == Side.ATTACKER ? 0 : (t.id.hashCode() & 0x7fffffff) % zones.size();
+        // 2026-09-11 目标选择智能化（此前攻方全员恒打 zones[0]、守方随机散开 → 分不出胜负）：
+        //   攻方：主攻「推进顺序上第一个未占领」据点；约 1/3 分流到下一个未占领点（多点开花，
+        //         避免全员堆一点被守方一波清光）；全部占领后扫尾最后一个。
+        //   守方：收缩协防「最前沿的非守方据点」（争夺/失守边缘优先），无威胁则守最后一点。
+        int pick;
+        long h = t.id.hashCode() & 0x7fffffffL;
+        if (t.side == Side.ATTACKER) {
+            int firstOpen = zones.size() - 1;
+            for (int i = 0; i < zones.size(); i++) {
+                if (zones.get(i).owner() != Side.ATTACKER) { firstOpen = i; break; }
+            }
+            int secondOpen = -1;
+            for (int i = firstOpen + 1; i < zones.size(); i++) {
+                if (zones.get(i).owner() != Side.ATTACKER) { secondOpen = i; break; }
+            }
+            pick = (h % 10L < 3L && secondOpen >= 0) ? secondOpen : firstOpen;
+        } else {
+            pick = zones.size() - 1;
+            for (int i = 0; i < zones.size(); i++) {
+                if (zones.get(i).owner() != Side.DEFENDER) { pick = i; break; }
+            }
+        }
         int idx = match.zoneIndex(zones.get(pick).id());
         double[] c = match.zoneCenter(idx);
         if (c == null) {
             return null;
         }
         double r = Math.max(2.0, match.zoneRadius(idx));
-        long h = t.id.hashCode() & 0x7fffffffL;
         double ox = ((h % 1001) / 1000.0 - 0.5) * 1.5 * r;
         double oz = (((h >> 16) % 1001) / 1000.0 - 0.5) * 1.5 * r;
         double tx = c[0] + ox;
