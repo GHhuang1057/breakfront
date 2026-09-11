@@ -350,27 +350,13 @@ async function loadMap(){
       tb.appendChild(tr);
     });
   });
-  // 预填出生点
-  if (r.spawns){
-    if(r.spawns.attacker){ $('f-ax').value = r.spawns.attacker.x; $('f-az').value = r.spawns.attacker.z; }
-    if(r.spawns.defender){ $('f-dx').value = r.spawns.defender.x; $('f-dz').value = r.spawns.defender.z; }
-  }
+  // 预填出生点（走归一化：服务端可能返回 [x,y,z] 数组形态，直接 .x 会是 undefined）
+  const nm=normalizeMap(r);
+  if(nm.spawns.attacker){ $('f-ax').value=nm.spawns.attacker.x; $('f-az').value=nm.spawns.attacker.z; }
+  if(nm.spawns.defender){ $('f-dx').value=nm.spawns.defender.x; $('f-dz').value=nm.spawns.defender.z; }
 }
 function gv(id){ const e=$(id); return e ? parseFloat(e.value)||0 : 0; }
-async function mapOp(op, side){
-  const body = {name:op, op:op, side: side||''};
-  if (op==='add'){ body.x=gv('f-x'); body.z=gv('f-z'); body.r=gv('f-r'); }
-  if (op==='move'){ body.id=$('f-id').value; body.x=gv('f-mx'); body.z=gv('f-mz'); }
-  if (op==='remove'){ body.id=$('f-rid').value; }
-  if (op==='rename'){ body.name=$('f-sname').value; }
-  if (op==='spawn'){ body.x = side==='defender'?gv('f-dx'):gv('f-ax'); body.z = side==='defender'?gv('f-dz'):gv('f-az'); }
-  const r = await api('/bfadmin/api/mapedit', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:TOKEN, ...body})});
-  log((r.ok?'✓ ':'✗ ') + op + (r.msg ? ' — ' + r.msg : ''));
-  setTimeout(loadMap, 400);
-  if(['save','load','sectorNext','sectorPrev','rename'].includes(op)) setTimeout(()=>mapLoad(false), 450);
-}
-/* ================= 地图俯瞰编辑器（Leaflet + CRS.Simple，2026-09-10 重写） =================
+/* ================= 地图俯瞰编辑器（Leaflet + CRS.Simple，2026-09-11 重构） =================
  * 世界坐标映射：MC 的 (x, z) 直接作为 CRS.Simple 的 (lat, lng)。
  * CRS.Simple 默认变换 (1,0,-1,0)：lat 向下为负、lng 向右为正 —— 与 MC 的
  * +X 向东、+Z 向南完全一致，因此无需任何坐标翻转。
@@ -442,7 +428,7 @@ function loadCam(){
   }catch(e){ return null; }
 }
 
-async function getMapRaw(){ return await api('/bfadmin/api/map?token='+encodeURIComponent(TOKEN)); }
+async function getMapRaw(){ return await api('/bfadmin/api/map'); }  // token 由 api() 统一追加（勿手拼，免双份）
 
 /* 归一化：兼容 sectors[].zones[]{id,x,z,r} 与顶层 zones[]{zoneId,letter,x,z,radius} */
 function normalizeMap(r){
@@ -478,7 +464,13 @@ function findZone(id){
   return null;
 }
 function selZone(){ return findZone(mapState.selId); }
-function zoneBounds(x,z,r){ return [[x-r, z-r],[x+r, z+r]]; }   // [[lat1,lng1],[lat2,lng2]]
+/**
+ * 据点方块 bounds —— 必须走 LL()（squaremap 约定 lat=-z·s、lng=x·s）。
+ * ⚠️ 历史 bug：旧实现直接返回 [[x-r,z-r],[x+r,z+r]]，即 lat=x、lng=z 的裸坐标——
+ * 既没乘 SQM_SCALE 又与 LL() 的轴约定不一致（转置+翻转），导致据点方块与
+ * 底图/瓦片/网格使用两套坐标系，表现为据点永远「错位」。全站唯一入口在这里。
+ */
+function zoneBounds(x,z,r){ return [LL(x-r,z-r), LL(x+r,z+r)]; }
 
 /* ---- 初始化 ---- */
 function lfInit(){
@@ -616,11 +608,13 @@ function lfRender(){
       rect.addTo(isEdit?Ls.edit:Ls.other);
 
       if(isEdit && z.r>0){
-        L.marker(LL(z.x,z.z),{interactive:false,pane:'pEdit',
+        const labelM=L.marker(LL(z.x,z.z),{interactive:false,pane:'pEdit',
           icon:L.divIcon({className:'lf-zone-label',html:String(z.letter!=null?z.letter:z.id),iconSize:null})})
           .addTo(Ls.edit);
+        mapState.zoneLayer.set(String(z.id),{rect,zone:z,isEdit,si,label:labelM});
+      } else {
+        mapState.zoneLayer.set(String(z.id),{rect,zone:z,isEdit,si,label:null});
       }
-      mapState.zoneLayer.set(String(z.id),{rect,zone:z,isEdit,si});
     });
   });
 
@@ -660,7 +654,7 @@ function lfRenderSelection(){
       z.x=Math.round((center._st.x+dx)*10)/10;
       z.z=Math.round((center._st.z+dz)*10)/10;
       entry.rect.setBounds(zoneBounds(z.x,z.z,z.r));
-      const lbl=entry.label;
+      if(entry.label) entry.label.setLatLng(LL(z.x,z.z));   // 字母标签跟随移动
       showZoneInfo();
     });
     center.on('dragend', ()=>{
@@ -694,6 +688,7 @@ function lfRenderSelection(){
         z.x=Math.round((anchor.x+c.fx*nr)*10)/10;
         z.z=Math.round((anchor.z+c.fz*nr)*10)/10;
         entry.rect.setBounds(zoneBounds(z.x,z.z,z.r));
+        if(entry.label) entry.label.setLatLng(LL(z.x,z.z));  // 中心随缩放平移，标签跟随
         showZoneInfo();
       });
       mk.on('dragend', ()=>{
@@ -724,13 +719,14 @@ async function applyEditMulti(id, target, before){
   await mapLoad(true);
 }
 
-/* 双击空白新建据点 */
+/* 双击空白新建据点（半径沿用当前选中据点，便于连续画同尺寸据点；默认 6） */
 function onLfDbl(e){
   if(!mapState.model) return;
   if(e.originalEvent && e.originalEvent._bfStop) return;
+  const cur=selZone();
   mapState.selId=null;
   const pb=pt(e.latlng);
-  applyEdit('add',{x:r1(pb.x), z:r1(pb.z), r:6});
+  applyEdit('add',{x:r1(pb.x), z:r1(pb.z), r:r1(cur&&cur.r>0?cur.r:6)});
 }
 
 /* ---- 地形底图 ----
@@ -967,13 +963,26 @@ async function sendEdit(op, fields, doReload){
   return r;
 }
 async function mapOp(op, side){
+  /* 统一入口（⚠️ 此前本函数被重复定义，后者丢弃表单字段 → 控制台页的
+     添加/移动/删除/设出生全部静默失效。重构后两页共用，字段在此集中收集）。 */
   const fields={};
-  if(op==='spawn') fields.side=side||'attacker';
-  const r=await sendEdit(op, fields, true);
-  if(r.ok || ['sectorNext','sectorPrev','load'].includes(op)) await mapLoad(true);
+  if(op==='add'){ fields.x=gv('f-x'); fields.z=gv('f-z'); fields.r=gv('f-r'); }
+  else if(op==='move'){ fields.id=($('f-id').value||'').trim(); fields.x=gv('f-mx'); fields.z=gv('f-mz'); }
+  else if(op==='remove'){ fields.id=($('f-rid').value||'').trim(); }
+  else if(op==='rename'){ fields.name=($('f-sname').value||'').trim(); }
+  else if(op==='spawn'){
+    fields.side=side||'attacker';
+    fields.x = fields.side==='defender'?gv('f-dx'):gv('f-ax');
+    fields.z = fields.side==='defender'?gv('f-dz'):gv('f-az');
+  }
+  const r=await sendEdit(op, fields, false);
+  if(r.ok || op==='load') await mapLoad(true);   // 图编辑成功或换图后刷新（地图页未初始化也安全）
+  else if(op==='add'||op==='move'||op==='remove'||op==='spawn'||op==='rename') setMapHint('操作失败：'+(r.msg||r.code));
 }
 
-/* 撤销：把当前编辑扇区还原到上一个快照 */
+/* 撤销：把当前编辑扇区还原到上一个快照。
+ * ⚠️ re-add 的据点 id 由服务端重新分配，不能拿快照里的旧 id 去 move/resize；
+ * 正确顺序：删多余 → 按快照坐标补回 → 重拉模型按「位置就近」重新配对 → 校正 move/resize。 */
 async function doUndo(){
   if(!undoStack.length){ setMapHint('没有可撤销的操作'); return; }
   const snap=undoStack.pop();
@@ -984,11 +993,15 @@ async function doUndo(){
   const sZ=(snapM.sectors[si]||{zones:[]}).zones, cZ=(curM.sectors[si]||{zones:[]}).zones;
   for(const c of cZ){ if(!sZ.find(z=>String(z.id)===String(c.id))) await sendEdit('remove',{id:c.id},false); }
   for(const z of sZ){ if(!cZ.find(c=>String(c.id)===String(z.id))) await sendEdit('add',{x:z.x,z:z.z,r:z.r},false); }
+  await mapLoad(true);                              // 拿到 re-add 后的真实 id
+  const nowM=normalizeMap(mapState.raw||cur);
+  const nZ=(nowM.sectors[si]||{zones:[]}).zones;
   for(const z of sZ){
-    const c=cZ.find(c=>String(c.id)===String(z.id));
-    if(!c) continue;
-    if(Math.abs(c.x-z.x)>0.05||Math.abs(c.z-z.z)>0.05) await sendEdit('move',{id:z.id,x:z.x,z:z.z},false);
-    if(Math.abs(c.r-z.r)>0.05) await sendEdit('resize',{id:z.id,r:z.r},false);
+    const n=nZ.find(c=>Math.abs(c.x-z.x)<0.6&&Math.abs(c.z-z.z)<0.6&&Math.abs(c.r-z.r)<0.6)
+          ||nZ.find(c=>Math.abs(c.x-z.x)<1.5&&Math.abs(c.z-z.z)<1.5);
+    if(!n) continue;
+    if(Math.abs(n.x-z.x)>0.05||Math.abs(n.z-z.z)>0.05) await sendEdit('move',{id:n.id,x:z.x,z:z.z},false);
+    if(Math.abs(n.r-z.r)>0.05) await sendEdit('resize',{id:n.id,r:z.r},false);
   }
   await mapLoad(true);
   setMapHint('已撤销一步');
