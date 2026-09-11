@@ -946,9 +946,10 @@ public final class ServerMatch {
         }
         // 取消旁观后的自愈：旧客户端「观察」写入 playerdata 的 gamemode=spectator
         // 会跨重启保留，而新逻辑不再有任何退出旁观的路径 → 玩家永远卡旁观。
-        // 2026-09-11 #40 扩展：旁观/创造/冒险模式下玩家**不受任何伤害**
-        // （"敌方/自己无法受到攻击"的直接成因之一），combat 服务器统一以生存模式进入战斗。
-        if (!player.isSurvival()) {
+        // 2026-09-11 #40 修复：创造/旁观模式下玩家**不受任何伤害**
+        // （"敌方/自己无法受到攻击"的直接成因），combat 服务器统一以生存模式进入战斗。
+        // （冒险模式可正常受击，故不强制；仅创造/旁观需要拉回生存。）
+        if (player.isCreative() || player.isSpectator()) {
             exec(server, "gamemode survival " + player.getGameProfile().getName());
         }
         if (teams.sideOf(player.getUuid()) == null) {

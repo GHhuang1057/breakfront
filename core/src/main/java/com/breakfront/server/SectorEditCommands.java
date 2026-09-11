@@ -224,7 +224,7 @@ public final class SectorEditCommands {
             src.sendError(Text.literal("请把准星对准一个方块（目标超出 160 格或对准天空）"));
             return 0;
         }
-        send(src, match.editorSetSpawn(src.getSource().getServer(), attacker, c[0], c[1]));
+        send(src, match.editorSetSpawn(src.getServer(), attacker, c[0], c[1]));
         return 1;
     }
 
@@ -244,7 +244,7 @@ public final class SectorEditCommands {
             src.sendError(Text.literal("请把准星对准一个方块（目标超出 160 格或对准天空）"));
             return 0;
         }
-        send(src, match.editorSetLobbySpawn(src.getSource().getServer(), c[0], c[1]));
+        send(src, match.editorSetLobbySpawn(src.getServer(), c[0], c[1]));
         return 1;
     }
 
