@@ -95,8 +95,12 @@ public final class BfDraw {
     }
 
     /**
-     * 矢量圆环（环形带，无贴图）：以 TRIANGLE_STRIP 画 64 段的环。
-     * 用于击杀反馈环（对标 GD656 IconRingEffect 的三角带环 + 发光/插值动效）。
+     * 矢量圆环（环形带，无贴图）：以一组 {@code ctx.fill} 小方块沿圆周平铺成环。
+     * 用于击杀反馈环（对标 GD656 IconRingEffect 的环 + 发光/插值动效）。
+     *
+     * <p>2026-09-11 改：此前用 Tessellator 立即模式绘制，紧接 {@code ctx.fill} 会产生脏渲染
+     * 残留（命中反馈中心的「白块」）。现统一走 GUI 批处理 {@code ctx.fill}，与其它 HUD 元素
+     * 同一条渲染通路，彻底消除残留。
      *
      * @param radius    环中心半径（px）
      * @param thickness 环带厚度（px），<=0 跳过
@@ -110,26 +114,15 @@ public final class BfDraw {
         if (c[3] <= 0) {
             return;
         }
-        float rOuter = (float) (radius + thickness * 0.5);
-        float rInner = (float) Math.max(0.0, radius - thickness * 0.5);
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
-        Matrix4f m = ctx.getMatrices().peek().getPositionMatrix();
-        BufferBuilder buf = Tessellator.getInstance()
-                .begin(VertexFormat.DrawMode.TRIANGLE_STRIP, VertexFormats.POSITION_COLOR);
-        int SEG = 64;
-        for (int i = 0; i <= SEG; i++) {
-            double ang = Math.PI * 2.0 * i / SEG;
-            float cos = (float) Math.cos(ang);
-            float sin = (float) Math.sin(ang);
-            buf.vertex(m, (float) (cx + cos * rOuter), (float) (cy + sin * rOuter), 0)
-                    .color(c[0] / 255f, c[1] / 255f, c[2] / 255f, c[3] / 255f);
-            buf.vertex(m, (float) (cx + cos * rInner), (float) (cy + sin * rInner), 0)
-                    .color(c[0] / 255f, c[1] / 255f, c[2] / 255f, c[3] / 255f);
+        int seg = 44;
+        int half = (int) Math.ceil(thickness * 0.5 + 0.5);
+        double step = Math.PI * 2.0 / seg;
+        for (int i = 0; i < seg; i++) {
+            double ang = i * step;
+            int sx = (int) Math.round(cx + Math.cos(ang) * radius);
+            int sy = (int) Math.round(cy + Math.sin(ang) * radius);
+            ctx.fill(sx - half, sy - half, sx + half, sy + half, argb);
         }
-        BufferRenderer.drawWithGlobalProgram(buf.end());
-        RenderSystem.disableBlend();
     }
 
     /** 1px 描边矩形（卡片边框语言）。 */

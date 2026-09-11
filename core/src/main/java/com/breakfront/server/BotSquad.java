@@ -656,8 +656,12 @@ public final class BotSquad {
         double r = Math.max(2.0, match.zoneRadius(idx));
         double ox = ((h % 1001) / 1000.0 - 0.5) * 1.5 * r;
         double oz = (((h >> 16) % 1001) / 1000.0 - 0.5) * 1.5 * r;
-        double tx = c[0] + ox;
-        double tz = c[1] + oz;
+        // 2026-09-11：每次（重）选目标点时叠加随机抖动，使卡墙的 bot 解卡后换个角度再尝试，
+        // 避免确定性 hash 偏移导致反复卡在同一面墙（此前 STUCK 重选仍回到同一点）。
+        double jx = (Math.random() - 0.5) * 1.0 * r;
+        double jz = (Math.random() - 0.5) * 1.0 * r;
+        double tx = c[0] + ox + jx;
+        double tz = c[1] + oz + jz;
         return new Vec3d(tx, BotMotor.surfaceY(server.getOverworld(), tx, tz), tz);
     }
 

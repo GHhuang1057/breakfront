@@ -1,8 +1,10 @@
 package com.breakfront.server;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
 
@@ -42,6 +44,8 @@ public final class BotMotor {
     private static final double STEP_UP = 1.25;
     /** 邻域地表采样半径（找不到直接落点时向外找）。 */
     private static final int SURFACE_PROBE = 6;
+    /** 向下寻支撑面的最大落差（格）：超过视为悬空/掉出地图，交还 NaN 由上层兜底。 */
+    private static final int FLOOR_DROP = 10;
 
     private BotMotor() {
     }
@@ -67,11 +71,40 @@ public final class BotMotor {
         double nz = bot.getZ() + dz / dist * step;
 
         ServerWorld world = bot.getServerWorld();
-        double ny = surfaceY(world, nx, nz);
+        // 2026-09-11 修复「穿模」：改取**脚下当前层**的支撑面，而非整列最高表面。
+        // 此前 surfaceY 取 WORLD_SURFACE 列顶——地铁/多层城市图里列顶是屋顶，
+        // bot 会被吸到屋顶再setPos，视觉即穿模/瞬移。现从脚下高度向下找第一块实心方块作地面。
+        double ny = floorYUnder(world, nx, nz, bot.getY());
+        if (Double.isNaN(ny)) {
+            ny = surfaceY(world, nx, nz); // 兜底：脚下无地面（悬空）则退守列表面
+        }
         // 台阶保护：目标点明显高于当前（且超出可踏高度）时，不硬推上去，交由上层绕行
         if (ny - bot.getY() > STEP_UP) {
             ny = bot.getY();
         }
+
+        // 墙体碰撞避让：目标格被实心方块占据则尝试单侧滑步绕行，两侧都堵则原地等待
+        // （advance() 的卡住检测会在 STUCK_TICKS 后重选目标点，避免永久卡死）。
+        if (isBlocked(world, nx, nz, ny)) {
+            boolean xOk = !isBlocked(world, nx, bot.getZ(), ny);
+            boolean zOk = !isBlocked(world, bot.getX(), nz, ny);
+            if (xOk && zOk) {
+                // 都能走：优先沿更接近目标的一侧推进
+                if (Math.abs(dx) >= Math.abs(dz)) {
+                    nz = bot.getZ();
+                } else {
+                    nx = bot.getX();
+                }
+            } else if (xOk) {
+                nz = bot.getZ();
+            } else if (zOk) {
+                nx = bot.getX();
+            } else {
+                faceTo(bot, tx, tz);
+                return false; // 完全堵死：不动，等上层重选
+            }
+        }
+
         faceTo(bot, tx, tz);
         bot.setPos(nx, ny, nz);
         // 归零速度：消除重力的逐 tick 累积与惯性，保证位移完全由本类决定。
@@ -141,6 +174,48 @@ public final class BotMotor {
             }
         }
         return Double.isNaN(best) ? world.getBottomY() + 3 : best + SURFACE_OFFSET;
+    }
+
+    /**
+     * 采样 (x,z) 处<b>脚下当前层</b>的支撑面高度（多层级地图防穿模核心）。
+     *
+     * <p>从 bot 当前脚下方开始向下扫描，返回第一个实心方块顶面 + 贴地偏移，
+     * 使 bot 始终贴着自己所在楼层走动，而不是被 {@link #surfaceY} 吸到列顶（屋顶）。
+     * 落差超过 {@link #FLOOR_DROP} 视为悬空，返回 {@code NaN} 交上层兜底。
+     */
+    public static double floorYUnder(ServerWorld world, double x, double z, double currentY) {
+        int fx = (int) Math.floor(x);
+        int fz = (int) Math.floor(z);
+        int start = (int) Math.floor(currentY) - 1; // 从脚下方一格开始向下找支撑
+        int bottom = (int) Math.floor(currentY) - FLOOR_DROP;
+        for (int y = start; y >= bottom; y--) {
+            if (y < world.getBottomY()) {
+                break;
+            }
+            BlockPos bp = new BlockPos(fx, y, fz);
+            BlockState bs = world.getBlockState(bp);
+            if (bs.isSolid()) {
+                return y + 1 + SURFACE_OFFSET; // 站在这块方块上面
+            }
+        }
+        return Double.NaN;
+    }
+
+    /** (x,z) 处、以 footY 为脚底高度的身体竖列是否被实心方块占据（墙体/柱体检测）。 */
+    private static boolean isBlocked(ServerWorld world, double x, double z, double footY) {
+        int fx = (int) Math.floor(x);
+        int fz = (int) Math.floor(z);
+        int y0 = (int) Math.floor(footY);   // 站立格
+        int y1 = y0 + 1;                    // 躯干
+        int y2 = y0 + 2;                    // 头部（玩家身高 ~1.8）
+        return solidAt(world, fx, y0, fz) || solidAt(world, fx, y1, fz) || solidAt(world, fx, y2, fz);
+    }
+
+    private static boolean solidAt(ServerWorld world, int x, int y, int z) {
+        if (y < world.getBottomY()) {
+            return false;
+        }
+        return world.getBlockState(new BlockPos(x, y, z)).isSolid();
     }
 
     /** 水平距离（米）。 */

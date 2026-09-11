@@ -14,7 +14,8 @@ PLAYER_MAX_HEALTH=100），若不调参全枪偏弱、TTK 不成立。
   - bullet.damage                → 近距基础伤害
   - bullet.extra_damage.damage_adjust  → 距离衰减三档（30/60/inf 或族专属档位）
   - bullet.extra_damage.head_shot_multiplier → 族爆头倍率
-不动：rpm / 弹容 / 弹药类型 / 弹道 / 换弹 / 后座 / 附件。
+  - fire_mode（顶层数组，首位=默认）→ 对能全自动的枪默认 auto（见 FIRE_MODE 表）
+不动：rpm / 弹容 / 弹药类型 / 弹道 / 换弹 / 后座 / 附件 / 泵动·栓动·DMR·狙原类。
 
 用法：
   python scripts/tune_tacz_pack.py <gunpack_dir> [<gunpack_dir> ...] [--dry-run]
@@ -93,6 +94,28 @@ GUN_TO_FAM = {
 }
 
 # ---------------------------------------------------------------------------
+# 开火模式默认（首位 = 默认模式）。2026-09-11 修复「枪械默认全自动/连发」：
+# 对能全自动的枪，把默认置为 auto，玩家出生即全自动，无需每次切模式。
+# 注意 TaCZ 的 fire_mode 是顶层数组，第一项为默认；burst 还需 burst_data，
+# 故这里只对明确全自动的枪设 auto（不触碰 DMR/狙/泵动/双管/马格南等原类）。
+FIRE_MODE = {
+    # 突击步枪：默认全自动（保留 semi 可选）
+    "ak47": ["auto", "semi"], "aug": ["auto", "semi"], "g36k": ["auto", "semi"],
+    "hk416d": ["auto", "semi"], "m4a1": ["auto", "semi"], "m16a1": ["auto", "semi"],
+    "m16a4": ["auto", "semi"], "qbz_191": ["auto", "semi"], "qbz_95": ["auto", "semi"],
+    "type_81": ["auto", "semi"], "scar_l": ["auto", "semi"], "rpk": ["auto", "semi"],
+    # 冲锋枪：默认全自动
+    "b93r": ["auto", "semi"], "hk_mp5a5": ["auto", "semi"], "p90": ["auto", "semi"],
+    "ump45": ["auto", "semi"], "uzi": ["auto", "semi"], "vector45": ["auto", "semi"],
+    # 全自动手枪
+    "cz75": ["auto", "semi"],
+    # 轻机枪 / 转管：纯全自动
+    "fn_evolys": ["auto"], "m249": ["auto"], "minigun": ["auto"],
+    # 全自动霰弹
+    "aa12": ["auto"],
+}
+
+# ---------------------------------------------------------------------------
 # JSONC 处理（TaCZ 数据带 // 行注释与中文）
 # ---------------------------------------------------------------------------
 def strip_jsonc(s: str) -> str:
@@ -156,18 +179,18 @@ def tune_pack(pack_dir, dry_run=False):
         gid = fname[: -len("_data.json")]
         fam = GUN_TO_FAM.get(gid)
         if fam is None:
-            rows.append((gid, "skip" if gid in GUN_TO_FAM else "UNKNOWN", "-", "-", "-"))
+            rows.append((gid, "skip" if gid in GUN_TO_FAM else "UNKNOWN", "-", "-", "-", "-"))
             continue
         path = os.path.join(guns_dir, fname)
         try:
             data = load_jsonc(path)
         except Exception as e:  # noqa: BLE001
-            rows.append((gid, fam, "PARSE_FAIL", str(e)[:40], "-"))
+            rows.append((gid, fam, "PARSE_FAIL", str(e)[:40], "-", "-"))
             continue
 
         bullet = data.get("bullet")
         if not isinstance(bullet, dict):
-            rows.append((gid, fam, "NO_BULLET", "-", "-"))
+            rows.append((gid, fam, "NO_BULLET", "-", "-", "-"))
             continue
         ex = bullet.setdefault("extra_damage", {})
         rule = FAM[fam]
@@ -183,6 +206,11 @@ def tune_pack(pack_dir, dry_run=False):
             {"distance": d2, "damage": c2},
             {"distance": "infinite", "damage": c3},
         ]
+        # 开火模式默认：能全自动的枪置为 auto（首位=默认），保留原类不强制改的枪不动
+        old_fm = data.get("fire_mode")
+        new_fm = FIRE_MODE.get(gid)
+        if new_fm is not None:
+            data["fire_mode"] = new_fm
         if not dry_run:
             # 备份原始文件一次
             bak = os.path.join(backup_dir, fname)
@@ -190,8 +218,9 @@ def tune_pack(pack_dir, dry_run=False):
                 shutil.copy2(path, bak)
             dump_jsonc(path, data)
         changed += 1
+        fm_disp = f"{old_fm}->{new_fm}" if new_fm is not None else f"{old_fm}(不动)"
         rows.append((gid, fam, f"{old_dmg}->{c1}", f"head {old_head}->{rule['head']}",
-                     f"adj {d1}/{d2}/inf"))
+                     f"adj {d1}/{d2}/inf", fm_disp))
     return changed, rows
 
 
@@ -204,11 +233,11 @@ def main():
     for pack in args:
         n, rows = tune_pack(pack, dry_run)
         print(f"\n===== {pack}  (改写 {n} 把)" + ("  [DRY-RUN]" if dry_run else "") + " =====")
-        hdr = f"{'gun':<18}{'fam':<10}{'damage':<12}{'head':<12}{'adjust'}"
+        hdr = f"{'gun':<18}{'fam':<10}{'damage':<12}{'head':<12}{'adjust':<14}{'fire_mode'}"
         print(hdr)
         print("-" * len(hdr.encode('gbk', errors='ignore').decode('gbk', errors='ignore') if False else hdr))
         for r in rows:
-            print(f"{r[0]:<18}{str(r[1]):<10}{str(r[2]):<12}{str(r[3]):<12}{str(r[4])}")
+            print(f"{r[0]:<18}{str(r[1]):<10}{str(r[2]):<12}{str(r[3]):<12}{str(r[4]):<14}{str(r[5])}")
 
 
 if __name__ == "__main__":

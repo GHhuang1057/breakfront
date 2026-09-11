@@ -14,6 +14,16 @@ public final class BfDeployCamera {
     public enum Mode { NONE, OVERHEAD, GLIDE }
 
     private static volatile Mode mode = Mode.NONE;
+    /**
+     * 部署屏是否处于打开状态。
+     *
+     * <p>2026-09-11 修「没开局就反复落地-俯瞰」：此前 cameraPose 只要玩家存活就把
+     * OVERHEAD 自动切到 GLIDE，而部署屏每帧又通过 engage 把模式拉回 OVERHEAD，
+     * 于是形成 OVERHEAD→GLIDE(900ms)→NONE→OVERHEAD→… 的死循环（观感即反复落地-俯瞰）。
+     * 现约定：<b>只有当部署屏关闭、玩家已自行存活在世界里</b>（如 vanilla 重生）才自动滑落，
+     * 部署屏打开期间始终稳稳停在 OVERHEAD，不再自跳。
+     */
+    private static volatile boolean deployScreenOpen = false;
     /** 俯瞰锚点 / 滑落起点（世界坐标）。 */
     private static double ax, ay, az;
     private static long glideStart;
@@ -50,6 +60,21 @@ public final class BfDeployCamera {
         return mode != Mode.NONE;
     }
 
+    /** 当前状态机阶段（部署屏据此判断是否隐藏第一人称手部）。 */
+    public static Mode mode() {
+        return mode;
+    }
+
+    /** 部署屏打开/关闭时由 BfDeployScreen 调用，避免相机在屏开期间自跳。 */
+    public static void setDeployScreenOpen(boolean open) {
+        deployScreenOpen = open;
+        if (!open && mode == Mode.OVERHEAD) {
+            // 屏关闭且仍停在俯瞰（如初始部署 ESC 退出）：交由 cameraPose 正常滑落到第一人称
+            glideStart = System.currentTimeMillis();
+            mode = Mode.GLIDE;
+        }
+    }
+
     /**
      * CameraMixin 在 Camera.update TAIL 调用。
      * 返回覆写相机坐标；rotOut[0]=yaw、rotOut[1]=pitch；返回 null 表示不接管。
@@ -58,8 +83,9 @@ public final class BfDeployCamera {
         if (focused == null) {
             return null;
         }
-        // 部署屏未点部署但玩家已复活（如原版重生键）→ 自动转入滑落，避免卡在俯瞰
-        if (mode == Mode.OVERHEAD && focused.isAlive()) {
+        // 仅在「部署屏已关闭、玩家已存活于世界」时自动滑落（如 vanilla 重生键）。
+        // 部署屏打开期间（deployScreenOpen=true）一律稳住 OVERHEAD，不自动跳，根治反复落地-俯瞰。
+        if (mode == Mode.OVERHEAD && focused.isAlive() && !deployScreenOpen) {
             glideStart = System.currentTimeMillis();
             mode = Mode.GLIDE;
         }

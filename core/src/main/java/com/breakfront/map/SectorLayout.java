@@ -39,6 +39,16 @@ public final class SectorLayout {
 
     private final List<SectorDef> sectors = new ArrayList<>();
 
+    // 出生点（全图级，攻/守/大厅）：NaN 表示未设置，由 spawnFor 兜底到锚点/世界出生点。
+    // 2026-09-11 新增：此前出生点只存在 server.properties，/bfs 编辑器无法编辑；
+    // 现一并纳入布局，可经 /bfs spawn 编辑并随 sectors.json 持久化。
+    private double attackerSpawnX = Double.NaN;
+    private double attackerSpawnZ = Double.NaN;
+    private double defenderSpawnX = Double.NaN;
+    private double defenderSpawnZ = Double.NaN;
+    private double lobbySpawnX = Double.NaN;
+    private double lobbySpawnZ = Double.NaN;
+
     public SectorLayout() {
     }
 
@@ -117,6 +127,59 @@ public final class SectorLayout {
         return n;
     }
 
+    // ---------- 出生点（全图级） ----------
+
+    public boolean hasAttackerSpawn() {
+        return !Double.isNaN(attackerSpawnX);
+    }
+
+    public boolean hasDefenderSpawn() {
+        return !Double.isNaN(defenderSpawnX);
+    }
+
+    public boolean hasLobbySpawn() {
+        return !Double.isNaN(lobbySpawnX);
+    }
+
+    public double attackerSpawnX() {
+        return attackerSpawnX;
+    }
+
+    public double attackerSpawnZ() {
+        return attackerSpawnZ;
+    }
+
+    public double defenderSpawnX() {
+        return defenderSpawnX;
+    }
+
+    public double defenderSpawnZ() {
+        return defenderSpawnZ;
+    }
+
+    public double lobbySpawnX() {
+        return lobbySpawnX;
+    }
+
+    public double lobbySpawnZ() {
+        return lobbySpawnZ;
+    }
+
+    public void setAttackerSpawn(double x, double z) {
+        attackerSpawnX = x;
+        attackerSpawnZ = z;
+    }
+
+    public void setDefenderSpawn(double x, double z) {
+        defenderSpawnX = x;
+        defenderSpawnZ = z;
+    }
+
+    public void setLobbySpawn(double x, double z) {
+        lobbySpawnX = x;
+        lobbySpawnZ = z;
+    }
+
     /** 转成纯逻辑对局扇区列表（服务端 BreakthroughGame 消费）。 */
     public List<Sector> toGameSectors() {
         double capture = BreakthroughTuning.DEFAULT_ZONE_CAPTURE_SECONDS;
@@ -147,6 +210,16 @@ public final class SectorLayout {
                         .append(')');
             }
         }
+        sb.append("\n出生点: ");
+        sb.append(hasAttackerSpawn()
+                ? String.format("攻(%.1f,%.1f) ", attackerSpawnX, attackerSpawnZ)
+                : "攻(未设) ");
+        sb.append(hasDefenderSpawn()
+                ? String.format("守(%.1f,%.1f) ", defenderSpawnX, defenderSpawnZ)
+                : "守(未设)");
+        if (hasLobbySpawn()) {
+            sb.append(String.format(" ｜ 大厅(%.1f,%.1f)", lobbySpawnX, lobbySpawnZ));
+        }
         return sb.toString();
     }
 
@@ -172,6 +245,29 @@ public final class SectorLayout {
             secArr.add(so);
         }
         root.add("sectors", secArr);
+        // 出生点（全图级）
+        JsonObject sp = new JsonObject();
+        if (hasAttackerSpawn()) {
+            JsonObject a = new JsonObject();
+            a.addProperty("x", attackerSpawnX);
+            a.addProperty("z", attackerSpawnZ);
+            sp.add("attacker", a);
+        }
+        if (hasDefenderSpawn()) {
+            JsonObject d = new JsonObject();
+            d.addProperty("x", defenderSpawnX);
+            d.addProperty("z", defenderSpawnZ);
+            sp.add("defender", d);
+        }
+        if (hasLobbySpawn()) {
+            JsonObject l = new JsonObject();
+            l.addProperty("x", lobbySpawnX);
+            l.addProperty("z", lobbySpawnZ);
+            sp.add("lobby", l);
+        }
+        if (sp.size() > 0) {
+            root.add("spawns", sp);
+        }
         return new Gson().toJson(root);
     }
 
@@ -214,6 +310,28 @@ public final class SectorLayout {
                 }
                 if (!def.zones().isEmpty()) {
                     layout.sectors.add(def);
+                }
+            }
+        }
+        // 出生点（全图级）
+        if (root.has("spawns") && root.get("spawns").isJsonObject()) {
+            JsonObject sp = root.getAsJsonObject("spawns");
+            if (sp.has("attacker") && sp.get("attacker").isJsonObject()) {
+                JsonObject a = sp.getAsJsonObject("attacker");
+                if (a.has("x") && a.has("z")) {
+                    layout.setAttackerSpawn(a.get("x").getAsDouble(), a.get("z").getAsDouble());
+                }
+            }
+            if (sp.has("defender") && sp.get("defender").isJsonObject()) {
+                JsonObject d = sp.getAsJsonObject("defender");
+                if (d.has("x") && d.has("z")) {
+                    layout.setDefenderSpawn(d.get("x").getAsDouble(), d.get("z").getAsDouble());
+                }
+            }
+            if (sp.has("lobby") && sp.get("lobby").isJsonObject()) {
+                JsonObject l = sp.getAsJsonObject("lobby");
+                if (l.has("x") && l.has("z")) {
+                    layout.setLobbySpawn(l.get("x").getAsDouble(), l.get("z").getAsDouble());
                 }
             }
         }

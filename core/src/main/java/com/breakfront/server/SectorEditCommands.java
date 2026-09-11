@@ -62,7 +62,10 @@ public final class SectorEditCommands {
                 ? "开(" + match.editorViewersCount() + "人观看)" : "关")
                 + " ｜ 当前扇区: " + match.currentEditorSectorName()
                 + " ｜ AI填充: " + (match.autoFillEnabled() ? "开" : "关")
-                + " ｜ 布局: " + match.layout().sectorCount() + "扇区/" + match.layout().zoneCount() + "据点"));
+                + " ｜ 布局: " + match.layout().sectorCount() + "扇区/" + match.layout().zoneCount() + "据点"
+                + " ｜ 出生点: " + (match.layout().hasAttackerSpawn() ? "攻✓" : "攻✗")
+                + "/" + (match.layout().hasDefenderSpawn() ? "守✓" : "守✗")
+                + (match.layout().hasLobbySpawn() ? "/大厅✓" : "")));
         root.then(simple("list", (src, match) -> match.editorLayoutText()));
 
         // /bfs here [radius]
@@ -80,6 +83,7 @@ public final class SectorEditCommands {
         root.then(simple("clear", (src, match) -> match.editorClear(src.getServer())));
 
         root.then(sectorNode());
+        root.then(spawnNode());
         root.then(simple("save", (src, match) -> match.saveLayout()));
         root.then(simple("load", (src, match) -> match.loadLayout(src.getServer())));
         root.then(simple("apply", (src, match) -> match.applyLayout(src.getServer())));
@@ -197,6 +201,53 @@ public final class SectorEditCommands {
                                 })));
     }
 
+    private static LiteralArgumentBuilder<ServerCommandSource> spawnNode() {
+        return literal("spawn")
+                .then(literal("att").executes(ctx -> runSetSpawn(ctx.getSource(), true)))
+                .then(literal("def").executes(ctx -> runSetSpawn(ctx.getSource(), false)))
+                .then(literal("lobby").executes(ctx -> runSetLobbySpawn(ctx.getSource())));
+    }
+
+    private static int runSetSpawn(ServerCommandSource src, boolean attacker) {
+        var match = BreakfrontServer.match();
+        if (match == null) {
+            src.sendError(Text.literal("对局尚未初始化"));
+            return 0;
+        }
+        ServerPlayerEntity p = playerOf(src);
+        if (p == null) {
+            src.sendError(Text.literal("仅玩家可用"));
+            return 0;
+        }
+        double[] c = lookAtCenter(p);
+        if (c == null) {
+            src.sendError(Text.literal("请把准星对准一个方块（目标超出 160 格或对准天空）"));
+            return 0;
+        }
+        send(src, match.editorSetSpawn(src.getSource().getServer(), attacker, c[0], c[1]));
+        return 1;
+    }
+
+    private static int runSetLobbySpawn(ServerCommandSource src) {
+        var match = BreakfrontServer.match();
+        if (match == null) {
+            src.sendError(Text.literal("对局尚未初始化"));
+            return 0;
+        }
+        ServerPlayerEntity p = playerOf(src);
+        if (p == null) {
+            src.sendError(Text.literal("仅玩家可用"));
+            return 0;
+        }
+        double[] c = lookAtCenter(p);
+        if (c == null) {
+            src.sendError(Text.literal("请把准星对准一个方块（目标超出 160 格或对准天空）"));
+            return 0;
+        }
+        send(src, match.editorSetLobbySpawn(src.getSource().getServer(), c[0], c[1]));
+        return 1;
+    }
+
     private static int runHere(ServerCommandSource src, double radius) {
         var match = BreakfrontServer.match();
         if (match == null) {
@@ -251,6 +302,7 @@ public final class SectorEditCommands {
                 "resize <id> <半径>           调整据点半径",
                 "remove <id> | undo           删除指定 / 撤销最近添加",
                 "sector next|prev|list|name <名>  切换/查看/重命名当前扇区",
+                "spawn att|def|lobby           在准星所指处设置攻/守/大厅出生点(进布局)",
                 "clear                        清空布局重新划分",
                 "save | load | apply          落盘 / 装载 / 应用(保存+重建对局)",
                 "例：/bfs on → 找好位置 → /bfs here 10 → 往前走 /bfs sector next → /bfs here …");

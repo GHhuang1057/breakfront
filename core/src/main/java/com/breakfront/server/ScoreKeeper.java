@@ -80,6 +80,11 @@ public final class ScoreKeeper {
         }
     }
 
+    /** 取某玩家的统计条目（无则返回 null）。计分板全量同步时复用既有战绩。 */
+    public Entry entry(UUID id) {
+        return players.get(id);
+    }
+
     /** 击杀榜前 n（按 kills 降序，同杀比死亡）。 */
     public List<Entry> top(int n) {
         List<Entry> list = new ArrayList<>(players.values());

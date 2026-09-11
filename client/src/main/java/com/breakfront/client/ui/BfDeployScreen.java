@@ -107,6 +107,8 @@ public class BfDeployScreen extends Screen {
         this.lastMy = mouseY;
         int sw = this.width;
         int sh = this.height;
+        // 通知相机：部署屏处于打开态（屏开期间相机稳住俯瞰，不自动滑落）
+        com.breakfront.client.hud.BfDeployCamera.setDeployScreenOpen(true);
 
         // 全屏冷底 → 部署相机激活时改为**半透明**：露出 3D 实景俯瞰（两种部署模式皆然）。
         if (com.breakfront.client.hud.BfDeployCamera.active()) {
@@ -744,6 +746,8 @@ public class BfDeployScreen extends Screen {
     public void removed() {
         // 切屏（LOBBY / 死亡 / 部署完成）：释放地形采样缓存，避免跨局泄漏
         TerrainOverview.release();
+        // 通知相机：部署屏已关闭（交由状态机决定是否滑落到第一人称）
+        com.breakfront.client.hud.BfDeployCamera.setDeployScreenOpen(false);
         super.removed();
     }
 

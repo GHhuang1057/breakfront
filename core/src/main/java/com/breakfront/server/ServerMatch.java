@@ -158,8 +158,44 @@ public final class ServerMatch {
         }
         visualsPlaced = false;
         score.reset();
+        applyLayoutSpawns(); // 把布局里设计的出生点应用到运行期 override（仅当运行期无显式覆盖时）
         BreakfrontServer.LOGGER.info("[Breakfront] layout applied ({} sectors, {} zones)",
                 layout.sectorCount(), layout.zoneCount());
+    }
+
+    /** 把布局里设计的出生点应用到运行期 override（仅当运行期尚无显式覆盖时，props 优先）。 */
+    private void applyLayoutSpawns() {
+        if (Double.isNaN(attackerSpawn[0]) && layout.hasAttackerSpawn()) {
+            setSpawnOverride(Side.ATTACKER, layout.attackerSpawnX(), layout.attackerSpawnZ());
+        }
+        if (Double.isNaN(defenderSpawn[0]) && layout.hasDefenderSpawn()) {
+            setSpawnOverride(Side.DEFENDER, layout.defenderSpawnX(), layout.defenderSpawnZ());
+        }
+        if (Double.isNaN(lobbySpawn[0]) && layout.hasLobbySpawn()) {
+            setLobbySpawn(layout.lobbySpawnX(), layout.lobbySpawnZ());
+        }
+    }
+
+    /** /bfs spawn att|def：在准星所指处设置攻/守出生点（写入布局 + 运行期生效 + 持久化）。 */
+    public String editorSetSpawn(MinecraftServer server, boolean attacker, double x, double z) {
+        if (attacker) {
+            layout.setAttackerSpawn(x, z);
+            setSpawnOverride(Side.ATTACKER, x, z);
+            saveLayout();
+            return String.format("已设置攻方出生点 → (%.1f, %.1f)，已写入布局并保存", x, z);
+        }
+        layout.setDefenderSpawn(x, z);
+        setSpawnOverride(Side.DEFENDER, x, z);
+        saveLayout();
+        return String.format("已设置守方出生点 → (%.1f, %.1f)，已写入布局并保存", x, z);
+    }
+
+    /** /bfs spawn lobby：设置大厅出生点（写入布局 + 运行期生效 + 持久化）。 */
+    public String editorSetLobbySpawn(MinecraftServer server, double x, double z) {
+        layout.setLobbySpawn(x, z);
+        setLobbySpawn(x, z);
+        saveLayout();
+        return String.format("已设置大厅出生点 → (%.1f, %.1f)，已写入布局并保存", x, z);
     }
 
     /** 应用扇区配置：先落盘，再重建对局并回到大厅（/bfs apply）。 */
@@ -621,14 +657,31 @@ public final class ServerMatch {
         }
     }
 
-    /** 广播比分/击杀榜（每 1s）。 */
+    /**
+     * 广播比分/击杀榜（每 1s）。
+     * 2026-09-11 修复 #39：必须包含**全部在线真人**，而非仅 top(12) 击杀榜。
+     * 此前 {@link ScoreKeeper} 只在玩家参与击杀/死亡时才建条目，0/0 玩家因此不进 board()，
+     * 表现为「在线的人从计分板消失」。现改为遍历在线真人，复用既有战绩、未参与者补 0/0/0。
+     */
     private void broadcastScore(MinecraftServer server) {
+        var players = server.getPlayerManager().getPlayerList();
         var rows = new ArrayList<ScoreboardPayload.Row>();
-        for (ScoreKeeper.Entry e : score.top(12)) {
-            rows.add(new ScoreboardPayload.Row(e.name, e.sideOrdinal, e.kills, e.deaths, e.headshots));
+        for (ServerPlayerEntity p : players) {
+            if (p == null || BotPlayerFactory.isBot(p)) {
+                continue; // 仅真人计入计分板
+            }
+            UUID id = p.getUuid();
+            ScoreKeeper.Entry e = score.entry(id);
+            Side side = sideOfEntity(p);
+            int sideOrd = side == null ? -1 : side.ordinal();
+            if (e != null) {
+                rows.add(new ScoreboardPayload.Row(e.name, sideOrd, e.kills, e.deaths, e.headshots));
+            } else {
+                rows.add(new ScoreboardPayload.Row(p.getGameProfile().getName(), sideOrd, 0, 0, 0));
+            }
         }
         var payload = new ScoreboardPayload(score.attackerKills(), score.defenderKills(), rows);
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+        for (ServerPlayerEntity player : players) {
             ServerPlayNetworking.send(player, payload);
         }
     }
@@ -893,8 +946,9 @@ public final class ServerMatch {
         }
         // 取消旁观后的自愈：旧客户端「观察」写入 playerdata 的 gamemode=spectator
         // 会跨重启保留，而新逻辑不再有任何退出旁观的路径 → 玩家永远卡旁观。
-        // 入服即强制回生存（2026-09-11 用户实测卡旁观）。
-        if (player.isSpectator()) {
+        // 2026-09-11 #40 扩展：旁观/创造/冒险模式下玩家**不受任何伤害**
+        // （"敌方/自己无法受到攻击"的直接成因之一），combat 服务器统一以生存模式进入战斗。
+        if (!player.isSurvival()) {
             exec(server, "gamemode survival " + player.getGameProfile().getName());
         }
         if (teams.sideOf(player.getUuid()) == null) {
@@ -1900,6 +1954,16 @@ public final class ServerMatch {
                         .append(", r=").append(String.format("%.0f", z.radius()))
                         .append(')');
             }
+        }
+        sb.append("\n出生点: ");
+        sb.append(layout.hasAttackerSpawn()
+                ? String.format("攻(%.1f,%.1f) ", layout.attackerSpawnX(), layout.attackerSpawnZ())
+                : "攻(未设) ");
+        sb.append(layout.hasDefenderSpawn()
+                ? String.format("守(%.1f,%.1f)", layout.defenderSpawnX(), layout.defenderSpawnZ())
+                : "守(未设)");
+        if (layout.hasLobbySpawn()) {
+            sb.append(String.format(" ｜ 大厅(%.1f,%.1f)", layout.lobbySpawnX(), layout.lobbySpawnZ()));
         }
         return sb.toString();
     }

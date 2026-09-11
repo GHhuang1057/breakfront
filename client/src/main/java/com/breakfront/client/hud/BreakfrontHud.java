@@ -104,6 +104,7 @@ public class BreakfrontHud {
         miniSize = (int) Math.min(140, sh * 0.22);
 
         renderTopBar(context, font, sw);
+        renderObjective(context, font, sw); // #41 重制后接入：左上领地/目标面板
         renderHealth(context, font, sw, sh);
         renderWeapon(context, font, sw, sh);
         renderKillFeed(context, font, sw);
@@ -244,14 +245,20 @@ public class BreakfrontHud {
         lastAtmoHp = hp;
 
         float flash = now < atmoDmgUntil ? (float) (atmoDmgUntil - now) / 460f : 0f;
-        float low = ratio <= 0.25f ? (0.22f + 0.16f * (float) Math.sin(now / 280.0)) : 0f;
+        float low = ratio <= 0.25f ? (0.10f + 0.06f * (float) Math.sin(now / 280.0)) : 0f;
         float a = Math.max(flash, low);
         if (a <= 0.01f) {
             return;
         }
-        int band = (int) (Math.min(sw, sh) * 0.16);
-        int edge = argb(BfTheme.RED, (int) (a * 200));
-        int edgeH = argb(BfTheme.RED, (int) (a * 140)); // 左右带半强度，避免四角过曝
+        // 2026-09-11 收敛：受击红屏改为「边缘脉冲」而非全屏红。
+        // 边带收窄到屏幕短边的 10%，且峰值 alpha 上限 120（此前 200）+ 低血量呼吸上限仅 0.16，
+        // 避免「一掉血整屏泛红」的观感。
+        int band = (int) (Math.min(sw, sh) * 0.10);
+        int flashA = (int) (Math.min(a, 1f) * 120);
+        int lowA = (int) (Math.min(low, 1f) * 70);
+        int aEdge = Math.max(flashA, lowA);
+        int edge = argb(BfTheme.RED, aEdge);
+        int edgeH = argb(BfTheme.RED, (int) (aEdge * 0.6)); // 左右带半强度，避免四角过曝
         int clear = 0x00000000;
         // 上 / 下（纵向渐变）
         BfDraw.gradientV(ctx, 0, 0, sw, band, edge, clear);
@@ -812,18 +819,27 @@ public class BreakfrontHud {
 
     // ---- 左上：目标胶囊 ----
 
+    /**
+     * 左上：目标 / 领地范围面板（2026-09-11 重制）。
+     * 此前该方法为死代码、从未被 render() 调用 —— 即「领地范围展示从始至终没有好过」的根因。
+     * 现重制为竖排列表，每行 = 一个据点：
+     *   · 左侧字母徽标（按归属着色；争夺态呼吸闪烁）
+     *   · 右侧「战场跨度轨道」：整张地图 world-X 跨度作为底轨，该据点
+     *     [worldX-radius, worldX+radius] 高亮为一段 —— 直接呈现「领地范围」的空间位置
+     *   · 据点中心竖刻度 + 争夺进度（防守方持有但 meter>0 时按推进填充绿）
+     */
     private void renderObjective(DrawContext ctx, TextRenderer font, int sw) {
         List<ZoneView> zones = ClientMatchState.zones();
         if (zones.isEmpty()) {
             return;
         }
         int x = 10;
-        int y = 8;
-        ctx.drawText(font, Text.literal("OBJECTIVE  领地"), x, y, BfTheme.MUTED, false);
-        int cy = y + font.fontHeight + 4;
-        // 2026-09-11 改版：去掉「方向/占守」文字，只画**领地范围**（世界 x 跨度按比例映射）
-        // 与**领地中心**（竖线刻度）——条带即战场的空间布局。
-        int stripW = Math.min(sw - 20, 460);
+        int y = 28; // 让出顶部 (10,10) 的时钟文字
+        int panelW = Math.min(210, sw - 20);
+        ctx.drawText(font, Text.literal("目标  OBJECTIVE"), x, y, BfTheme.MUTED, false);
+        int headerH = font.fontHeight + 7;
+
+        // 战场 world-X 跨度（含各据点半径）
         double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE;
         for (ZoneView z : zones) {
             minX = Math.min(minX, z.worldX() - z.radius());
@@ -832,21 +848,45 @@ public class BreakfrontHud {
         if (maxX - minX < 1e-6) {
             return;
         }
+
+        int trackX = x + 20;
+        int trackW = panelW - 20 - 8;
+        int rowH = 17;
+        int ry = y + headerH;
         long t = System.currentTimeMillis();
+
         for (ZoneView z : zones) {
-            int x0 = x + (int) ((z.worldX() - z.radius() - minX) / (maxX - minX) * stripW);
-            int x1 = x + (int) ((z.worldX() + z.radius() - minX) / (maxX - minX) * stripW);
-            int cm = x + (int) ((z.worldX() - minX) / (maxX - minX) * stripW);
             Side owner = Side.values()[z.ownerOrdinal()];
             boolean contested = owner == Side.DEFENDER && z.meter() > 1e-3f;
             int edge = contested
                     ? ((t % 700) < 350 ? 0xFFEFFFFF : BfTheme.CYAN)
                     : (owner == Side.ATTACKER ? BfTheme.GREEN : BfTheme.BLUE);
-            ctx.fill(x0, cy, x1, cy + 4, 0x99000000);        // 领地范围
-            ctx.fill(x0, cy, x1, cy + 1, edge);               // 上沿按归属描边
-            ctx.fill(cm, cy - 3, cm + 1, cy + 9, edge);       // 领地中心刻度
-            ctx.drawText(font, Text.literal(z.letter()),
-                    cm - font.getWidth(z.letter()) / 2, cy + 10, edge, false);
+            // 字母徽标
+            ctx.drawText(font, Text.literal(z.letter()), x, ry + 2, edge, false);
+
+            int midY = ry + rowH / 2;
+            // 底轨（整张战场跨度）
+            ctx.fill(trackX, midY - 2, trackX + trackW, midY + 2, 0x33000000);
+            // 该据点领地范围段
+            int sx = trackX + (int) ((z.worldX() - z.radius() - minX) / (maxX - minX) * trackW);
+            int ex = trackX + (int) ((z.worldX() + z.radius() - minX) / (maxX - minX) * trackW);
+            sx = Math.max(trackX, Math.min(trackX + trackW, sx));
+            ex = Math.max(trackX, Math.min(trackX + trackW, ex));
+            if (ex > sx) {
+                ctx.fill(sx, midY - 2, ex, midY + 2, edge & 0xAAFFFFFF);
+                ctx.fill(sx, midY - 3, ex, midY - 2, edge);
+            }
+            // 据点中心刻度
+            int cm = trackX + (int) ((z.worldX() - minX) / (maxX - minX) * trackW);
+            ctx.fill(cm, midY - 5, cm + 1, midY + 5, edge);
+            // 争夺进度：从中心向两侧按 meter 填充（防守方持有但被推进）
+            if (contested) {
+                int w = (int) (z.radius() / (maxX - minX) * trackW * Math.max(0f, Math.min(1f, z.meter())));
+                if (w > 0) {
+                    ctx.fill(cm - w, midY - 3, cm + w, midY - 2, BfTheme.GREEN);
+                }
+            }
+            ry += rowH;
         }
     }
 
