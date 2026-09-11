@@ -56,25 +56,32 @@ public final class Updater {
     }
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(3))
+            .connectTimeout(Duration.ofSeconds(10))   // 国内→CF 边缘 TCP/TLS 冷握手可能超 3s
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     /** 影子替换进程本会话只武装一次（同 JVM 重复进入重启卡不重复拉起）。 */
     private static volatile boolean watcherArmed = false;
 
-    /** 轻量探测更新源是否在线（主菜单状态徽章用）。 */
+    /** 轻量探测更新源是否在线（主菜单状态徽章用）。
+     * ⚠️ 国内直连 Cloudflare 边缘：冷启动 DNS+TLS 握手抖动很容易破 3s（实测常态 0.7~1.8s），
+     * 单次 3s 探测会间歇性误报「更新源离线」→ 放宽到 8s×2 次。 */
     public static boolean probe(String host, int updatePort) {
-        try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(BfServerConfig.updateBase()
-                            + "/breakfront/manifest.json"))
-                    .timeout(Duration.ofSeconds(3))
-                    .GET()
-                    .build();
-            return HTTP.send(req, HttpResponse.BodyHandlers.discarding()).statusCode() == 200;
-        } catch (Exception e) {
-            return false;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(BfServerConfig.updateBase()
+                                + "/breakfront/manifest.json"))
+                        .timeout(Duration.ofSeconds(8))
+                        .GET()
+                        .build();
+                if (HTTP.send(req, HttpResponse.BodyHandlers.discarding()).statusCode() == 200) {
+                    return true;
+                }
+            } catch (Exception e) {
+                // 超时/网络抖动：重试一次
+            }
         }
+        return false;
     }
 
     /** 进度回调（预检屏使用）：stage 描述当前阶段，frac ∈ [0,1] 0=未知。 */
@@ -176,12 +183,12 @@ public final class Updater {
         }
     }
 
-    /** GET 并等待响应体（text）；单次 6s 超时，失败快速重试一次。 */
+    /** GET 并等待响应体（text）；单次 12s 超时，失败重试最多 3 次（退避 1s/2s）。 */
     private static String fetchWithRetry(String url) {
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < 3; attempt++) {
             try {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                        .timeout(Duration.ofSeconds(6))
+                        .timeout(Duration.ofSeconds(12))
                         .GET()
                         .build();
                 HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
@@ -190,9 +197,9 @@ public final class Updater {
                 }
                 return null; // 明确非 200 不再重试
             } catch (Exception e) {
-                if (attempt == 0) {
+                if (attempt < 2) {
                     try {
-                        Thread.sleep(600);
+                        Thread.sleep(1000L * (attempt + 1));
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return null;
