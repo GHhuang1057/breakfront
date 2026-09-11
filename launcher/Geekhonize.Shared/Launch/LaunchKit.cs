@@ -37,7 +37,7 @@ public sealed class BfManifest
 
 public static class BfSource
 {
-    public const string DefaultManifest = "https://mc.geekhonize.top/server/manifest.json";
+    public const string DefaultManifest = "https://bfupdate.geekhonize.top/breakfront/manifest.json";
 
     public static async Task<BfManifest?> FetchAsync(HttpClient http, string? manifestUrl = null)
     {
