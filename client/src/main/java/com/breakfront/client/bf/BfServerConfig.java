@@ -22,6 +22,8 @@ public final class BfServerConfig {
     public static final String DEFAULT_HOST = "play.geekhonize.top";
     public static final int DEFAULT_PORT = 25565;
     public static final int DEFAULT_UPDATE_PORT = 25610;
+    /** 2026-09-10 前的旧公测域名（已改为官网）。老客户端把它写进了配置文件，读到必须迁移。 */
+    private static final String LEGACY_DEFAULT_HOST = "mc.geekhonize.top";
     /**
      * 公测服更新/音乐通道（Cloudflare Worker geekhonize-bfupdate：自动取 GitHub 最新 dev release
      * 并代理下载）。未备案域名 + 直连 25610 会被 ICP 合规拦截，故正式通道统一走 CF。
@@ -72,20 +74,16 @@ public final class BfServerConfig {
                 }
             } else {
                 Files.createDirectories(file.getParent());
-                Files.writeString(file, String.join("\n",
-                        "# BREAKFRONT 联机配置",
-                        "# 默认即公测服 play.geekhonize.top（内置），以下两行通常无需改动",
-                        "# 自建/本地测试服请改 host（如 localhost）并保持端口一致",
-                        "# updatebase：更新通道基址（公测服走 https://bfupdate.geekhonize.top 经 Cloudflare）；"
-                                + "留空则回退 http://host:updateport",
-                        "# musicbase：音乐库基址（公测服直连 MC 主机音频服务；Cloudflare Workers 出站"
-                                + "端口白名单不含 25610 故音乐不经 CF）；留空按上述规则推导",
-                        "host=" + DEFAULT_HOST,
-                        "port=" + DEFAULT_PORT,
-                        "updatePort=" + DEFAULT_UPDATE_PORT) + "\n",
-                        StandardCharsets.UTF_8);
+                Files.writeString(file, templateText(), StandardCharsets.UTF_8);
             }
             host = kv.getOrDefault("host", DEFAULT_HOST);
+            // ⚠️ 旧默认域名迁移：老客户端首次运行时把当时的 DEFAULT_HOST（mc.）写进了配置。
+            // 若不迁移，换域名后 host != 新 DEFAULT_HOST → 被判为「自建服」→
+            // 更新源回退 http://mc...:25610 → 打到 Cloudflare 边缘超时（表现即「更新源离线」）。
+            if (LEGACY_DEFAULT_HOST.equalsIgnoreCase(host)) {
+                host = DEFAULT_HOST;
+                Files.writeString(file, templateText(), StandardCharsets.UTF_8);
+            }
             port = parseIntSafe(kv.get("port"), DEFAULT_PORT);
             updatePort = parseIntSafe(kv.get("updateport"), DEFAULT_UPDATE_PORT);
             String ub = kv.getOrDefault("updatebase", "");
@@ -118,6 +116,21 @@ public final class BfServerConfig {
         } catch (NumberFormatException e) {
             return def;
         }
+    }
+
+    /** 首次生成/迁移时写回的配置模板（host 等取当前默认值）。 */
+    private static String templateText() {
+        return String.join("\n",
+                "# BREAKFRONT 联机配置",
+                "# 默认即公测服 play.geekhonize.top（内置），以下两行通常无需改动",
+                "# 自建/本地测试服请改 host（如 localhost）并保持端口一致",
+                "# updatebase：更新通道基址（公测服走 https://bfupdate.geekhonize.top 经 Cloudflare）；"
+                        + "留空则回退 http://host:updateport",
+                "# musicbase：音乐库基址（公测服直连 MC 主机音频服务；Cloudflare Workers 出站"
+                        + "端口白名单不含 25610 故音乐不经 CF）；留空按上述规则推导",
+                "host=" + DEFAULT_HOST,
+                "port=" + DEFAULT_PORT,
+                "updatePort=" + DEFAULT_UPDATE_PORT) + "\n";
     }
 
     public static String host() {
