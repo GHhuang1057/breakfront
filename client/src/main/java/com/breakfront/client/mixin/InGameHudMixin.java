@@ -3,6 +3,7 @@ package com.breakfront.client.mixin;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.InGameHud;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -62,6 +63,18 @@ public abstract class InGameHudMixin {
 
     @Inject(method = "renderPlayerList", at = @At("HEAD"), cancellable = true)
     private void bf$hideVanillaTabList(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
+        ci.cancel();
+    }
+
+    /**
+     * 取消原版暗角（renderVignetteOverlay）：vignette 贴图是「中心透明、边缘不透明」的径向渐变，
+     * 受伤（hurtTime）与低血量时被整体染成红色，边缘不透明区覆盖大半屏 —— 与自绘 BF 边角脉冲
+     * （BreakfrontHud.renderAtmosphere）叠加后表现为「屏幕全红」。原版暗角整体关闭，
+     * 受击红闪/低血量呼吸统一由自绘氛围层承担（BF2042 风格：只亮四边、中心始终通透）。
+     * 传送门/火焰等其余全屏遮罩继续保留。
+     */
+    @Inject(method = "renderVignetteOverlay", at = @At("HEAD"), cancellable = true)
+    private void bf$hideVanillaVignette(DrawContext context, Entity entity, CallbackInfo ci) {
         ci.cancel();
     }
 }
