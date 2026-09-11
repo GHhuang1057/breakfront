@@ -70,6 +70,11 @@ try {
   $ph = @{ 'X-Requested-With' = 'XMLHttpRequest' }
   Log 'panel login ok'
 
+  # 有人在线则本轮跳过（不写标记，3 分钟后重试）——避免发版重启把在线玩家踢出。
+  $est = @(Get-NetTCPConnection -LocalPort 25565 -State Established -ErrorAction SilentlyContinue |
+           Where-Object { \$_.RemoteAddress -notmatch '^(127\.|::1|0\.0\.0\.0)' })
+  if (\$est.Count -gt 0) { Log ('defer: ' + \$est.Count + ' player connections online'); Remove-Item \$Lock -Force; exit 0 }
+
   function InstCall($action) {
     Invoke-RestMethod -Uri ("$Panel/api/protected_instance/$action" + "?daemonId=$DaemonId&uuid=$InstanceUuid&token=$token") -WebSession $sess -Headers $ph -TimeoutSec 30 | Out-Null
   }

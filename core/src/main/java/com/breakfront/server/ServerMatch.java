@@ -705,6 +705,13 @@ public final class ServerMatch {
         MinecraftServer server = BreakfrontServer.server();
         bots.clearAll(server);          // 新回合：AI 编制归零，随后按对账在新出生点重建
         if (server != null) {
+            // 据点区块常驻加载（管理台可能刚改过扇区，锚点变了也要覆盖新坐标）。
+            // 不加载则 groundY 读盘失败 → NaN → 占领/票数/HUD 全停（2026-09-11 实测）。
+            try {
+                forceLoadAnchorChunks(server);
+            } catch (Exception e) {
+                BreakfrontServer.LOGGER.warn("[Breakfront] forceLoadAnchorChunks failed: {}", e.toString());
+            }
             // ⚠️ 开赛前**必须**把填充目标落实一遍：`/bf start` 手动开局不会走
             //    tickAutoPlay 的 applyFillTarget 分支，目标人数还停在 0 →
             //    结果新回合里一个 BOT 都没有（用户反馈「开局后 AI BOT 没出现」即此路径）。
@@ -1185,6 +1192,25 @@ public final class ServerMatch {
         BreakfrontServer.LOGGER.info(
                 "[Breakfront] 出生点 ({}, {}, {}) 已常驻加载 ±{} 格区块",
                 (long) sp[0], (long) sp[1], (long) sp[2], radiusBlocks);
+    }
+
+    /** 据点锚点区块常驻加载。
+     * ⚠️ 2026-09-11 实测定案：A1/A2 曾被 /bf status 判「无地形」——坐标其实没问题，
+     * 根因是**发版重启后据点区块不驻留内存**：groundY 的同步读盘失败 → NaN →
+     * 占领推进 / 信标 / HUD 扇区 / BOT 部署整条链路停摆（票数不动的直接原因）。
+     * 与出生区块同待遇：服务器启动与每回合开始各 forceload 一次。 */
+    public void forceLoadAnchorChunks(MinecraftServer server) {
+        int n = 0;
+        for (String id : zoneOrder) {
+            ZoneAnchor a = anchors.get(id);
+            if (a == null) continue;
+            exec(server, String.format("forceload add %d %d",
+                    (int) Math.floor(a.x()), (int) Math.floor(a.z())));
+            n++;
+        }
+        if (n > 0) {
+            BreakfrontServer.LOGGER.info("[Breakfront] {} 个据点锚点区块已常驻加载", n);
+        }
     }
 
     /** 出生坐标（含 Y），攻/守默认锚定在首/末据点的阵营侧；可 /bf spawns set 覆盖。

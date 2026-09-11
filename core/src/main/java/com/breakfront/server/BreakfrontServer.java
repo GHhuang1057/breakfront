@@ -48,8 +48,9 @@ public final class BreakfrontServer {
             // 否则 columnTopY 为 NaN，出生点会被兜底逻辑推到几十格开外（2026-09-10 实测）。
             try {
                 match.forceLoadSpawnChunks(server, 48);
+                match.forceLoadAnchorChunks(server);
             } catch (Exception e) {
-                LOGGER.warn("[Breakfront] forceLoadSpawnChunks failed: {}", e.toString());
+                LOGGER.warn("[Breakfront] forceLoad spawn/anchor chunks failed: {}", e.toString());
             }
         });
 
