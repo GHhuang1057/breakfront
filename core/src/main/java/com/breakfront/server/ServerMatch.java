@@ -182,11 +182,13 @@ public final class ServerMatch {
             layout.setAttackerSpawn(x, z);
             setSpawnOverride(Side.ATTACKER, x, z);
             saveLayout();
+            pushEditorPreview(server);   // 让编辑器里的攻方出生点标记即时出现/移动
             return String.format("已设置攻方出生点 → (%.1f, %.1f)，已写入布局并保存", x, z);
         }
         layout.setDefenderSpawn(x, z);
         setSpawnOverride(Side.DEFENDER, x, z);
         saveLayout();
+        pushEditorPreview(server);   // 让编辑器里的守方出生点标记即时出现/移动
         return String.format("已设置守方出生点 → (%.1f, %.1f)，已写入布局并保存", x, z);
     }
 
@@ -195,6 +197,7 @@ public final class ServerMatch {
         layout.setLobbySpawn(x, z);
         setLobbySpawn(x, z);
         saveLayout();
+        pushEditorPreview(server);   // 让编辑器里的大厅出生点标记即时出现/移动
         return String.format("已设置大厅出生点 → (%.1f, %.1f)，已写入布局并保存", x, z);
     }
 
@@ -1746,7 +1749,8 @@ public final class ServerMatch {
         editorViewers.remove(playerId);
         ServerPlayerEntity p = server.getPlayerManager().getPlayer(playerId);
         if (p != null) {
-            ServerPlayNetworking.send(p, new SectorEditPayload(false, 0, List.of()));
+            ServerPlayNetworking.send(p, SectorEditPayload.of(false, 0, List.of(),
+                    Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN));
         }
         return "扇区编辑器已关闭（预览已清除）";
     }
@@ -1985,8 +1989,15 @@ public final class ServerMatch {
                 zones.add(new SectorEditPayload.ZoneView(z.id(), si, z.x(), gy, z.z(), z.radius()));
             }
         }
-        SectorEditPayload payload = new SectorEditPayload(true,
-                Math.max(0, editorSectorIdx), zones);
+        // 出生点（来自布局；未设置写 NaN，客户端跳过绘制）
+        double ax = layout.hasAttackerSpawn() ? layout.attackerSpawnX() : Double.NaN;
+        double az = layout.hasAttackerSpawn() ? layout.attackerSpawnZ() : Double.NaN;
+        double dx = layout.hasDefenderSpawn() ? layout.defenderSpawnX() : Double.NaN;
+        double dz = layout.hasDefenderSpawn() ? layout.defenderSpawnZ() : Double.NaN;
+        double lx = layout.hasLobbySpawn() ? layout.lobbySpawnX() : Double.NaN;
+        double lz = layout.hasLobbySpawn() ? layout.lobbySpawnZ() : Double.NaN;
+        SectorEditPayload payload = SectorEditPayload.of(true,
+                Math.max(0, editorSectorIdx), zones, ax, az, dx, dz, lx, lz);
         for (UUID viewerId : new ArrayList<>(editorViewers)) {
             ServerPlayerEntity p = server.getPlayerManager().getPlayer(viewerId);
             if (p != null) {

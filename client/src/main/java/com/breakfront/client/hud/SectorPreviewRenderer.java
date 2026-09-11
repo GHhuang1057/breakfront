@@ -70,6 +70,64 @@ public final class SectorPreviewRenderer {
                 drawCenterMark(m, zone.worldX(), gy + 0.22, zone.worldZ(), rgb);
             }
         }
+        // 出生点标记：攻=橙、守=蓝、大厅=白圈，让 admin 在编辑器里看得见、对得准
+        drawSpawn(m, world, SectorEditState.attackerSpawnX(), SectorEditState.attackerSpawnZ(),
+                new int[]{232, 98, 44}, "攻");
+        drawSpawn(m, world, SectorEditState.defenderSpawnX(), SectorEditState.defenderSpawnZ(),
+                new int[]{77, 166, 255}, "守");
+        drawSpawn(m, world, SectorEditState.lobbySpawnX(), SectorEditState.lobbySpawnZ(),
+                new int[]{234, 242, 248}, "厅");
+    }
+
+    /** 在地面画一个「柱子 + 顶标」的出生点标记（无地面则跳过）。 */
+    private static void drawSpawn(Matrix4f m, net.minecraft.client.world.ClientWorld world,
+                                 double x, double z, int[] rgb, String label) {
+        if (Double.isNaN(x) || Double.isNaN(z)) {
+            return;
+        }
+        int top = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING,
+                (int) Math.floor(x), (int) Math.floor(z));
+        if (top <= world.getBottomY() + 2) {
+            return;
+        }
+        double gy = top + 0.12;
+        float rf = rgb[0] / 255f, gf = rgb[1] / 255f, bf = rgb[2] / 255f;
+        // 立柱（细竖线，高 2.2 格，醒目）
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShader(GameRenderer::getRenderTypeLinesProgram);
+        BufferBuilder col = Tessellator.getInstance()
+                .begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.LINES);
+        col.vertex(m, (float) x, (float) gy, (float) z).color(rf, gf, bf, 1f).normal(0, 1, 0);
+        col.vertex(m, (float) x, (float) (gy + 2.2), (float) z).color(rf, gf, bf, 1f).normal(0, 1, 0);
+        BufferRenderer.drawWithGlobalProgram(col.end());
+        RenderSystem.disableBlend();
+        // 地面圆环（半径 2.5 格）表示出生散布区
+        drawGroundRing(m, x, gy, z, 2.5, rgb, 200);
+        // 顶标菱形
+        drawCenterMark(m, x, gy + 2.3, z, rgb);
+    }
+
+    /** 贴地圆环（细线段近似）。 */
+    private static void drawGroundRing(Matrix4f m, double cx, double y, double cz,
+                                       double r, int[] rgb, int a) {
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShader(GameRenderer::getRenderTypeLinesProgram);
+        RenderSystem.lineWidth(2.0f);
+        BufferBuilder buffer = Tessellator.getInstance()
+                .begin(VertexFormat.DrawMode.DEBUG_LINE_STRIP, VertexFormats.LINES);
+        float rf = rgb[0] / 255f, gf = rgb[1] / 255f, bf = rgb[2] / 255f;
+        float af = a / 255f;
+        int seg = 28;
+        for (int i = 0; i <= seg; i++) {
+            double ang = i * (Math.PI * 2.0 / seg);
+            buffer.vertex(m, (float) (cx + Math.cos(ang) * r), (float) y, (float) (cz + Math.sin(ang) * r))
+                    .color(rf, gf, bf, af).normal(0.0f, 1.0f, 0.0f);
+        }
+        BufferRenderer.drawWithGlobalProgram(buffer.end());
+        RenderSystem.lineWidth(1.0f);
+        RenderSystem.disableBlend();
     }
 
     /** 当前扇区圆心处的小菱形（两条交叉线段），表示「正在往这里加据点」。 */

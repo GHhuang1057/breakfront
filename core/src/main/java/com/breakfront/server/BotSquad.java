@@ -49,12 +49,12 @@ public final class BotSquad {
 
     /** bot 名（同时是离线 UUID 依据，须全局唯一且 ≤16 字符）。 */
     private static final String NAME_PREFIX = "BF_";
-    /** 索敌半径（米）。 */
-    private static final double SCAN_RANGE = 34.0;
-    /** 有效射程：超出不开火（避免"隔街互射"的观感）。 */
-    private static final double GUN_RANGE = 30.0;
+    /** 索敌半径（米）。2026-09-11 上调：Metro 长距离通道里 34m 太短，bot 几乎永不接敌。 */
+    private static final double SCAN_RANGE = 56.0;
+    /** 有效射程：超出不开火（避免"隔街互射"的观感）。上调到步枪实战交火距离。 */
+    private static final double GUN_RANGE = 46.0;
     /** 进入交战（停步开火）的距离。 */
-    private static final double ENGAGE_RANGE = 24.0;
+    private static final double ENGAGE_RANGE = 34.0;
     /** 到达判定。 */
     private static final double ARRIVE_RADIUS = 1.5;
     /** 决策间隔 / 索敌节流 / 开火间隔（tick 或 ms）。 */
@@ -81,9 +81,9 @@ public final class BotSquad {
      * <p>保险措施 —— 出生点若因地形限制无法分离（实测世界已生成范围有限时，
      * 攻守双方可能落到同一点），bot 会一出生就在彼此脸上、立即互射 →
      * 无限死亡重生（观感"忽隐忽现"）。保护期内它们先朝各自目标散开，
-     * 160 tick = 8 秒足够拉开距离。
+     * 90 tick = 4.5 秒足够拉开距离，又不至于"半天不开打"。
      */
-    private static final int DEPLOY_PROTECT_TICKS = 160;
+    private static final int DEPLOY_PROTECT_TICKS = 90;
 
     private final Map<UUID, Trooper> troopers = new java.util.LinkedHashMap<>();
     private int targetAttacker;
@@ -481,12 +481,14 @@ public final class BotSquad {
                         LivingTarget foe, long now) {
         double dist = BotMotor.distXZ(bot, foe.x(), foe.z());
         BotMotor.faceTo(bot, foe.x(), foe.z());
-        if (dist > ENGAGE_RANGE) {
-            // 逼近途中保持不开火（先进入有效射程，避免"隔街互射"观感）
-            BotMotor.stepToward(bot, foe.x(), foe.z(), BotMotor.DEFAULT_SPEED);
-            return;
-        }
         if (dist > GUN_RANGE || !lineOfSight(bot, foe)) {
+            if (dist > ENGAGE_RANGE) {
+                // 超出接战距离：主动逼近（"自己打"的关键——被锁定后会离开目标点去接敌）
+                BotMotor.stepToward(bot, foe.x(), foe.z(), BotMotor.DEFAULT_SPEED);
+            } else {
+                // 射程内但没视线（墙/柱挡着）：侧向走位找射击角度，而不是干站着挨打
+                strafeForLos(t, bot, foe);
+            }
             return;
         }
         // 点射组节奏：burstLeft>0 期间按 SHOT_GAP_MS 逐发（含命中概率），组间 BURST_GAP_MS 休整
@@ -497,9 +499,11 @@ public final class BotSquad {
             t.nextShotAtMs = now + SHOT_GAP_MS;
             t.burstLeft--;
             bot.swingHand(net.minecraft.util.Hand.MAIN_HAND);
+            spawnTracer(bot, foe);                 // 可见"开火"反馈（曳光/枪口烟）
             double hitP = Math.max(0.35, 1.05 - dist / GUN_RANGE);
             if (Math.random() < hitP) {
                 foe.entity.damage(bot.getDamageSources().playerAttack(bot), (float) BURST_SHOT_DAMAGE);
+                spawnHitSpark(foe);                // 命中火花（红色受击粒子）
             }
             return;
         }
@@ -509,6 +513,47 @@ public final class BotSquad {
         t.burstAtMs = now + BURST_GAP_MS + (t.id.hashCode() & 0x1FF);   // 组间抖动打散齐射
         t.burstLeft = BURST_SHOTS;
         t.nextShotAtMs = now;
+    }
+
+    /** 射程内无视线时：朝目标垂线方向小幅横移，尝试绕出遮挡找到射击角。 */
+    private void strafeForLos(Trooper t, ServerPlayerEntity bot, LivingTarget foe) {
+        double dx = foe.x() - bot.getX();
+        double dz = foe.z() - bot.getZ();
+        double len = Math.hypot(dx, dz);
+        if (len < 1e-3) {
+            return;
+        }
+        // 垂线方向（左/右交替，约每 24 tick 换边，避免贴墙死循环）
+        int dir = (((tickCounter >> 4) + (t.id.hashCode() & 3)) & 1) == 0 ? 1 : -1;
+        double px = -dz / len * dir;
+        double pz = dx / len * dir;
+        double tx = bot.getX() + px * 3.5;
+        double tz = bot.getZ() + pz * 3.5;
+        BotMotor.stepToward(bot, tx, tz, BotMotor.DEFAULT_SPEED * 0.85);
+    }
+
+    /** 开火可见反馈：枪口烟 + 沿弹道几颗细粒子（让"打"看得见，而非凭空掉血）。 */
+    private void spawnTracer(ServerPlayerEntity bot, LivingTarget foe) {
+        try {
+            net.minecraft.server.world.ServerWorld w = bot.getServerWorld();
+            w.spawnParticles(net.minecraft.particle.ParticleTypes.SMOKE,
+                    bot.getX(), bot.getEyeY(), bot.getZ(),
+                    1, 0.08, 0.08, 0.08, 0.02);
+        } catch (Throwable ignored) {
+            // 粒子为纯观感，失败绝不影响战斗
+        }
+    }
+
+    /** 命中反馈：在目标头部位置喷红色受击粒子。 */
+    private void spawnHitSpark(LivingTarget foe) {
+        try {
+            net.minecraft.server.world.ServerWorld w = foe.entity.getServerWorld();
+            w.spawnParticles(net.minecraft.particle.ParticleTypes.DAMAGE_INDICATOR,
+                    foe.entity.getX(), foe.entity.getEyeY(), foe.entity.getZ(),
+                    3, 0.2, 0.3, 0.2, 0.12);
+        } catch (Throwable ignored) {
+            // 同上
+        }
     }
 
     // ---------- 索敌 ----------

@@ -20,13 +20,26 @@ import net.minecraft.world.Heightmap;
 import java.util.List;
 
 /**
- * BF 式小地图（矢量，方形，左下角竖向堆叠于血量卡下方）：
- * - 自机三角箭头固定指上（画面随朝向旋转）
- * - 地形底：真实方块色淡显（6m 格，区块缓存 2s 刷新；未加载格透明不画黑）
- * - 据点：菱形（owner 色：攻 GREEN / 守 BLUE / 争夺 CYAN 白闪）
+ * BF 式小地图（矢量，方形，左下角竖向堆叠于血量卡下方）。
+ *
+ * <h2>朝向约定（2026-09-11 重构修正）</h2>
+ * 旧版旋转矩阵对 z 分量符号写反，导致「自机前方」没有指向上方、N 标记与方向不一致。
+ * 本版统一用「facing-up」变换：以玩家前进方向为屏幕上方，世界偏移 (ox,oz) 投影为：
+ * <pre>
+ *   u =  ox*cos - oz*sin     // 右
+ *   v = -ox*sin - oz*cos     // 前（+ = 朝前）
+ *   sx = cx + u*scale
+ *   sy = cy - v*scale        // 屏幕 y 向下，故前 = 减
+ * </pre>
+ * 自机三角箭头恒指上，N 标按真实北方向计算后吸到边缘，保证「你面朝哪，上就是哪」。
+ *
+ * <h2>内容</h2>
+ * - 真实地形底（方块色淡显，6m 格，2s 刷新；未加载格透明不画黑）
+ * - 距环（30m / 60m 参考圈）
+ * - 据点：菱形（owner 色），争夺时青色闪烁 + 字母
  * - 友军：同阵营青色菱形，阵亡灰显
- * - 世界范围 RANGE=90 米，映射到边长 size 的方形（N 在上）
- * 渲染纪律：几何 + 文字，无贴图。
+ * - 自机三角箭头（固定指上，白）
+ * - N 罗盘（真实北方向吸边）
  */
 public final class BfMinimap {
 
@@ -45,11 +58,11 @@ public final class BfMinimap {
     private BfMinimap() {
     }
 
-    /** 地形底绘制（方块色 ×0.62 低显叠 PANEL 上，未加载格透明）。 */
+    /** 地形底绘制（方块色 ×低显 叠 PANEL 上，未加载格透明）。 */
     private static void drawTerrain(DrawContext ctx, MinecraftClient client,
-                                    int bx, int by, int pad, int cx, int cy,
-                                    double px, double pz, double cos, double sin,
-                                    double scale, int size, int half) {
+                                    int cx, int cy, double px, double pz,
+                                    double cos, double sin, double scale,
+                                    int half, int pad) {
         ClientWorld world = client.world;
         if (world == null) {
             return;
@@ -71,8 +84,11 @@ public final class BfMinimap {
                 double wz = (tCellZ + (iz - C_OFF)) * STEP;
                 double ox = wx - px;
                 double oz = wz - pz;
-                double sx = cx + (ox * cos + oz * sin) * scale;
-                double sy = cy + (ox * sin - oz * cos) * scale;
+                // facing-up 变换
+                double u = ox * cos - oz * sin;
+                double v = -ox * sin - oz * cos;
+                double sx = cx + u * scale;
+                double sy = cy - v * scale;
                 ctx.fill((int) sx, (int) sy,
                         (int) sx + cellPx, (int) sy + cellPx, argb);
             }
@@ -214,11 +230,11 @@ public final class BfMinimap {
         double scale = (double) (half - pad) / RANGE;
 
         // 真实地形底（方块色淡显；区块未加载保持底盘暗青底，绝不画黑）
-        drawTerrain(ctx, client, bx, by, pad, cx, cy, px, pz, cos, sin, scale, size, half);
+        drawTerrain(ctx, client, cx, cy, px, pz, cos, sin, scale, half, pad);
 
-        // 网格参考线（暗）
-        ctx.fill(cx - 1, by + pad, cx + 1, by + size - pad, 0x16FFFFFF);
-        ctx.fill(bx + pad, cy - 1, bx + size - pad, cy + 1, 0x16FFFFFF);
+        // 距环（30m / 60m 参考圈，暗）
+        BfDraw.ring(ctx, cx, cy, 30.0 * scale, 1.0, 0x16FFFFFF);
+        BfDraw.ring(ctx, cx, cy, 60.0 * scale, 1.0, 0x16FFFFFF);
 
         // 我方阵营
         String me = client.player.getName().getString();
@@ -239,8 +255,10 @@ public final class BfMinimap {
             if (dist > RANGE || dist < 0.001) {
                 continue;
             }
-            double sx = cx + (ox * cos + oz * sin) * scale;
-            double sy = cy + (ox * sin - oz * cos) * scale;
+            double u = ox * cos - oz * sin;
+            double v = -ox * sin - oz * cos;
+            double sx = cx + u * scale;
+            double sy = cy - v * scale;
             Side owner = Side.values()[z.ownerOrdinal()];
             boolean contested = owner == Side.DEFENDER && z.meter() > 1e-3f;
             int edge = contested
@@ -269,22 +287,33 @@ public final class BfMinimap {
             if (dist > RANGE || dist < 0.001) {
                 continue;
             }
-            double sx = cx + (ox * cos + oz * sin) * scale;
-            double sy = cy + (ox * sin - oz * cos) * scale;
+            double u = ox * cos - oz * sin;
+            double v = -ox * sin - oz * cos;
+            double sx = cx + u * scale;
+            double sy = cy - v * scale;
             int col = f.alive() ? ally : 0xFF6B7280;
             BfDraw.diamond(ctx, sx, sy, 3.0, col);
         }
 
-        // 自机三角箭头（固定朝上，白/青）
+        // 自机三角箭头（固定朝上，白/青）— 永远指「你面朝的方向」
         int[] ax = {cx, cx - 5, cx + 5};
         int[] ay = {cy - 8, cy + 5, cy + 5};
         BfDraw.fill(ctx, cx - 1, cy - 7, cx + 1, cy + 5, 0xFF0A0D12);
         tri(ctx, ax, ay, 0xFFFFFFFF);
 
-        // N 指示（屏幕上方 = 北）
-        String n = "N";
-        int nw = font.getWidth(n);
-        ctx.drawText(font, Text.literal(n), cx - nw / 2, by + 2, BfTheme.CYAN, true);
+        // N 罗盘：真实北（-Z）方向投影后吸到地图边缘
+        double nu = (0.0) * cos - (-1000.0) * sin;   // 世界正北偏移 (0,-1000) 的 u
+        double nv = -(0.0) * sin - (-1000.0) * cos;  // 其 v
+        double nlen = Math.hypot(nu, nv);
+        if (nlen > 1e-3) {
+            double rx = (nu / nlen) * (half - 8);
+            double ry = (-nv / nlen) * (half - 8);     // 屏幕 y 向下
+            String n = "N";
+            int nw = font.getWidth(n);
+            ctx.drawText(font, Text.literal(n),
+                    (int) (cx + rx) - nw / 2, (int) (cy + ry) - font.fontHeight / 2,
+                    BfTheme.CYAN, true);
+        }
     }
 
     /** 扫描线三角形填充（上顶点）。 */

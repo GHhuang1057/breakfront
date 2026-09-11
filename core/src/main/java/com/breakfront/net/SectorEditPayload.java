@@ -17,7 +17,20 @@ import java.util.List;
 public record SectorEditPayload(
         boolean enabled,
         int currentSector,
-        List<ZoneView> zones) implements CustomPayload {
+        List<ZoneView> zones,
+        double attX, double attZ,
+        double defX, double defZ,
+        double lobbyX, double lobbyZ) implements CustomPayload {
+
+    /** 未设置出生点时对应字段写 NaN（客户端据此跳过绘制）。 */
+    public static final double NO_SPAWN = Double.NaN;
+
+    public static SectorEditPayload of(boolean enabled, int currentSector, List<ZoneView> zones,
+                                      double attX, double attZ, double defX, double defZ,
+                                      double lobbyX, double lobbyZ) {
+        return new SectorEditPayload(enabled, currentSector, zones,
+                attX, attZ, defX, defZ, lobbyX, lobbyZ);
+    }
 
     public static final Id<SectorEditPayload> ID =
             new Id<>(Identifier.of("breakfront", "sector_edit"));
@@ -32,10 +45,18 @@ public record SectorEditPayload(
         for (ZoneView zone : zones) {
             zone.write(buf);
         }
+        buf.writeDouble(attX);
+        buf.writeDouble(attZ);
+        buf.writeDouble(defX);
+        buf.writeDouble(defZ);
+        buf.writeDouble(lobbyX);
+        buf.writeDouble(lobbyZ);
     }
 
     public SectorEditPayload(PacketByteBuf buf) {
-        this(buf.readBoolean(), buf.readInt(), readZones(buf));
+        this(buf.readBoolean(), buf.readInt(), readZones(buf),
+                buf.readDouble(), buf.readDouble(), buf.readDouble(),
+                buf.readDouble(), buf.readDouble(), buf.readDouble());
     }
 
     private static List<ZoneView> readZones(PacketByteBuf buf) {

@@ -9,7 +9,11 @@
     "ScreenBackgroundMixin",
     "EntityRendererNameTagMixin",
     "CameraMixin",
-    "KeyboardMixin"
+    "KeyboardMixin",
+    {
+      "name": "GameRendererMixin",
+      "required": false
+    }
   ],
   "injectors": {
     "defaultRequire": 1
