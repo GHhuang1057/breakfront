@@ -891,6 +891,12 @@ public final class ServerMatch {
         if (BotPlayerFactory.isBot(player)) {
             return;
         }
+        // 取消旁观后的自愈：旧客户端「观察」写入 playerdata 的 gamemode=spectator
+        // 会跨重启保留，而新逻辑不再有任何退出旁观的路径 → 玩家永远卡旁观。
+        // 入服即强制回生存（2026-09-11 用户实测卡旁观）。
+        if (player.isSpectator()) {
+            exec(server, "gamemode survival " + player.getGameProfile().getName());
+        }
         if (teams.sideOf(player.getUuid()) == null) {
             teams.assignLeast(player.getUuid());
         }
