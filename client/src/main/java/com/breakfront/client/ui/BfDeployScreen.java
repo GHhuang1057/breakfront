@@ -213,7 +213,7 @@ public class BfDeployScreen extends Screen {
         // 目标切换时锚点跟随；点击部署后 beginGlide 滑落到第一人称（BfDeployCamera/CameraMixin）。
         if (respawnMode && selectedDeployIndex >= 0 && selectedDeployIndex < targets.size()) {
             DeployTarget sel = targets.get(selectedDeployIndex);
-            com.breakfront.client.hud.BfDeployCamera.engage(sel.worldX(), sel.worldZ());
+            com.breakfront.client.hud.BfDeployCamera.engage(sel.wx(), sel.wz());
         }
 
         // 自动 fit：整个据点集 + 出生区包围盒 → 视口居中，留 8% 边距
