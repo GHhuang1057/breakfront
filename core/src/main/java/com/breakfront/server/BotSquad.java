@@ -535,7 +535,8 @@ public final class BotSquad {
     /** 开火可见反馈：枪口烟 + 沿弹道几颗细粒子（让"打"看得见，而非凭空掉血）。 */
     private void spawnTracer(ServerPlayerEntity bot, LivingTarget foe) {
         try {
-            net.minecraft.server.world.ServerWorld w = bot.getServerWorld();
+            net.minecraft.server.world.ServerWorld w =
+                    (net.minecraft.server.world.ServerWorld) bot.getWorld();
             w.spawnParticles(net.minecraft.particle.ParticleTypes.SMOKE,
                     bot.getX(), bot.getEyeY(), bot.getZ(),
                     1, 0.08, 0.08, 0.08, 0.02);
@@ -547,7 +548,8 @@ public final class BotSquad {
     /** 命中反馈：在目标头部位置喷红色受击粒子。 */
     private void spawnHitSpark(LivingTarget foe) {
         try {
-            net.minecraft.server.world.ServerWorld w = foe.entity.getServerWorld();
+            net.minecraft.server.world.ServerWorld w =
+                    (net.minecraft.server.world.ServerWorld) foe.entity.getWorld();
             w.spawnParticles(net.minecraft.particle.ParticleTypes.DAMAGE_INDICATOR,
                     foe.entity.getX(), foe.entity.getEyeY(), foe.entity.getZ(),
                     3, 0.2, 0.3, 0.2, 0.12);
