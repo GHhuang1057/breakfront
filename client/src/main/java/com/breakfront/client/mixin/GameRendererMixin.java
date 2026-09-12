@@ -14,10 +14,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p>部署屏打开时相机停在 3D 俯瞰，但原版仍会在屏幕底部渲染第一人称手臂/枪模，
  * 观感即「还没进第一人称就拿着枪」。此处取消手部渲染，直到滑落到第一人称。
  *
- * <p>方法签名随版本略有差异，故在 mixins.json 标 {@code "required": false}：
- * 若当前版本方法签名不匹配，仅跳过、不崩溃（优雅降级——手部照常显示，不影响其它功能）。
+ * <p>目标方法签名锁定于 1.21.1 的 {@code GameRenderer.renderHand(Camera, float, float)}。
+ * 本 Mixin 版本（Loom 1.17.20 内置）的 {@code @Mixin} 不支持 {@code required} 属性，
+ * 且 mixins.json 的列表仅接受字符串，故该 mixin 为硬必需：跨 MC 版本时须复核 renderHand 签名，
+ * 若方法被重命名/移除将导致客户端启动失败（而非优雅降级）。
  */
-@Mixin(value = GameRenderer.class, required = false)
+@Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
 
     @Inject(method = "renderHand", at = @At("HEAD"), cancellable = true)
