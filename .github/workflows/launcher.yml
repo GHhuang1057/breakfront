@@ -43,35 +43,7 @@ jobs:
           name: geekhonize-launcher-win-x64
           path: dist/win
 
-  android:
-    runs-on: ubuntu-latest
-    continue-on-error: true   # B1.5：workload/SDK 链路成熟中，失败不阻塞主绿线
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - name: Install android workload
-        run: dotnet workload install android --skip-manifest-update
-      - name: Publish APK (net8.0-android / arm64)
-        env:
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        run: |
-          dotnet publish launcher/Geekhonize.Android/Geekhonize.Android.csproj -c Release \
-            -f net8.0-android \
-            -p:AndroidSdkDirectory=/usr/local/lib/android/sdk \
-            -o dist/android
-          find dist/android -name '*.apk' -exec cp {} dist/android/geekhonize-launcher-android.apk \; 2>/dev/null || true
-          ls -la dist/android/ | grep -i apk || true
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: geekhonize-launcher-android
-          path: dist/android/*.apk
+  # Android 构建已迁移至 GHhuang1057/breakfront-launcher-android（FCL fork，CI 注入客户端 mod），本仓库不再构建 Android APK。
 
   release:
     needs: [linux, windows]
@@ -104,27 +76,4 @@ jobs:
           gh release create "${TAG}" ${ASSETS} \
             --prerelease \
             --title "BREAKFRONT Launcher dev build (${SHA})" \
-            --notes ".NET/Avalonia 专属启动器（Geekhonize 登录→写入会话→启动游戏）。Win/Linux x64 自包含。"
-
-  # Android APK 成功后再单独补传到同一 release（失败不影响桌面绿线）
-  android-upload:
-    needs: [android, release]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    if: ${{ always() && needs.android.result == 'success' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: geekhonize-launcher-android
-          path: dist/android
-      - name: Upload apk
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SHA="${GITHUB_SHA::7}"
-          find dist/android -name '*.apk' -exec cp {} ./geekhonize-launcher-android.apk \;
-          ls -la geekhonize-launcher-android.apk
-          gh release upload "launcher-dev-${SHA}" geekhonize-launcher-android.apk --clobber 2>/dev/null || true
-          echo APK_UPLOADED
+            --notes ".NET/Avalonia 桌面启动器（Geekhonize 登录→写入会话→启动游戏）。Win/Linux x64 自包含。Android 见 GHhuang1057/breakfront-launcher-android（FCL fork）。"
