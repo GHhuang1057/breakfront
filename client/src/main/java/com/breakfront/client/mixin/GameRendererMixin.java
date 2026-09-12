@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p>方法签名随版本略有差异，故在 mixins.json 标 {@code "required": false}：
  * 若当前版本方法签名不匹配，仅跳过、不崩溃（优雅降级——手部照常显示，不影响其它功能）。
  */
-@Mixin(GameRenderer.class)
+@Mixin(value = GameRenderer.class, required = false)
 public abstract class GameRendererMixin {
 
     @Inject(method = "renderHand", at = @At("HEAD"), cancellable = true)

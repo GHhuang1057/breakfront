@@ -10,10 +10,7 @@
     "EntityRendererNameTagMixin",
     "CameraMixin",
     "KeyboardMixin",
-    {
-      "name": "GameRendererMixin",
-      "required": false
-    }
+    "GameRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
