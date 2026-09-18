@@ -119,14 +119,14 @@ public final class ServerMatch {
     public ServerMatch(MinecraftServer server) {
         this.runDir = server.getRunDirectory();
         loadServerProps();
-        this.layout = loadLayoutOrFallback();
+        this.layout = loadLayoutOrFallback(server);
         rebuildFromLayout();
     }
 
     // ================= 装载与重建 =================
 
-    /** 启动装载：外部扇区配置优先，缺失/损坏回退内置 viaduct 布局。 */
-    private SectorLayout loadLayoutOrFallback() {
+    /** 启动装载：外部扇区配置优先；缺失/损坏/为空则按**世界出生点**动态铺一条可玩推进线。 */
+    private SectorLayout loadLayoutOrFallback(MinecraftServer server) {
         Path file = runDir.resolve("breakfront/sectors.json");
         if (Files.isRegularFile(file)) {
             try {
@@ -138,11 +138,20 @@ public final class ServerMatch {
                     return loaded;
                 }
             } catch (Exception e) {
-                BreakfrontServer.LOGGER.warn("[Breakfront] sectors.json invalid ({}), fallback default",
+                BreakfrontServer.LOGGER.warn("[Breakfront] sectors.json invalid ({}), fallback to spawn-relative layout",
                         e.toString());
             }
         }
-        return SectorLayout.defaultViaduct();
+        ServerWorld world = server == null ? null : server.getOverworld();
+        BlockPos spawn = world == null ? null : world.getSpawnPos();
+        double cx = spawn == null ? 0.0 : spawn.getX();
+        double cz = spawn == null ? 0.0 : spawn.getZ();
+        SectorLayout generated = SectorLayout.aroundSpawn(cx, cz);
+        BreakfrontServer.LOGGER.info(
+                "[Breakfront] no usable sectors.json - generated spawn-relative layout around ({}, {}) with {} zones; "
+                        + "use /bfs to re-mark and /bfs save to persist",
+                String.format("%.0f", cx), String.format("%.0f", cz), generated.zoneCount());
+        return generated;
     }
 
     /** 以当前 layout 重建纯逻辑对局 + 锚点索引（启动与 /bfs apply 共用）。 */

@@ -348,4 +348,28 @@ public final class SectorLayout {
                 new SectorDef("扇区二", List.of(
                         new Zone("B1", 43.5, 51.5, 6.0)))));
     }
+
+    /**
+     * 无 sectors.json（缺失/为空/损坏）时的**地图无关**兜底：以世界出生点为基准铺 3 个扇区共 5 个据点，沿 +X 交错推进。
+     *
+     * <p>为什么不再用 {@link #defaultViaduct()}：那套是自建 viaduct 城的硬编码坐标，换到 Metro 这类外部地图后据点全部落在
+     * 未生成/无地形处 —— 表现为「全线无地形、据点不渲染、出生走兜底」。按世界出生点生成可保证**任何地图**启动即有一条可玩推进线；
+     * 之后管理员再用 /bfs 逐点重划并 save 覆盖（sectors.json 一旦存在就优先）。
+     *
+     * @param cx 世界出生点 X（方块坐标）
+     * @param cz 世界出生点 Z
+     */
+    public static SectorLayout aroundSpawn(double cx, double cz) {
+        double step = 56.0;
+        double r = 9.0;
+        return new SectorLayout(List.of(
+                new SectorDef("扇区一", List.of(
+                        new Zone("A1", cx + step * 0.5, cz - 20.0, r),
+                        new Zone("A2", cx + step * 1.0, cz + 20.0, r))),
+                new SectorDef("扇区二", List.of(
+                        new Zone("B1", cx + step * 1.7, cz - 24.0, r),
+                        new Zone("B2", cx + step * 2.2, cz + 24.0, r))),
+                new SectorDef("扇区三", List.of(
+                        new Zone("C1", cx + step * 3.0, cz, r)))));
+    }
 }
